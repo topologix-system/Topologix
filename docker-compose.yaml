@@ -1,0 +1,167 @@
+services:
+  # Batfish Network Analysis Service
+  batfish:
+    image: batfish/allinone:latest
+    container_name: batfish
+    ports:
+      - "8888:8888"
+      - "9996:9996"
+      - "9997:9997"
+    volumes:
+      - batfish-data:/data
+      - ./snapshots:/notebooks/snapshots
+      - ./notebooks:/notebooks
+      - ./configs:/notebooks/configs
+      
+    networks:
+      - topologix-network
+    restart: unless-stopped
+
+  # Backend API Service (Python + Flask)
+  backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    container_name: topologix-backend
+    # Command: Controlled by environment variable for dev/prod switching
+    # Development: python app.py (Flask dev server with hot reload)
+    # Production: gunicorn (WSGI server for production)
+    command: ${BACKEND_COMMAND:-python app.py}
+    ports:
+      - "5000:5000"
+    environment:
+      # Flask Environment (development or production)
+      - FLASK_ENV=${FLASK_ENV:-development}
+      - FLASK_DEBUG=${FLASK_DEBUG:-True}
+
+      # Batfish Service
+      - BATFISH_HOST=${BATFISH_HOST:-batfish}
+      - BATFISH_PORT=${BATFISH_PORT:-9996}
+
+      # CORS origins for API access
+      # Include localhost and common LAN access patterns
+      # For production, override with your specific domain/IP
+      - CORS_ORIGINS=${CORS_ORIGINS:-http://localhost:3000,http://127.0.0.1:3000}
+
+      # Authentication (disabled by default for OSS distribution)
+      - AUTH_ENABLED=${AUTH_ENABLED:-true}
+      - AUTH_DEFAULT_ADMIN_USER=${AUTH_DEFAULT_ADMIN_USER:-admin}
+      - AUTH_DEFAULT_ADMIN_PASS=${AUTH_DEFAULT_ADMIN_PASS}
+
+      # Security Keys (auto-generated if not set, but should be set in production)
+      - SECRET_KEY=${SECRET_KEY}
+      - JWT_SECRET_KEY=${JWT_SECRET_KEY}
+      - CSRF_SECRET_KEY=${CSRF_SECRET_KEY}
+
+      # Login security (OSS defaults - secure but not too restrictive)
+      - LOGIN_MAX_ATTEMPTS_PER_USER=${LOGIN_MAX_ATTEMPTS_PER_USER:-5}
+      - LOGIN_MAX_ATTEMPTS_PER_IP=${LOGIN_MAX_ATTEMPTS_PER_IP:-10}
+      - LOGIN_RATE_WINDOW_MINUTES=${LOGIN_RATE_WINDOW_MINUTES:-15}
+      - LOGIN_LOCKOUT_DURATION_MINUTES=${LOGIN_LOCKOUT_DURATION_MINUTES:-30}
+
+      # Database configuration (only used when AUTH_ENABLED=true)
+      # SQLite (default - stored in Docker volume for persistence)
+      - DATABASE_URL=${DATABASE_URL:-sqlite:////app/data/topologix.db}
+
+      # Email configuration for password reset
+      - EMAIL_PROVIDER=${EMAIL_PROVIDER:-console}
+      - EMAIL_FROM=${EMAIL_FROM:-noreply@topologix.local}
+      - EMAIL_FROM_NAME=${EMAIL_FROM_NAME:-Topologix}
+      - SMTP_HOST=${SMTP_HOST:-localhost}
+      - SMTP_PORT=${SMTP_PORT:-587}
+      - SMTP_USERNAME=${SMTP_USERNAME}
+      - SMTP_PASSWORD=${SMTP_PASSWORD}
+      - SMTP_USE_TLS=${SMTP_USE_TLS:-true}
+
+      # Password Reset
+      - PASSWORD_RESET_TOKEN_EXPIRY=${PASSWORD_RESET_TOKEN_EXPIRY:-3600}
+      - PASSWORD_RESET_URL_BASE=${PASSWORD_RESET_URL_BASE:-http://localhost:3000}
+
+      # Reverse proxy configuration (see .env.example for details)
+      # - 1 for single nginx (typical Docker setup)
+      # - 2 for Caddy/nginx -> nginx -> Flask
+      - TRUSTED_PROXY_COUNT=${TRUSTED_PROXY_COUNT:-1}
+      # PostgreSQL example (recommended for production):
+      # - DATABASE_URL=postgresql://user:password@postgres:5432/topologix
+      # MySQL example:
+      # - DATABASE_URL=mysql+pymysql://user:password@mysql:3306/topologix
+    volumes:
+      # Bind mount source code
+      # Note: For development, allowing write access for hot-reload
+      # In production, use :ro and separate configuration
+      - ./backend:/app
+      # Snapshots directory (read-write, separate mount point)
+      - ./snapshots:/snapshots:rw
+      # Database volume (SQLite persistence when AUTH_ENABLED=true)
+      - backend-db:/app/data
+      # Flask session storage (named volume for proper permissions)
+      - flask-sessions:/app/flask_session
+    networks:
+      - topologix-network
+    depends_on:
+      - batfish
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:5000/api/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+
+  # Frontend Web UI (React + Vite)
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+      # Build arguments for Vite environment variables
+      # These are embedded at BUILD time (not runtime)
+      # Empty VITE_API_BASE_URL enables nginx reverse proxy (environment-independent)
+      args:
+        VITE_API_BASE_URL: "${VITE_API_BASE_URL:-}"
+        VITE_AUTH_ENABLED: "${VITE_AUTH_ENABLED:-true}"
+        VITE_TIMEZONE: "${VITE_TIMEZONE:-Asia/Tokyo}"
+    container_name: topologix-frontend
+    ports:
+      - "3000:80"
+    # Runtime environment variables (not used by production build)
+    # Kept for documentation purposes
+    environment:
+      - VITE_API_BASE_URL=${VITE_API_BASE_URL:-}
+      # Authentication (must match backend AUTH_ENABLED)
+      - VITE_AUTH_ENABLED=${VITE_AUTH_ENABLED:-true}
+    volumes:
+      # node_modules in named volume (NOT on host - security)
+      - frontend-modules:/app/node_modules
+      # Bind mount source code
+      # Note: For development, allowing write access for hot-reload
+      # In production, use :ro and separate configuration
+      - ./frontend:/app
+    networks:
+      - topologix-network
+    depends_on:
+      - backend
+    restart: unless-stopped
+    stdin_open: true
+    tty: true
+
+networks:
+  topologix-network:
+    driver: bridge
+    name: topologix-network
+
+volumes:
+  # Batfish data persistence
+  batfish-data:
+    name: topologix-batfish-data
+
+  # Frontend node_modules (isolated from host)
+  frontend-modules:
+    name: topologix-frontend-modules
+
+  # Backend database (SQLite persistence when AUTH_ENABLED=true)
+  backend-db:
+    name: topologix-backend-db
+
+  # Flask session storage (isolated from host for proper permissions)
+  flask-sessions:
+    name: topologix-flask-sessions

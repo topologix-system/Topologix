@@ -1,0 +1,2 @@
+# This file ensures the security directory exists
+# Actual security files (keys, certificates) will be ignored per .gitignore rules

@@ -1,0 +1,70 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+backend/flask_session/*
+
+# Environment variables (Security)
+.env
+.env.local
+.env.*.local
+!.env.example
+
+# Database
+*.db
+*.sqlite
+*.sqlite3
+db.sqlite3-journal
+
+# Snapshots (User data - keep test-env)
+snapshots/*
+!snapshots/.gitkeep
+backend/snapshots/*
+
+# Security files
+security/*.key
+security/*.pem
+security/*secret*
+security/*credential*
+security/tokens/
+security/certs/
+
+# Logs
+*.log
+logs/
+*.log.*
+
+# Testing
+.pytest_cache/
+.coverage
+.coverage.*
+htmlcov/
+.tox/
+.nox/
+test/*
+
+# Virtual environments
+venv/
+env/
+ENV/
+.venv
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# Temporary files
+*.tmp
+*.temp
+*.bak
+*.backup
+
+# OS
+.DS_Store
+Thumbs.db
+
+

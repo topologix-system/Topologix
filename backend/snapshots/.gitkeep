@@ -1,0 +1,2 @@
+# This file ensures the snapshots directory is tracked by Git
+# User-created snapshot directories will be ignored per .gitignore rules
