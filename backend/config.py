@@ -9,9 +9,19 @@ Application configuration with security enhancements
 - Database and Redis configuration for production
 - Audit logging and error handling configuration
 """
+import logging
 import os
 import secrets
 from pathlib import Path
+from typing import Tuple
+
+
+def _load_secret(name: str) -> Tuple[str, bool]:
+    """Return secret value and flag indicating whether it was auto-generated."""
+    value = os.getenv(name)
+    if value and value.strip():
+        return value, False
+    return secrets.token_urlsafe(32), True
 
 
 class Config:
@@ -34,9 +44,17 @@ class Config:
     ALLOW_REGISTRATION: bool = os.getenv('ALLOW_REGISTRATION', 'true').lower() == 'true'  # Allow self-registration
 
     # Security - Secret Keys
-    SECRET_KEY: str = os.getenv('SECRET_KEY', secrets.token_urlsafe(32))
-    JWT_SECRET_KEY: str = os.getenv('JWT_SECRET_KEY', secrets.token_urlsafe(32))
-    CSRF_SECRET_KEY: str = os.getenv('CSRF_SECRET_KEY', secrets.token_urlsafe(32))
+    _SECRET_KEY_VALUE, _SECRET_KEY_AUTO = _load_secret('SECRET_KEY')
+    SECRET_KEY: str = _SECRET_KEY_VALUE
+    SECRET_KEY_AUTO_GENERATED: bool = _SECRET_KEY_AUTO
+
+    _JWT_SECRET_VALUE, _JWT_SECRET_AUTO = _load_secret('JWT_SECRET_KEY')
+    JWT_SECRET_KEY: str = _JWT_SECRET_VALUE
+    JWT_SECRET_KEY_AUTO_GENERATED: bool = _JWT_SECRET_AUTO
+
+    _CSRF_SECRET_VALUE, _CSRF_SECRET_AUTO = _load_secret('CSRF_SECRET_KEY')
+    CSRF_SECRET_KEY: str = _CSRF_SECRET_VALUE
+    CSRF_SECRET_KEY_AUTO_GENERATED: bool = _CSRF_SECRET_AUTO
 
     # Security - Session Configuration
     SESSION_COOKIE_SECURE: bool = ENV == 'production'
@@ -71,7 +89,7 @@ class Config:
 
     # Security - Reverse Proxy Configuration
     # Set to True when behind reverse proxy (Caddy/nginx) for proper IP address extraction
-    BEHIND_REVERSE_PROXY: bool = os.getenv('BEHIND_REVERSE_PROXY', 'true').lower() == 'true'
+    BEHIND_REVERSE_PROXY: bool = os.getenv('BEHIND_REVERSE_PROXY', 'false').lower() == 'true'
     # Number of trusted proxies in chain
     # - 1 for single nginx (typical Docker setup)
     # - 2 for Caddy/nginx -> nginx -> Flask
@@ -197,10 +215,12 @@ class Config:
         """
         # Ensure critical security keys are set in production
         if cls.ENV == 'production':
-            if cls.SECRET_KEY == secrets.token_urlsafe(32):
-                raise ValueError("SECRET_KEY must be set in production")
-            if cls.JWT_SECRET_KEY == secrets.token_urlsafe(32):
-                raise ValueError("JWT_SECRET_KEY must be set in production")
+            if cls.SECRET_KEY_AUTO_GENERATED:
+                raise ValueError("SECRET_KEY must be provided when ENV=production")
+            if cls.JWT_SECRET_KEY_AUTO_GENERATED:
+                raise ValueError("JWT_SECRET_KEY must be provided when ENV=production")
+            if cls.CSRF_SECRET_KEY_AUTO_GENERATED:
+                raise ValueError("CSRF_SECRET_KEY must be provided when ENV=production")
             if not cls.SESSION_COOKIE_SECURE:
                 raise ValueError("SESSION_COOKIE_SECURE must be True in production")
             if cls.DEBUG:
@@ -236,11 +256,18 @@ class Config:
 # Create configuration instance
 config = Config()
 
+# Warn when secrets are auto-generated (development convenience only)
+if config.SECRET_KEY_AUTO_GENERATED:
+    logging.warning("SECRET_KEY not provided; generated random value for this process (do not rely on this in production).")
+if config.JWT_SECRET_KEY_AUTO_GENERATED:
+    logging.warning("JWT_SECRET_KEY not provided; generated random value for this process (do not rely on this in production).")
+if config.CSRF_SECRET_KEY_AUTO_GENERATED:
+    logging.warning("CSRF_SECRET_KEY not provided; generated random value for this process (do not rely on this in production).")
+
 # Validate configuration on import
 try:
     config.validate_config()
 except ValueError as e:
-    import logging
     logging.error(f"Configuration validation failed: {e}")
     if config.ENV == 'production':
         raise
