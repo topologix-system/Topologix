@@ -10,8 +10,6 @@ services:
       - batfish-data:/data
       - ./snapshots:/notebooks/snapshots
       - ./backend/snapshots:/snapshots
-      - ./backend/notebooks:/notebooks
-      - ./backend/configs:/notebooks/configs
     networks:
       - topologix-network
     restart: unless-stopped

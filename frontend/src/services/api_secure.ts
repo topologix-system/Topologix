@@ -6,6 +6,7 @@
  * - Validates all user inputs against ReDoS patterns before submission
  */
 import axios, { AxiosInstance, AxiosError, AxiosRequestConfig } from 'axios'
+import { runtimeConfig } from '../config/runtimeConfig'
 import type {
   APIResponse,
   NetworkInitializeRequest,
@@ -39,7 +40,7 @@ import type {
   CreateSnapshotRequest,
 } from '../types'
 
-const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || 'http://localhost:5000'
+const API_BASE_URL = runtimeConfig.apiBaseUrl || 'http://localhost:5000'
 
 interface AuthState {
   accessToken: string | null
