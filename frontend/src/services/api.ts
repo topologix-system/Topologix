@@ -3,10 +3,11 @@
  * - Configures axios with authentication, CSRF protection, and rate limiting
  * - Implements automatic token refresh on 401 errors with interceptors
  * - Provides typed API methods for all network analysis endpoints (Batfish integration)
- * - Handles environment-based auth enable/disable via VITE_AUTH_ENABLED
+ * - Handles environment/runtime-based auth enable/disable configuration
  * - Role-based access control with hasRole() and hasPermission() helpers
  */
 import axios, { AxiosInstance, AxiosError, AxiosRequestConfig } from 'axios'
+import { runtimeConfig } from '../config/runtimeConfig'
 import type {
   APIResponse,
   NetworkInitializeRequest,
@@ -61,8 +62,8 @@ import type {
   ChangePasswordRequest,
 } from '../types'
 
-const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || ''
-const AUTH_ENABLED = import.meta.env.VITE_AUTH_ENABLED === 'true'
+const API_BASE_URL = runtimeConfig.apiBaseUrl || ''
+const AUTH_ENABLED = runtimeConfig.authEnabled
 
 interface AuthState {
   accessToken: string | null

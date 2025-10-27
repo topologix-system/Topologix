@@ -43,6 +43,10 @@ COPY nginx.conf /etc/nginx/conf.d/default.conf
 # Remove default nginx config
 RUN rm /etc/nginx/conf.d/default.conf.dpkg-dist 2>/dev/null || true
 
+# Copy entrypoint script that injects runtime configuration
+COPY docker-entrypoint.sh /docker-entrypoint.sh
+RUN chmod +x /docker-entrypoint.sh
+
 # Run as root in container (safe in container environment)
 # nginx:alpine base image handles user permissions internally
 
@@ -53,5 +57,6 @@ EXPOSE 80
 HEALTHCHECK --interval=30s --timeout=3s --start-period=5s --retries=3 \
     CMD wget --no-verbose --tries=1 --spider http://127.0.0.1/health || exit 1
 
-# Start nginx in foreground
+# Start nginx in foreground via entrypoint (after runtime config injection)
+ENTRYPOINT ["/docker-entrypoint.sh"]
 CMD ["nginx", "-g", "daemon off;"]
