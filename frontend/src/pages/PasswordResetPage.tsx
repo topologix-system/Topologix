@@ -15,6 +15,7 @@ import { Network, AlertCircle, Eye, EyeOff } from 'lucide-react'
 import { authAPI } from '../services/api'
 import { PasswordPolicyHelper } from '../components/PasswordPolicyHelper'
 import { APP_VERSION, IS_PRODUCTION } from '../constants'
+import { logger } from '../utils/logger'
 
 export function PasswordResetPage() {
   const { t } = useTranslation()
@@ -42,7 +43,7 @@ export function PasswordResetPage() {
       }, 2000)
     },
     onError: (error: any) => {
-      console.error('Password reset failed:', error)
+      logger.error('Password reset failed:', error)
     }
   })
 

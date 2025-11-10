@@ -5,8 +5,31 @@
  * - Implements edge deduplication and layer-based filtering logic
  * - Core utility for TopologyViewer component graph rendering
  */
-import type { NodeProperties, PhysicalEdge, Layer3Edge, OSPFEdge, BGPEdge, VXLANEdge, EIGRPEdge, ISISEdge, IPsecEdge, SwitchedVlanEdge } from '../../types'
+import type { NodeProperties, PhysicalEdge, Layer1Edge, Layer3Edge, OSPFEdge, BGPEdge, VXLANEdge, EIGRPEdge, ISISEdge, IPsecEdge } from '../../types'
 import type { CytoscapeElements, CytoscapeNode, CytoscapeEdge, LayerType } from './types'
+import { logger } from '../../utils/logger'
+
+/**
+ * Generate stable edge ID from edge properties
+ * Uses source-target-type-ports composite key for uniqueness
+ */
+function generateStableEdgeId(
+  source: string,
+  target: string,
+  edgeType: string,
+  sourcePort?: string,
+  targetPort?: string
+): string {
+  const portSuffix = sourcePort && targetPort
+    ? `-${sourcePort}-${targetPort}`
+    : sourcePort
+    ? `-${sourcePort}`
+    : targetPort
+    ? `-${targetPort}`
+    : ''
+
+  return `edge-${edgeType}-${source}-${target}${portSuffix}`
+}
 
 /**
  * Convert Batfish node properties to Cytoscape node elements
@@ -17,14 +40,14 @@ import type { CytoscapeElements, CytoscapeNode, CytoscapeEdge, LayerType } from 
  */
 export function convertNodesToElements(nodes: NodeProperties[]): CytoscapeNode[] {
   if (!nodes || !Array.isArray(nodes)) {
-    console.warn('[cytoscape/utils] Invalid nodes array provided to convertNodesToElements')
+    logger.warn('[cytoscape/utils] Invalid nodes array provided to convertNodesToElements')
     return []
   }
 
   return nodes
     .filter(node => {
       if (!node || !node.node) {
-        console.warn('[cytoscape/utils] Skipping invalid node:', node)
+        logger.warn('[cytoscape/utils] Skipping invalid node:', node)
         return false
       }
       return true
@@ -46,6 +69,48 @@ export function convertNodesToElements(nodes: NodeProperties[]): CytoscapeNode[]
 }
 
 /**
+ * Generic converter for interface-based edge types
+ * Handles edge types that use interface-to-interface connections
+ * @param edges - Array of edge objects with interface/remote_interface properties
+ * @param edgeType - Type identifier ('physical', 'layer1', etc.)
+ * @returns Array of Cytoscape-compatible edge elements
+ */
+function convertInterfaceBasedEdgesToElements(
+  edges: (PhysicalEdge | Layer1Edge)[],
+  edgeType: string
+): CytoscapeEdge[] {
+  if (!edges || !Array.isArray(edges)) {
+    logger.warn(`[cytoscape/utils] Invalid ${edgeType} edges array`)
+    return []
+  }
+
+  return edges
+    .filter(edge => {
+      if (!edge || !edge.interface || !edge.remote_interface) {
+        logger.warn(`[cytoscape/utils] Skipping invalid ${edgeType} edge:`, edge)
+        return false
+      }
+      return true
+    })
+    .map((edge) => {
+      const [sourceNode, sourcePort] = parseInterface(edge.interface)
+      const [targetNode, targetPort] = parseInterface(edge.remote_interface)
+
+      return {
+        data: {
+          id: generateStableEdgeId(sourceNode, targetNode, edgeType, sourcePort, targetPort),
+          source: sourceNode,
+          target: targetNode,
+          label: '',
+          source_port: sourcePort,
+          target_port: targetPort,
+          edge_type: edgeType,
+        },
+      }
+    })
+}
+
+/**
  * Convert Batfish physical layer edges to Cytoscape edge elements
  * Represents direct cable connections between network devices
  * Parses interface names to extract node and port information
@@ -53,35 +118,18 @@ export function convertNodesToElements(nodes: NodeProperties[]): CytoscapeNode[]
  * @returns Array of Cytoscape-compatible physical edge elements
  */
 export function convertPhysicalEdgesToElements(edges: PhysicalEdge[]): CytoscapeEdge[] {
-  if (!edges || !Array.isArray(edges)) {
-    console.warn('[cytoscape/utils] Invalid physical edges array')
-    return []
-  }
+  return convertInterfaceBasedEdgesToElements(edges, 'physical')
+}
 
-  return edges
-    .filter(edge => {
-      if (!edge || !edge.interface || !edge.remote_interface) {
-        console.warn('[cytoscape/utils] Skipping invalid physical edge:', edge)
-        return false
-      }
-      return true
-    })
-    .map((edge, index) => {
-      const [sourceNode, sourcePort] = parseInterface(edge.interface)
-      const [targetNode, targetPort] = parseInterface(edge.remote_interface)
-
-      return {
-        data: {
-          id: `edge-physical-${index}`,
-          source: sourceNode,
-          target: targetNode,
-          label: '',
-          source_port: sourcePort,
-          target_port: targetPort,
-          edge_type: 'physical',
-        },
-      }
-    })
+/**
+ * Convert Batfish layer 1 edges to Cytoscape edge elements
+ * Represents manually defined physical connections from layer1_topology.json
+ * Used to supplement auto-detected physical connections
+ * @param edges - Array of Batfish layer 1 edge objects
+ * @returns Array of Cytoscape-compatible layer 1 edge elements
+ */
+export function convertLayer1EdgesToElements(edges: Layer1Edge[]): CytoscapeEdge[] {
+  return convertInterfaceBasedEdgesToElements(edges, 'layer1')
 }
 
 /**
@@ -92,24 +140,37 @@ export function convertPhysicalEdgesToElements(edges: PhysicalEdge[]): Cytoscape
  * @returns Array of Cytoscape-compatible layer 3 edge elements
  */
 export function convertLayer3EdgesToElements(edges: Layer3Edge[]): CytoscapeEdge[] {
-  return edges.map((edge, index) => {
-    const [sourceNode, sourcePort] = parseInterface(edge.interface)
-    const [targetNode, targetPort] = parseInterface(edge.remote_interface)
+  if (!edges || !Array.isArray(edges)) {
+    logger.warn('[Topology] Invalid layer3 edges array')
+    return []
+  }
 
-    return {
-      data: {
-        id: `edge-layer3-${index}`,
-        source: sourceNode,
-        target: targetNode,
-        label: edge.ips?.[0] || '',
-        source_port: sourcePort,
-        target_port: targetPort,
-        ips: edge.ips,
-        remote_ips: edge.remote_ips,
-        edge_type: 'layer3',
-      },
-    }
-  })
+  return edges
+    .filter(edge => {
+      if (!edge || !edge.interface || !edge.remote_interface) {
+        logger.warn('[Topology] Skipping invalid layer3 edge:', edge)
+        return false
+      }
+      return true
+    })
+    .map((edge) => {
+      const [sourceNode, sourcePort] = parseInterface(edge.interface)
+      const [targetNode, targetPort] = parseInterface(edge.remote_interface)
+
+      return {
+        data: {
+          id: generateStableEdgeId(sourceNode, targetNode, 'layer3', sourcePort, targetPort),
+          source: sourceNode,
+          target: targetNode,
+          label: edge.ips?.[0] || '',
+          source_port: sourcePort,
+          target_port: targetPort,
+          ips: edge.ips,
+          remote_ips: edge.remote_ips,
+          edge_type: 'layer3',
+        },
+      }
+    })
 }
 
 /**
@@ -120,13 +181,13 @@ export function convertLayer3EdgesToElements(edges: Layer3Edge[]): CytoscapeEdge
  * @returns Array of Cytoscape-compatible OSPF edge elements with protocol styling
  */
 export function convertOSPFEdgesToElements(edges: OSPFEdge[]): CytoscapeEdge[] {
-  return edges.map((edge, index) => {
+  return edges.map((edge) => {
     const [sourceNode, sourcePort] = parseInterface(edge.interface)
     const [targetNode, targetPort] = parseInterface(edge.remote_interface)
 
     return {
       data: {
-        id: `edge-ospf-${index}`,
+        id: generateStableEdgeId(sourceNode, targetNode, 'ospf', sourcePort, targetPort),
         source: sourceNode,
         target: targetNode,
         label: 'OSPF',
@@ -149,7 +210,7 @@ export function convertOSPFEdgesToElements(edges: OSPFEdge[]): CytoscapeEdge[] {
  * @returns Array of Cytoscape-compatible BGP edge elements with AS numbers
  */
 export function convertBGPEdgesToElements(edges: BGPEdge[]): CytoscapeEdge[] {
-  return edges.map((edge, index) => {
+  return edges.map((edge) => {
     // BGP edges use node-to-node connections
     const sourceNode = edge.node
     const targetNode = edge.remote_node
@@ -158,9 +219,16 @@ export function convertBGPEdgesToElements(edges: BGPEdge[]): CytoscapeEdge[] {
     const sourcePort = edge.interface ? parseInterface(edge.interface)[1] : ''
     const targetPort = edge.remote_interface ? parseInterface(edge.remote_interface)[1] : ''
 
+    if (edge.interface && !sourcePort) {
+      logger.debug(`[Topology] BGP edge missing source port: ${edge.interface}`)
+    }
+    if (edge.remote_interface && !targetPort) {
+      logger.debug(`[Topology] BGP edge missing target port: ${edge.remote_interface}`)
+    }
+
     return {
       data: {
-        id: `edge-bgp-${index}`,
+        id: generateStableEdgeId(sourceNode, targetNode, 'bgp', sourcePort, targetPort),
         source: sourceNode,
         target: targetNode,
         label: `BGP AS${edge.local_asn}`,
@@ -185,25 +253,44 @@ export function convertBGPEdgesToElements(edges: BGPEdge[]): CytoscapeEdge[] {
  * @returns Array of Cytoscape-compatible VXLAN edge elements (dashed lines)
  */
 export function convertVXLANEdgesToElements(edges: VXLANEdge[]): CytoscapeEdge[] {
-  return edges.map((edge, index) => {
-    const sourceNode = edge.node
-    const targetNode = edge.remote_node
+  if (!edges || !Array.isArray(edges)) {
+    logger.warn('[Topology] Invalid VXLAN edges array')
+    return []
+  }
 
-    return {
-      data: {
-        id: `edge-vxlan-${index}`,
-        source: sourceNode,
-        target: targetNode,
-        label: `VXLAN VNI ${edge.vni}`,
-        protocol: 'vxlan',
-        vni: edge.vni,
-        vtep_address: edge.vtep_address,
-        remote_vtep_address: edge.remote_vtep_address,
-        multicast_group: edge.multicast_group,
-        edge_type: 'vxlan',
-      },
-    }
-  })
+  return edges
+    .filter(edge => {
+      if (!edge) {
+        logger.warn('[Topology] Null VXLAN edge found')
+        return false
+      }
+      const sourceNode = edge.node
+      const targetNode = edge.remote_node
+      if (!sourceNode || !targetNode) {
+        logger.warn('[Topology] Invalid VXLAN edge nodes:', { sourceNode, targetNode })
+        return false
+      }
+      return true
+    })
+    .map((edge) => {
+      const sourceNode = edge.node
+      const targetNode = edge.remote_node
+
+      return {
+        data: {
+          id: generateStableEdgeId(sourceNode, targetNode, 'vxlan'),
+          source: sourceNode,
+          target: targetNode,
+          label: `VXLAN VNI ${edge.vni}`,
+          protocol: 'vxlan',
+          vni: edge.vni,
+          vtep_address: edge.vtep_address,
+          remote_vtep_address: edge.remote_vtep_address,
+          multicast_group: edge.multicast_group,
+          edge_type: 'vxlan',
+        },
+      }
+    })
 }
 
 /**
@@ -214,25 +301,38 @@ export function convertVXLANEdgesToElements(edges: VXLANEdge[]): CytoscapeEdge[]
  * @returns Array of Cytoscape-compatible EIGRP edge elements with protocol styling
  */
 export function convertEIGRPEdgesToElements(edges: EIGRPEdge[]): CytoscapeEdge[] {
-  return edges.map((edge, index) => {
-    const [sourceNode, sourcePort] = parseInterface(edge.interface)
-    const [targetNode, targetPort] = parseInterface(edge.remote_interface)
+  if (!edges || !Array.isArray(edges)) {
+    logger.warn('[Topology] Invalid EIGRP edges array')
+    return []
+  }
 
-    return {
-      data: {
-        id: `edge-eigrp-${index}`,
-        source: sourceNode,
-        target: targetNode,
-        label: 'EIGRP',
-        protocol: 'eigrp',
-        source_port: sourcePort,
-        target_port: targetPort,
-        ip: edge.ip,
-        remote_ip: edge.remote_ip,
-        edge_type: 'eigrp',
-      },
-    }
-  })
+  return edges
+    .filter(edge => {
+      if (!edge || !edge.interface || !edge.remote_interface) {
+        logger.warn('[Topology] Skipping invalid EIGRP edge:', edge)
+        return false
+      }
+      return true
+    })
+    .map((edge) => {
+      const [sourceNode, sourcePort] = parseInterface(edge.interface)
+      const [targetNode, targetPort] = parseInterface(edge.remote_interface)
+
+      return {
+        data: {
+          id: generateStableEdgeId(sourceNode, targetNode, 'eigrp', sourcePort, targetPort),
+          source: sourceNode,
+          target: targetNode,
+          label: 'EIGRP',
+          protocol: 'eigrp',
+          source_port: sourcePort,
+          target_port: targetPort,
+          ip: edge.ip,
+          remote_ip: edge.remote_ip,
+          edge_type: 'eigrp',
+        },
+      }
+    })
 }
 
 /**
@@ -243,24 +343,37 @@ export function convertEIGRPEdgesToElements(edges: EIGRPEdge[]): CytoscapeEdge[]
  * @returns Array of Cytoscape-compatible IS-IS edge elements with level labels
  */
 export function convertISISEdgesToElements(edges: ISISEdge[]): CytoscapeEdge[] {
-  return edges.map((edge, index) => {
-    const [sourceNode, sourcePort] = parseInterface(edge.interface)
-    const [targetNode, targetPort] = parseInterface(edge.remote_interface)
+  if (!edges || !Array.isArray(edges)) {
+    logger.warn('[Topology] Invalid IS-IS edges array')
+    return []
+  }
 
-    return {
-      data: {
-        id: `edge-isis-${index}`,
-        source: sourceNode,
-        target: targetNode,
-        label: `IS-IS L${edge.level}`,
-        protocol: 'isis',
-        source_port: sourcePort,
-        target_port: targetPort,
-        level: edge.level,
-        edge_type: 'isis',
-      },
-    }
-  })
+  return edges
+    .filter(edge => {
+      if (!edge || !edge.interface || !edge.remote_interface) {
+        logger.warn('[Topology] Skipping invalid IS-IS edge:', edge)
+        return false
+      }
+      return true
+    })
+    .map((edge) => {
+      const [sourceNode, sourcePort] = parseInterface(edge.interface)
+      const [targetNode, targetPort] = parseInterface(edge.remote_interface)
+
+      return {
+        data: {
+          id: generateStableEdgeId(sourceNode, targetNode, 'isis', sourcePort, targetPort),
+          source: sourceNode,
+          target: targetNode,
+          label: `IS-IS L${edge.level}`,
+          protocol: 'isis',
+          source_port: sourcePort,
+          target_port: targetPort,
+          level: edge.level,
+          edge_type: 'isis',
+        },
+      }
+    })
 }
 
 /**
@@ -271,52 +384,43 @@ export function convertISISEdgesToElements(edges: ISISEdge[]): CytoscapeEdge[] {
  * @returns Array of Cytoscape-compatible IPsec edge elements (dashed lines)
  */
 export function convertIPsecEdgesToElements(edges: IPsecEdge[]): CytoscapeEdge[] {
-  return edges.map((edge, index) => {
-    const sourceNode = edge.node
-    const targetNode = edge.remote_node
+  if (!edges || !Array.isArray(edges)) {
+    logger.warn('[Topology] Invalid IPsec edges array')
+    return []
+  }
 
-    return {
-      data: {
-        id: `edge-ipsec-${index}`,
-        source: sourceNode,
-        target: targetNode,
-        label: 'IPsec',
-        protocol: 'ipsec',
-        local_interface: edge.local_interface,
-        remote_interface: edge.remote_interface,
-        tunnel_interfaces: edge.tunnel_interfaces,
-        edge_type: 'ipsec',
-      },
-    }
-  })
-}
+  return edges
+    .filter(edge => {
+      if (!edge) {
+        logger.warn('[Topology] Null IPsec edge found')
+        return false
+      }
+      const sourceNode = edge.node
+      const targetNode = edge.remote_node
+      if (!sourceNode || !targetNode) {
+        logger.warn('[Topology] Invalid IPsec edge nodes:', { sourceNode, targetNode })
+        return false
+      }
+      return true
+    })
+    .map((edge) => {
+      const sourceNode = edge.node
+      const targetNode = edge.remote_node
 
-/**
- * Convert Batfish switched VLAN edges to Cytoscape edge elements
- * Represents VLAN trunk connections between switches at layer 2
- * Shows which VLANs are propagated between switching devices
- * @param edges - Array of Batfish switched VLAN edge objects
- * @returns Array of Cytoscape-compatible VLAN edge elements with VLAN ID labels
- */
-export function convertSwitchedVlanEdgesToElements(edges: SwitchedVlanEdge[]): CytoscapeEdge[] {
-  return edges.map((edge, index) => {
-    const [sourceNode, sourcePort] = parseInterface(edge.interface)
-    const [targetNode, targetPort] = parseInterface(edge.remote_interface)
-
-    return {
-      data: {
-        id: `edge-switched-vlan-${index}`,
-        source: sourceNode,
-        target: targetNode,
-        label: `VLAN ${edge.vlan}`,
-        protocol: 'vlan',
-        source_port: sourcePort,
-        target_port: targetPort,
-        vlan: edge.vlan,
-        edge_type: 'switched-vlan',
-      },
-    }
-  })
+      return {
+        data: {
+          id: generateStableEdgeId(sourceNode, targetNode, 'ipsec'),
+          source: sourceNode,
+          target: targetNode,
+          label: 'IPsec',
+          protocol: 'ipsec',
+          local_interface: edge.local_interface,
+          remote_interface: edge.remote_interface,
+          tunnel_interfaces: edge.tunnel_interfaces,
+          edge_type: 'ipsec',
+        },
+      }
+    })
 }
 
 /**
@@ -328,7 +432,7 @@ export function convertSwitchedVlanEdgesToElements(edges: SwitchedVlanEdge[]): C
  */
 export function parseInterface(interfaceStr: string): [string, string] {
   if (!interfaceStr || typeof interfaceStr !== 'string') {
-    console.warn('[cytoscape/utils] Invalid interface string:', interfaceStr)
+    logger.warn('[cytoscape/utils] Invalid interface string:', interfaceStr)
     return ['unknown', '']
   }
 
@@ -342,6 +446,13 @@ export function parseInterface(interfaceStr: string): [string, string] {
   if (parts.length > 1) {
     const port = parts[parts.length - 1]
     const node = parts.slice(0, -1).join(':')
+
+    // Validate node is not empty
+    if (!node || node.trim() === '') {
+      logger.warn('[Topology] Empty node name in interface:', interfaceStr)
+      return ['', port]
+    }
+
     return [node, port]
   }
 
@@ -385,13 +496,13 @@ export function mergeEdges(...edgeArrays: CytoscapeEdge[][]): CytoscapeEdge[] {
 
   for (const edges of edgeArrays) {
     if (!edges || !Array.isArray(edges)) {
-      console.warn('[cytoscape/utils] Skipping invalid edge array in mergeEdges')
+      logger.warn('[cytoscape/utils] Skipping invalid edge array in mergeEdges')
       continue
     }
 
     for (const edge of edges) {
       if (!edge || !edge.data || !edge.data.source || !edge.data.target) {
-        console.warn('[cytoscape/utils] Skipping invalid edge in mergeEdges:', edge)
+        logger.warn('[cytoscape/utils] Skipping invalid edge in mergeEdges:', edge)
         continue
       }
 
@@ -422,6 +533,7 @@ export function buildGraphElements(
   nodes: NodeProperties[],
   edges: {
     physical?: PhysicalEdge[]
+    layer1?: Layer1Edge[]
     layer3?: Layer3Edge[]
     ospf?: OSPFEdge[]
     bgp?: BGPEdge[]
@@ -429,27 +541,27 @@ export function buildGraphElements(
     eigrp?: EIGRPEdge[]
     isis?: ISISEdge[]
     ipsec?: IPsecEdge[]
-    'switched-vlan'?: SwitchedVlanEdge[]
   } = {},
   visibleLayers?: Set<LayerType>
 ): CytoscapeElements {
   if (!nodes) {
-    console.error('[cytoscape/utils] No nodes provided to buildGraphElements')
+    logger.error('[cytoscape/utils] No nodes provided to buildGraphElements')
     return { nodes: [], edges: [] }
   }
 
   const cytoscapeNodes = convertNodesToElements(nodes)
 
   if (!edges || typeof edges !== 'object') {
-    console.warn('[cytoscape/utils] No edges provided to buildGraphElements')
+    logger.warn('[cytoscape/utils] No edges provided to buildGraphElements')
     return { nodes: cytoscapeNodes, edges: [] }
   }
 
   // If visibleLayers is not provided, show all layers by default
-  const layers = visibleLayers || new Set(['physical', 'layer3', 'ospf', 'bgp', 'vxlan', 'eigrp', 'isis', 'ipsec', 'switched-vlan'])
+  const layers = visibleLayers || new Set(['physical', 'layer1', 'layer3', 'ospf', 'bgp', 'vxlan', 'eigrp', 'isis', 'ipsec'])
 
   // Conditionally convert edges based on visible layers
   const physicalEdges = layers.has('physical') && edges.physical ? convertPhysicalEdgesToElements(edges.physical) : []
+  const layer1Edges = layers.has('layer1') && edges.layer1 ? convertLayer1EdgesToElements(edges.layer1) : []
   const layer3Edges = layers.has('layer3') && edges.layer3 ? convertLayer3EdgesToElements(edges.layer3) : []
   const ospfEdges = layers.has('ospf') && edges.ospf ? convertOSPFEdgesToElements(edges.ospf) : []
   const bgpEdges = layers.has('bgp') && edges.bgp ? convertBGPEdgesToElements(edges.bgp) : []
@@ -457,21 +569,23 @@ export function buildGraphElements(
   const eigrpEdges = layers.has('eigrp') && edges.eigrp ? convertEIGRPEdgesToElements(edges.eigrp) : []
   const isisEdges = layers.has('isis') && edges.isis ? convertISISEdgesToElements(edges.isis) : []
   const ipsecEdges = layers.has('ipsec') && edges.ipsec ? convertIPsecEdgesToElements(edges.ipsec) : []
-  const switchedVlanEdges = layers.has('switched-vlan') && edges['switched-vlan'] ? convertSwitchedVlanEdgesToElements(edges['switched-vlan']) : []
 
-  const cytoscapeEdges = mergeEdges(
+  // Filter out empty arrays before merging to reduce merge overhead
+  const allEdgeArrays = [
     physicalEdges,
+    layer1Edges,
     layer3Edges,
     ospfEdges,
     bgpEdges,
     vxlanEdges,
     eigrpEdges,
     isisEdges,
-    ipsecEdges,
-    switchedVlanEdges
-  )
+    ipsecEdges
+  ].filter(arr => arr.length > 0)
 
-  console.log('[cytoscape/utils] Built graph with', cytoscapeNodes.length, 'nodes and', cytoscapeEdges.length, 'edges (layers:', Array.from(layers).join(', '), ')')
+  const cytoscapeEdges = mergeEdges(...allEdgeArrays)
+
+  logger.log('[cytoscape/utils] Built graph with', cytoscapeNodes.length, 'nodes and', cytoscapeEdges.length, 'edges (layers:', Array.from(layers).join(', '), ')')
 
   return {
     nodes: cytoscapeNodes,

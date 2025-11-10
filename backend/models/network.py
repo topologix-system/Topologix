@@ -64,7 +64,7 @@ class NetworkNode:
     health_status: str = "healthy"
     config_issues: list[str] = field(default_factory=list)
 
-    # Additional properties from nodeProperties (22種類のデータ対応)
+    # Additional properties from nodeProperties (supports 22 data types)
     configuration_format: str | None = None
     dns_servers: list[str] = field(default_factory=list)
     domain_name: str | None = None

@@ -8,6 +8,7 @@
  */
 import { create } from 'zustand'
 import { authAPI } from '../services/api'
+import { logger } from '../utils/logger'
 
 /**
  * User data structure for authenticated users
@@ -43,7 +44,7 @@ interface AuthStore {
  * Provides user authentication state and actions throughout the application
  * Initializes from authAPI.getCurrentUser() on store creation
  */
-export const useAuthStore = create<AuthStore>((set) => ({
+export const useAuthStore = create<AuthStore>((set, get) => ({
   user: authAPI.getCurrentUser(),
   isAuthenticated: authAPI.isAuthenticated(),
   isLoading: false,
@@ -116,6 +117,14 @@ export const useAuthStore = create<AuthStore>((set) => ({
   checkAuth: () => {
     const user = authAPI.getCurrentUser()
     const isAuth = authAPI.isAuthenticated()
+
+    const currentState = get()
+
+    // If was authenticated but now not, log the change
+    if (currentState.isAuthenticated && !isAuth) {
+      logger.info('[AuthStore] Authentication expired')
+    }
+
     set({
       user,
       isAuthenticated: isAuth,

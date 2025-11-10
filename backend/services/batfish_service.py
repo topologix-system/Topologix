@@ -40,6 +40,7 @@ class BatfishService:
         self.session = Session(host=config.BATFISH_HOST, port=config.BATFISH_PORT)
         self.network_name = config.BATFISH_NETWORK
         self.current_snapshot_name: str | None = None
+        self.reference_snapshot_name: str | None = None
         self._initialized = False
 
     def initialize_network(self, snapshot_dir: str | Path, snapshot_name: str | None = None) -> dict[str, Any]:
@@ -83,14 +84,14 @@ class BatfishService:
             init_issues = self.get_init_issues()
             parse_warnings = self.get_parse_warnings()
 
-            # init_result を安全にシリアライズ可能な形式に変換
+            # Convert init_result to a safe serializable format
             init_result_safe = {}
             if init_result:
-                # FileLines以外の安全な属性のみを抽出
+                # Extract only safe attributes excluding FileLines
                 for key in ['summary', 'status', 'filecount']:
                     if hasattr(init_result, key):
                         value = getattr(init_result, key)
-                        # FileLines型でなければ追加
+                        # Add if not FileLines type
                         if not hasattr(value, '__class__') or 'FileLines' not in str(value.__class__):
                             init_result_safe[key] = value
 
@@ -212,8 +213,22 @@ class BatfishService:
         for _, row in df.iterrows():
             # Convert Interface object to string
             interface_raw = row.get("Interface", "")
+            interface_str = str(interface_raw) if interface_raw else ""
+
+            # Extract hostname and interface name from format "hostname[interfaceName]"
+            hostname = ""
+            interface_name = ""
+
+            if '[' in interface_str and ']' in interface_str:
+                parts = interface_str.split('[', 1)
+                hostname = parts[0]
+                interface_name = parts[1].rstrip(']')
+            else:
+                interface_name = interface_str
+
             interface_data = {
-                "interface": str(interface_raw) if interface_raw else "",
+                "hostname": hostname,
+                "interface": interface_name,
                 "access_vlan": row.get("Access_VLAN"),
                 "active": row.get("Active", False),
                 "admin_up": row.get("Admin_Up", False),
@@ -570,7 +585,7 @@ class BatfishService:
 
         structures = []
         for _, row in df.iterrows():
-            # source_linesを安全に変換
+            # Safely convert source_lines
             source_lines_raw = row.get("Source_Lines", [])
             source_lines = []
             if source_lines_raw:
@@ -604,7 +619,7 @@ class BatfishService:
 
         structures = []
         for _, row in df.iterrows():
-            # source_linesを安全に変換
+            # Safely convert source_lines
             source_lines_raw = row.get("Source_Lines", [])
             source_lines = []
             if source_lines_raw:
@@ -680,17 +695,17 @@ class BatfishService:
 
         issues = []
         for _, row in df.iterrows():
-            # source_linesをFileLines型チェックして安全に変換
+            # Safely convert source_lines with FileLines type check
             source_lines_raw = row.get("Source_Lines", [])
             source_lines = []
             if source_lines_raw:
                 logger.debug(f"source_lines_raw type: {type(source_lines_raw)}, value: {source_lines_raw}")
-                # FileLinesオブジェクトの場合は文字列リストに変換
+                # Convert FileLines object to string list
                 if hasattr(source_lines_raw, '__class__') and 'FileLines' in str(source_lines_raw.__class__):
-                    # FileLines型の場合、文字列形式に変換
+                    # Convert FileLines type to string format
                     source_lines = [str(source_lines_raw)]
                 elif isinstance(source_lines_raw, list):
-                    # リスト内の各要素もチェック
+                    # Check each element in the list
                     source_lines = []
                     for item in source_lines_raw:
                         if hasattr(item, '__class__') and 'FileLines' in str(item.__class__):
@@ -722,18 +737,18 @@ class BatfishService:
 
         warnings = []
         for _, row in df.iterrows():
-            # テキストフィールドの安全な変換
+            # Safely convert text field
             text_raw = row.get("Text", "")
             text = text_raw if isinstance(text_raw, str) else str(text_raw)
 
-            # parser_contextの安全な変換（FileLinesを含む可能性）
+            # Safely convert parser_context (may contain FileLines)
             parser_context_raw = row.get("Parser_Context", "")
             if hasattr(parser_context_raw, '__class__') and 'FileLines' in str(parser_context_raw.__class__):
                 parser_context = str(parser_context_raw)
             else:
                 parser_context = parser_context_raw if isinstance(parser_context_raw, str) else str(parser_context_raw)
 
-            # commentの安全な変換（FileLinesを含む可能性）
+            # Safely convert comment (may contain FileLines)
             comment_raw = row.get("Comment", "")
             if hasattr(comment_raw, '__class__') and 'FileLines' in str(comment_raw.__class__):
                 comment = str(comment_raw)
@@ -1954,13 +1969,33 @@ class BatfishService:
 
     # ========== PHASE 3: NICE-TO-HAVE (10 queries) ==========
 
-    def get_differential_reachability(self, headers=None) -> list[dict[str, Any]]:
-        """Compare reachability between snapshots"""
+    def get_differential_reachability(self, reference_snapshot: str = None, snapshot: str = None, headers=None) -> list[dict[str, Any]]:
+        """
+        Compare reachability between snapshots
+
+        Args:
+            reference_snapshot: Base/reference snapshot name
+            snapshot: Comparison snapshot name
+            headers: Optional flow headers
+        """
         self._ensure_initialized()
 
         query = self.session.q.differentialReachability(headers=headers) if headers else self.session.q.differentialReachability()
-        df = self._execute_query(query, "differentialReachability")
-        if df is None:
+
+        # For differential queries, pass snapshot parameters to answer()
+        try:
+            if reference_snapshot and snapshot:
+                result = query.answer(snapshot=snapshot, reference_snapshot=reference_snapshot).frame()
+            else:
+                result = query.answer().frame()
+
+            if result.empty:
+                logger.debug("differentialReachability query returned empty result")
+                return []
+
+            df = result
+        except Exception as e:
+            logger.warning(f"differentialReachability query failed: {e}")
             return []
 
         results = []
@@ -2168,6 +2203,247 @@ class BatfishService:
                 results.append(result_data)
 
         return results
+
+    # ========== Snapshot Comparison Functions ==========
+
+    def set_reference_snapshot(self, snapshot_name: str) -> dict[str, Any]:
+        """
+        Set reference snapshot for differential analysis
+
+        Args:
+            snapshot_name: Name of snapshot to use as reference
+
+        Returns:
+            Status dictionary with reference snapshot name
+        """
+        try:
+            self.session.set_reference_snapshot(snapshot_name)
+            self.reference_snapshot_name = snapshot_name
+            logger.info(f"Reference snapshot set to: {snapshot_name}")
+
+            return {
+                "status": "success",
+                "reference_snapshot": snapshot_name
+            }
+        except Exception as e:
+            logger.error(f"Failed to set reference snapshot: {e}")
+            raise
+
+    def get_reference_snapshot(self) -> dict[str, str | None]:
+        """
+        Get current reference snapshot name
+
+        Returns:
+            Dictionary with reference snapshot name (or None)
+        """
+        return {
+            "reference_snapshot": self.reference_snapshot_name
+        }
+
+    def compare_snapshots(
+        self,
+        base_snapshot: str,
+        comparison_snapshot: str
+    ) -> dict[str, Any]:
+        """
+        Compare two snapshots comprehensively
+
+        Compares nodes, edges, routes, and reachability between snapshots.
+        Sets base as reference and activates comparison snapshot.
+
+        Args:
+            base_snapshot: Reference snapshot name
+            comparison_snapshot: Snapshot to compare against base
+
+        Returns:
+            Comprehensive comparison results with nodes, edges, routes, and reachability diffs
+        """
+        try:
+            logger.info(f"Comparing snapshots: {base_snapshot} vs {comparison_snapshot}")
+
+            # Initialize base snapshot and get initial data
+            logger.debug(f"Initializing base snapshot: {base_snapshot}")
+            snapshot_path = Path(config.SNAPSHOTS_DIR) / base_snapshot
+            self.initialize_network(str(snapshot_path), snapshot_name=base_snapshot)
+
+            base_nodes = {node["node"]: node for node in self.get_node_properties()}
+            base_edges = {self._edge_key(edge): edge for edge in self.get_layer3_edges()}
+            base_routes = self.get_routes()
+
+            # Initialize comparison snapshot
+            logger.debug(f"Initializing comparison snapshot: {comparison_snapshot}")
+            snapshot_path = Path(config.SNAPSHOTS_DIR) / comparison_snapshot
+            self.initialize_network(str(snapshot_path), snapshot_name=comparison_snapshot)
+
+            comparison_nodes = {node["node"]: node for node in self.get_node_properties()}
+            comparison_edges = {self._edge_key(edge): edge for edge in self.get_layer3_edges()}
+            comparison_routes = self.get_routes()
+
+            # Compare nodes
+            nodes_diff = self._compare_nodes_diff(base_nodes, comparison_nodes)
+
+            # Compare edges (topology)
+            edges_diff = self._compare_edges_diff(base_edges, comparison_edges)
+
+            # Compare routes
+            routes_diff = self._compare_routes_diff(base_routes, comparison_routes)
+
+            # Get differential reachability
+            reachability_diff = self.get_differential_reachability(
+                reference_snapshot=base_snapshot,
+                snapshot=comparison_snapshot
+            )
+
+            result = {
+                "base_snapshot": base_snapshot,
+                "comparison_snapshot": comparison_snapshot,
+                "nodes": nodes_diff,
+                "edges": edges_diff,
+                "routes": routes_diff,
+                "reachability": reachability_diff
+            }
+
+            logger.info(f"Snapshot comparison completed successfully")
+            return result
+
+        except Exception as e:
+            logger.error(f"Error comparing snapshots: {e}", exc_info=True)
+            raise
+
+    def _edge_key(self, edge: dict[str, Any]) -> str:
+        """Generate unique key for edge comparison"""
+        return f"{edge.get('interface', '')}->{edge.get('remote_interface', '')}"
+
+    def _compare_nodes_diff(
+        self,
+        base_nodes: dict[str, dict],
+        comparison_nodes: dict[str, dict]
+    ) -> dict[str, list]:
+        """Compare nodes between snapshots"""
+        added = [
+            node_id for node_id in comparison_nodes
+            if node_id not in base_nodes
+        ]
+        removed = [
+            node_id for node_id in base_nodes
+            if node_id not in comparison_nodes
+        ]
+
+        return {
+            "added": added,
+            "removed": removed,
+            "total_base": len(base_nodes),
+            "total_comparison": len(comparison_nodes)
+        }
+
+    def _compare_edges_diff(
+        self,
+        base_edges: dict[str, dict],
+        comparison_edges: dict[str, dict]
+    ) -> dict[str, list]:
+        """Compare edges (topology) between snapshots"""
+
+        def transform_edge(edge: dict) -> dict:
+            """
+            Transform edge from Batfish format to frontend format
+            Handles formats: "node[interface]", "node:interface", or plain strings
+            """
+            interface = edge.get('interface', '')
+            remote_interface = edge.get('remote_interface', '')
+
+            def parse_interface(iface_str: str) -> tuple[str, str]:
+                """Parse interface string to extract node and interface name"""
+                if '[' in iface_str and ']' in iface_str:
+                    # Format: "node[interface]"
+                    parts = iface_str.split('[', 1)
+                    node = parts[0]
+                    iface = parts[1].rstrip(']')
+                    return (node, iface)
+                elif ':' in iface_str:
+                    # Format: "node:interface"
+                    parts = iface_str.split(':', 1)
+                    return (parts[0], parts[1])
+                else:
+                    # Fallback: use as-is
+                    return (iface_str, '')
+
+            source_node, source_iface = parse_interface(interface)
+            target_node, target_iface = parse_interface(remote_interface)
+
+            return {
+                'source': source_node,
+                'target': target_node,
+                'source_interface': source_iface,
+                'target_interface': target_iface
+            }
+
+        added = [
+            transform_edge(comparison_edges[edge_key])
+            for edge_key in comparison_edges
+            if edge_key not in base_edges
+        ]
+        removed = [
+            transform_edge(base_edges[edge_key])
+            for edge_key in base_edges
+            if edge_key not in comparison_edges
+        ]
+
+        return {
+            "added": added,
+            "removed": removed,
+            "total_base": len(base_edges),
+            "total_comparison": len(comparison_edges)
+        }
+
+    def _compare_routes_diff(
+        self,
+        base_routes: list[dict],
+        comparison_routes: list[dict]
+    ) -> dict[str, Any]:
+        """Compare routing tables between snapshots"""
+        # Create route keys for comparison
+        def route_key(route: dict) -> str:
+            return f"{route.get('node', '')}-{route.get('vrf', '')}-{route.get('network', '')}"
+
+        base_route_map = {route_key(r): r for r in base_routes}
+        comparison_route_map = {route_key(r): r for r in comparison_routes}
+
+        added = [
+            comparison_route_map[key]
+            for key in comparison_route_map
+            if key not in base_route_map
+        ]
+        removed = [
+            base_route_map[key]
+            for key in base_route_map
+            if key not in comparison_route_map
+        ]
+
+        # Detect modified routes (same network but different next hop)
+        modified = []
+        for key in base_route_map:
+            if key in comparison_route_map:
+                base_route = base_route_map[key]
+                comp_route = comparison_route_map[key]
+                if (base_route.get('next_hop') != comp_route.get('next_hop') or
+                    base_route.get('protocol') != comp_route.get('protocol')):
+                    modified.append({
+                        "network": comp_route.get('network'),
+                        "node": comp_route.get('node'),
+                        "vrf": comp_route.get('vrf'),
+                        "base_next_hop": base_route.get('next_hop'),
+                        "comparison_next_hop": comp_route.get('next_hop'),
+                        "base_protocol": base_route.get('protocol'),
+                        "comparison_protocol": comp_route.get('protocol')
+                    })
+
+        return {
+            "added": added,
+            "removed": removed,
+            "modified": modified,
+            "total_base": len(base_routes),
+            "total_comparison": len(comparison_routes)
+        }
 
     # ========== Aggregate Data Fetching ==========
     def fetch_all_data(self) -> dict[str, Any]:

@@ -12,6 +12,7 @@ import { Info, Router, Link, AlertCircle, Search, Network } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
 import { useUIStore, type SidebarTab } from '../store'
 import { NodeSelector } from '../components/NodeSelector'
+import { logger } from '../utils/logger'
 
 // Lazy load panels to reduce initial bundle size and API requests
 const OverviewPanel = lazy(() => import('../components/panels/OverviewPanel'))
@@ -44,7 +45,7 @@ export function SidebarPopout() {
   useEffect(() => {
     const tabLabel = tabs.find((tab) => tab.id === sidebarTab)?.label || 'Sidebar'
     document.title = `Topologix - ${tabLabel}`
-    console.log('[SidebarPopout] Active tab changed to:', sidebarTab)
+    logger.log('[SidebarPopout] Active tab changed to:', sidebarTab)
   }, [sidebarTab, tabs, t])
 
   return (

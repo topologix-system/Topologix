@@ -9,7 +9,7 @@ import {
   Route,
 } from './network'
 import { OSPFProcessConfig, OSPFAreaConfig, OSPFInterfaceConfig, OSPFSessionCompat, OSPFEdge } from './ospf'
-import { PhysicalEdge, Layer3Edge, BGPEdge, VXLANEdge, EIGRPEdge, ISISEdge, IPsecEdge, SwitchedVlanEdge } from './edges'
+import { PhysicalEdge, Layer1Edge, Layer3Edge, BGPEdge, VXLANEdge, EIGRPEdge, ISISEdge, IPsecEdge } from './edges'
 import { BGPPeerConfiguration, BGPProcessConfiguration, BGPSessionStatus, BGPSessionCompatibility, BGPRib } from './bgp'
 import { SwitchedVlanProperties } from './vlan'
 import { IPOwner } from './ip'
@@ -35,7 +35,7 @@ export interface NetworkInitializeResponse {
   file_parse_status: FileParseStatus[]
   init_issues: InitIssue[]
   parse_warnings: ParseWarning[]
-  initialization_result: any
+  initialization_result: Record<string, unknown>
 }
 
 export interface AllNetworkData {
@@ -54,12 +54,12 @@ export interface AllNetworkData {
   bgp_session_compatibility: BGPSessionCompatibility[]
   bgp_rib: BGPRib[]
   edges: PhysicalEdge[]
+  layer1_edges: Layer1Edge[]
   layer3_edges: Layer3Edge[]
   vxlan_edges: VXLANEdge[]
   eigrp_edges: EIGRPEdge[]
   isis_edges: ISISEdge[]
   ipsec_edges: IPsecEdge[]
-  switched_vlan_edges: SwitchedVlanEdge[]
   switched_vlan_properties: SwitchedVlanProperties[]
   ip_owners: IPOwner[]
   defined_structures: DefinedStructure[]
@@ -78,7 +78,7 @@ export interface ReachabilityRequest {
   headers?: {
     srcIps?: string
     dstIps?: string
-    [key: string]: any
+    [key: string]: string | undefined
   }
 }
 

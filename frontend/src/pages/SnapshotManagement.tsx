@@ -17,6 +17,8 @@ import {
   ArrowLeft,
   X,
   Loader2,
+  GitCompare,
+  Cable,
 } from 'lucide-react'
 
 import {
@@ -214,14 +216,24 @@ export function SnapshotManagement() {
             </Link>
             <h1 className="text-2xl font-bold text-gray-900">Snapshot Management</h1>
           </div>
-          <button
-            onClick={() => setShowCreateDialog(true)}
-            className="flex items-center gap-2 px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors font-medium shadow-sm hover:shadow-md focus:outline-none focus:ring-2 focus:ring-primary-600 focus:ring-offset-2"
-            aria-label="Create new snapshot"
-          >
-            <Plus className="w-4 h-4" aria-hidden="true" />
-            New Snapshot
-          </button>
+          <div className="flex items-center gap-3">
+            <Link
+              to="/snapshots/compare"
+              className="flex items-center gap-2 px-4 py-2 bg-gray-100 text-gray-700 rounded-lg hover:bg-gray-200 transition-colors font-medium shadow-sm hover:shadow-md focus:outline-none focus:ring-2 focus:ring-primary-600 focus:ring-offset-2"
+              aria-label="Compare snapshots"
+            >
+              <GitCompare className="w-4 h-4" aria-hidden="true" />
+              Compare Snapshots
+            </Link>
+            <button
+              onClick={() => setShowCreateDialog(true)}
+              className="flex items-center gap-2 px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors font-medium shadow-sm hover:shadow-md focus:outline-none focus:ring-2 focus:ring-primary-600 focus:ring-offset-2"
+              aria-label="Create new snapshot"
+            >
+              <Plus className="w-4 h-4" aria-hidden="true" />
+              New Snapshot
+            </button>
+          </div>
         </div>
       </header>
 
@@ -324,9 +336,18 @@ export function SnapshotManagement() {
         <div className="flex-1 overflow-y-auto p-6">
           {selectedSnapshot ? (
             <>
-              <h2 className="text-xl font-semibold text-gray-900 mb-4">
-                Files in {selectedSnapshot}
-              </h2>
+              <div className="flex items-center justify-between mb-4">
+                <h2 className="text-xl font-semibold text-gray-900">
+                  Files in {selectedSnapshot}
+                </h2>
+                <Link
+                  to={`/snapshots/${selectedSnapshot}/layer1-topology`}
+                  className="inline-flex items-center gap-2 px-4 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 transition-colors"
+                >
+                  <Cable className="w-4 h-4" />
+                  Edit Layer 1 Topology
+                </Link>
+              </div>
 
               {/* Upload area */}
               <div

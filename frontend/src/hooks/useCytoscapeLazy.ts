@@ -7,9 +7,10 @@
  * - Used by TopologyViewer for optimal performance and user position persistence
  */
 import { useRef, useCallback, useState, useEffect, useMemo } from 'react'
-import type { Core, ElementDefinition } from 'cytoscape'
+import type { Core, ElementDefinition} from 'cytoscape'
 import { getLayoutConfig } from '../lib/cytoscape/layouts'
 import type { LayoutName, CytoscapeConfig } from '../lib/cytoscape/types'
+import { logger } from '../utils/logger'
 
 let cytoscapeModule: typeof import('cytoscape') | null = null
 let cytoscapeLoaded = false
@@ -32,7 +33,7 @@ async function loadCytoscape() {
          (cytoscape as any).cytoscape : null)
 
     if (!cytoscapeModule || typeof cytoscapeModule !== 'function') {
-      console.error('[useCytoscapeLazy] Failed to load Cytoscape module correctly. Module type:', typeof cytoscape, 'Module:', cytoscape)
+      logger.error('[useCytoscapeLazy] Failed to load Cytoscape module correctly. Module type:', typeof cytoscape, 'Module:', cytoscape)
       throw new Error('Cytoscape module is not a function')
     }
 
@@ -44,15 +45,15 @@ async function loadCytoscape() {
       cytoscapeModule.use(colaModule)
       cytoscapeModule.use(coseBilkentModule)
       cytoscapeModule.use(dagreModule)
-      console.log('[useCytoscapeLazy] Cytoscape extensions registered successfully')
+      logger.log('[useCytoscapeLazy] Cytoscape extensions registered successfully')
     } else {
-      console.error('[useCytoscapeLazy] Cannot register extensions - Cytoscape.use is not a function')
+      logger.error('[useCytoscapeLazy] Cannot register extensions - Cytoscape.use is not a function')
     }
 
     cytoscapeLoaded = true
     return cytoscapeModule
   } catch (error) {
-    console.error('[useCytoscapeLazy] Error loading Cytoscape modules:', error)
+    logger.error('[useCytoscapeLazy] Error loading Cytoscape modules:', error)
     cytoscapeModule = null
     cytoscapeLoaded = false
     return null
@@ -99,11 +100,11 @@ export function useCytoscapeLazy(config?: CytoscapeConfig): UseCytoscapeLazyRetu
   const updateTimeoutRef = useRef<NodeJS.Timeout | null>(null)
 
   const initialize = useCallback(async (container: HTMLElement, elements?: ElementDefinition[]) => {
-    console.log('[useCytoscapeLazy] Initializing Cytoscape instance with', elements?.length || 0, 'elements')
+    logger.log('[useCytoscapeLazy] Initializing Cytoscape instance with', elements?.length || 0, 'elements')
 
     try {
       if (cyRef.current) {
-        console.log('[useCytoscapeLazy] Destroying existing Cytoscape instance')
+        logger.log('[useCytoscapeLazy] Destroying existing Cytoscape instance')
         cyRef.current.destroy()
         cyRef.current = null
         setIsLoaded(false)
@@ -114,19 +115,19 @@ export function useCytoscapeLazy(config?: CytoscapeConfig): UseCytoscapeLazyRetu
         updateTimeoutRef.current = null
       }
 
-      console.log('[useCytoscapeLazy] Loading Cytoscape modules')
+      logger.log('[useCytoscapeLazy] Loading Cytoscape modules')
       const cytoscape = await loadCytoscape()
       if (!cytoscape) {
-        console.error('[useCytoscapeLazy] Cytoscape module could not be loaded')
+        logger.error('[useCytoscapeLazy] Cytoscape module could not be loaded')
         return null
       }
-      console.log('[useCytoscapeLazy] Cytoscape modules loaded successfully')
+      logger.log('[useCytoscapeLazy] Cytoscape modules loaded successfully')
 
-      console.log('[useCytoscapeLazy] Loading Cytoscape styles')
+      logger.log('[useCytoscapeLazy] Loading Cytoscape styles')
       const { defaultStyles } = await import('../lib/cytoscape/styles')
 
       const initialElements = elements || config?.elements || []
-      console.log('[useCytoscapeLazy] Creating Cytoscape instance with', initialElements.length, 'elements')
+      logger.log('[useCytoscapeLazy] Creating Cytoscape instance with', initialElements.length, 'elements')
 
       const cytoscapeConfig = {
         container,
@@ -144,19 +145,19 @@ export function useCytoscapeLazy(config?: CytoscapeConfig): UseCytoscapeLazyRetu
       }
 
       if (typeof cytoscape !== 'function') {
-        console.error('[useCytoscapeLazy] Cytoscape is not a function:', typeof cytoscape, cytoscape)
+        logger.error('[useCytoscapeLazy] Cytoscape is not a function:', typeof cytoscape, cytoscape)
         return null
       }
 
       cyRef.current = cytoscape(cytoscapeConfig)
-      console.log('[useCytoscapeLazy] Cytoscape instance created successfully')
-      console.log('[useCytoscapeLazy] Initial element count:', cyRef.current.elements().length)
+      logger.log('[useCytoscapeLazy] Cytoscape instance created successfully')
+      logger.log('[useCytoscapeLazy] Initial element count:', cyRef.current.elements().length)
 
       setIsLoaded(true)
       return cyRef.current
     } catch (error) {
-      console.error('[useCytoscapeLazy] Failed to initialize Cytoscape:', error)
-      console.error('[useCytoscapeLazy] Error details:', {
+      logger.error('[useCytoscapeLazy] Failed to initialize Cytoscape:', error)
+      logger.error('[useCytoscapeLazy] Error details:', {
         message: (error as any)?.message,
         stack: (error as any)?.stack,
         containerExists: !!container,
@@ -169,36 +170,36 @@ export function useCytoscapeLazy(config?: CytoscapeConfig): UseCytoscapeLazyRetu
   }, [config])
 
   const destroy = useCallback(() => {
-    console.log('[useCytoscapeLazy] Destroying Cytoscape instance')
+    logger.log('[useCytoscapeLazy] Destroying Cytoscape instance')
 
     if (updateTimeoutRef.current) {
-      console.log('[useCytoscapeLazy] Clearing pending layout timeout')
+      logger.log('[useCytoscapeLazy] Clearing pending layout timeout')
       clearTimeout(updateTimeoutRef.current)
       updateTimeoutRef.current = null
     }
 
     if (cyRef.current) {
       try {
-        console.log('[useCytoscapeLazy] Destroying Cytoscape instance with', cyRef.current.elements().length, 'elements')
+        logger.log('[useCytoscapeLazy] Destroying Cytoscape instance with', cyRef.current.elements().length, 'elements')
         cyRef.current.destroy()
         cyRef.current = null
         setIsLoaded(false)
-        console.log('[useCytoscapeLazy] Cytoscape instance destroyed successfully')
+        logger.log('[useCytoscapeLazy] Cytoscape instance destroyed successfully')
       } catch (error) {
-        console.error('[useCytoscapeLazy] Error destroying Cytoscape instance:', error)
+        logger.error('[useCytoscapeLazy] Error destroying Cytoscape instance:', error)
         cyRef.current = null
         setIsLoaded(false)
       }
     } else {
-      console.log('[useCytoscapeLazy] No Cytoscape instance to destroy')
+      logger.log('[useCytoscapeLazy] No Cytoscape instance to destroy')
     }
   }, [])
 
   const updateElements = useCallback((elements: ElementDefinition[], applyLayout: boolean = true) => {
-    console.log('[useCytoscapeLazy] updateElements called with', elements.length, 'elements, applyLayout:', applyLayout)
+    logger.log('[useCytoscapeLazy] updateElements called with', elements.length, 'elements, applyLayout:', applyLayout)
 
     if (!cyRef.current) {
-      console.error('[useCytoscapeLazy] Cannot update elements: Cytoscape instance not initialized')
+      logger.error('[useCytoscapeLazy] Cannot update elements: Cytoscape instance not initialized')
       return
     }
 
@@ -208,45 +209,45 @@ export function useCytoscapeLazy(config?: CytoscapeConfig): UseCytoscapeLazyRetu
         updateTimeoutRef.current = null
       }
 
-      console.log('[useCytoscapeLazy] Updating elements in batch mode')
+      logger.log('[useCytoscapeLazy] Updating elements in batch mode')
 
       cyRef.current.batch(() => {
         const cy = cyRef.current!
         const existingElements = cy.elements()
 
-        console.log('[useCytoscapeLazy] Removing', existingElements.length, 'existing elements')
+        logger.log('[useCytoscapeLazy] Removing', existingElements.length, 'existing elements')
         existingElements.remove()
 
-        console.log('[useCytoscapeLazy] Adding', elements.length, 'new elements')
+        logger.log('[useCytoscapeLazy] Adding', elements.length, 'new elements')
         cy.add(elements)
       })
 
-      console.log('[useCytoscapeLazy] Elements updated successfully, current count:', cyRef.current.elements().length)
+      logger.log('[useCytoscapeLazy] Elements updated successfully, current count:', cyRef.current.elements().length)
 
       if (applyLayout && cyRef.current && cyRef.current.elements().length > 0) {
-        console.log('[useCytoscapeLazy] Applying layout immediately')
+        logger.log('[useCytoscapeLazy] Applying layout immediately')
         try {
           const layout = cyRef.current.layout(getLayoutConfig('cola'))
           layout.run()
-          console.log('[useCytoscapeLazy] Layout applied successfully')
+          logger.log('[useCytoscapeLazy] Layout applied successfully')
         } catch (layoutError) {
-          console.error('[useCytoscapeLazy] Error applying layout:', layoutError)
+          logger.error('[useCytoscapeLazy] Error applying layout:', layoutError)
           try {
-            console.log('[useCytoscapeLazy] Trying fallback grid layout')
+            logger.log('[useCytoscapeLazy] Trying fallback grid layout')
             const fallbackLayout = cyRef.current.layout({ name: 'grid' })
             fallbackLayout.run()
           } catch (fallbackError) {
-            console.error('[useCytoscapeLazy] Fallback layout also failed:', fallbackError)
+            logger.error('[useCytoscapeLazy] Fallback layout also failed:', fallbackError)
           }
         }
       } else if (!applyLayout) {
-        console.log('[useCytoscapeLazy] Skipping layout application (applyLayout=false)')
+        logger.log('[useCytoscapeLazy] Skipping layout application (applyLayout=false)')
       } else if (cyRef.current) {
-        console.log('[useCytoscapeLazy] No elements to layout')
+        logger.log('[useCytoscapeLazy] No elements to layout')
       }
     } catch (error) {
-      console.error('[useCytoscapeLazy] Error updating elements:', error)
-      console.error('[useCytoscapeLazy] Error details:', {
+      logger.error('[useCytoscapeLazy] Error updating elements:', error)
+      logger.error('[useCytoscapeLazy] Error details:', {
         message: (error as any)?.message,
         stack: (error as any)?.stack,
         elementsCount: elements.length
@@ -351,7 +352,7 @@ export function useCytoscapeLazy(config?: CytoscapeConfig): UseCytoscapeLazyRetu
 
   const saveNodePositions = useCallback((): NodePositions => {
     if (!cyRef.current) {
-      console.log('[useCytoscapeLazy] Cannot save positions: Cytoscape instance not initialized')
+      logger.log('[useCytoscapeLazy] Cannot save positions: Cytoscape instance not initialized')
       return {}
     }
 
@@ -361,18 +362,18 @@ export function useCytoscapeLazy(config?: CytoscapeConfig): UseCytoscapeLazyRetu
       positions[node.id()] = { x: pos.x, y: pos.y }
     })
 
-    console.log(`[useCytoscapeLazy] Saved positions for ${Object.keys(positions).length} nodes`)
+    logger.log(`[useCytoscapeLazy] Saved positions for ${Object.keys(positions).length} nodes`)
     return positions
   }, [])
 
   const restoreNodePositions = useCallback((positions: NodePositions) => {
     if (!cyRef.current) {
-      console.log('[useCytoscapeLazy] Cannot restore positions: Cytoscape instance not initialized')
+      logger.log('[useCytoscapeLazy] Cannot restore positions: Cytoscape instance not initialized')
       return
     }
 
     if (!positions || Object.keys(positions).length === 0) {
-      console.log('[useCytoscapeLazy] No positions to restore')
+      logger.log('[useCytoscapeLazy] No positions to restore')
       return
     }
 
@@ -387,7 +388,7 @@ export function useCytoscapeLazy(config?: CytoscapeConfig): UseCytoscapeLazyRetu
       })
     })
 
-    console.log(`[useCytoscapeLazy] Restored positions for ${restoredCount} of ${Object.keys(positions).length} saved nodes`)
+    logger.log(`[useCytoscapeLazy] Restored positions for ${restoredCount} of ${Object.keys(positions).length} saved nodes`)
   }, [])
 
   useEffect(() => {

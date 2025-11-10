@@ -9,6 +9,7 @@
 import { CheckCircle, XCircle, Monitor, User, Calendar } from 'lucide-react'
 import type { SecurityLog } from '../types'
 import { TIMEZONE } from '../constants'
+import { logger } from '../utils/logger'
 
 /**
  * Parse timestamp string as UTC if no timezone indicator present
@@ -60,7 +61,7 @@ function formatDateInTimezone(date: Date, timezone: string): string {
       hour12: false,
     }).format(date)
   } catch (error) {
-    console.error(`Invalid timezone: ${timezone}`, error)
+    logger.error(`Invalid timezone: ${timezone}`, error)
     return date.toISOString().replace('T', ' ').substring(0, 19)
   }
 }

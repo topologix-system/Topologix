@@ -18,7 +18,7 @@ class FlowTrace:
     trace_count: int = 0
 
     def to_dict(self) -> dict:
-        # tracesを安全に変換
+        # Safely convert traces
         safe_traces = []
         for trace in self.traces:
             if hasattr(trace, '__class__') and 'FileLines' in str(trace.__class__):

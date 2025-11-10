@@ -2753,6 +2753,284 @@ def activate_snapshot(name: str):
         return error_response(str(e), 500)
 
 
+@app.route('/api/snapshots/compare', methods=['POST'])
+@require_auth
+def compare_snapshots():
+    """
+    Compare two snapshots to identify differences in nodes, edges, routes, and reachability
+
+    Request body:
+    {
+        "base_snapshot": "snapshot1",
+        "comparison_snapshot": "snapshot2"
+    }
+    """
+    try:
+        data = request.get_json()
+        if not data:
+            return error_response("Request body is required", 400)
+
+        base_snapshot = data.get('base_snapshot')
+        comparison_snapshot = data.get('comparison_snapshot')
+
+        if not base_snapshot or not comparison_snapshot:
+            return error_response("Both base_snapshot and comparison_snapshot are required", 400)
+
+        # Validate snapshot names
+        if config.AUTH_ENABLED:
+            base_snapshot = validate_snapshot_name(base_snapshot)
+            comparison_snapshot = validate_snapshot_name(comparison_snapshot)
+
+        # Verify snapshots exist (get_snapshot_path raises FileNotFoundError if not found)
+        try:
+            snapshot_service.get_snapshot_path(base_snapshot)
+            snapshot_service.get_snapshot_path(comparison_snapshot)
+        except FileNotFoundError as e:
+            return error_response(str(e), 404)
+
+        logger.info(f"Comparing snapshots: {base_snapshot} vs {comparison_snapshot}")
+
+        # Perform comparison
+        result = batfish_service.compare_snapshots(base_snapshot, comparison_snapshot)
+
+        return success_response(result, f"Snapshots compared successfully")
+
+    except ValueError as e:
+        logger.error(f"Validation error in snapshot comparison: {e}")
+        return error_response(str(e), 400)
+    except FileNotFoundError as e:
+        logger.error(f"Snapshot not found: {e}")
+        return error_response(str(e), 404)
+    except Exception as e:
+        import traceback
+        logger.error(f"Failed to compare snapshots: {e}")
+        logger.error(f"Traceback: {traceback.format_exc()}")
+        return error_response(str(e), 500)
+
+
+# ========== Layer1 Topology Management Endpoints ==========
+def validate_layer1_topology(topology_data: dict, snapshot_name: str) -> list[dict]:
+    """
+    Validate Layer1 topology data against snapshot devices and interfaces
+
+    Args:
+        topology_data: Layer1 topology JSON with edges
+        snapshot_name: Name of snapshot to validate against
+
+    Returns:
+        List of validation errors (empty if valid)
+    """
+    errors = []
+
+    if 'edges' not in topology_data:
+        errors.append({
+            'type': 'invalid_structure',
+            'message': "Missing 'edges' key in topology data"
+        })
+        return errors
+
+    edges = topology_data['edges']
+    if not isinstance(edges, list):
+        errors.append({
+            'type': 'invalid_structure',
+            'message': "'edges' must be a list"
+        })
+        return errors
+
+    try:
+        interfaces_by_device = snapshot_service.get_snapshot_interfaces(snapshot_name, batfish_service)
+    except Exception as e:
+        errors.append({
+            'type': 'validation_error',
+            'message': f"Failed to retrieve interfaces: {str(e)}"
+        })
+        return errors
+
+    seen_connections = set()
+
+    for idx, edge in enumerate(edges):
+        if not isinstance(edge, dict):
+            errors.append({
+                'type': 'invalid_structure',
+                'message': f"Edge at index {idx} must be an object",
+                'edge_index': idx
+            })
+            continue
+
+        node1 = edge.get('node1', {})
+        node2 = edge.get('node2', {})
+
+        if not isinstance(node1, dict) or not isinstance(node2, dict):
+            errors.append({
+                'type': 'invalid_structure',
+                'message': f"Edge at index {idx} must have 'node1' and 'node2' objects",
+                'edge_index': idx
+            })
+            continue
+
+        hostname1 = node1.get('hostname', '')
+        interface1 = node1.get('interfaceName', '')
+        hostname2 = node2.get('hostname', '')
+        interface2 = node2.get('interfaceName', '')
+
+        if hostname1 == hostname2:
+            errors.append({
+                'type': 'self_connection',
+                'message': f"Edge at index {idx}: Cannot connect device to itself ({hostname1})",
+                'edge_index': idx
+            })
+
+        if hostname1 not in interfaces_by_device:
+            errors.append({
+                'type': 'hostname_not_found',
+                'message': f"Edge at index {idx}: Hostname '{hostname1}' not found in snapshot",
+                'edge_index': idx
+            })
+        else:
+            device_interfaces = [iface['name'] for iface in interfaces_by_device[hostname1]['interfaces']]
+            if interface1 not in device_interfaces:
+                errors.append({
+                    'type': 'interface_not_found',
+                    'message': f"Edge at index {idx}: Interface '{interface1}' not found on device '{hostname1}'",
+                    'edge_index': idx
+                })
+
+        if hostname2 not in interfaces_by_device:
+            errors.append({
+                'type': 'hostname_not_found',
+                'message': f"Edge at index {idx}: Hostname '{hostname2}' not found in snapshot",
+                'edge_index': idx
+            })
+        else:
+            device_interfaces = [iface['name'] for iface in interfaces_by_device[hostname2]['interfaces']]
+            if interface2 not in device_interfaces:
+                errors.append({
+                    'type': 'interface_not_found',
+                    'message': f"Edge at index {idx}: Interface '{interface2}' not found on device '{hostname2}'",
+                    'edge_index': idx
+                })
+
+        connection_key = tuple(sorted([f"{hostname1}:{interface1}", f"{hostname2}:{interface2}"]))
+        if connection_key in seen_connections:
+            errors.append({
+                'type': 'duplicate_connection',
+                'message': f"Edge at index {idx}: Duplicate connection between {hostname1}:{interface1} and {hostname2}:{interface2}",
+                'edge_index': idx
+            })
+        seen_connections.add(connection_key)
+
+    return errors
+
+
+@app.route('/api/snapshots/<name>/layer1-topology', methods=['GET'])
+def get_snapshot_layer1_topology(name: str):
+    """
+    Get Layer1 topology for a snapshot
+
+    Returns the layer1_topology.json file content if it exists
+    """
+    try:
+        topology = snapshot_service.get_layer1_topology(name)
+
+        if topology is None:
+            return success_response({'edges': []}, "No Layer1 topology defined")
+
+        return success_response(topology)
+
+    except FileNotFoundError as e:
+        return error_response(str(e), 404)
+    except Exception as e:
+        logger.error(f"Failed to get Layer1 topology: {e}")
+        return error_response(str(e), 500)
+
+
+@app.route('/api/snapshots/<name>/layer1-topology', methods=['PUT'])
+def save_layer1_topology(name: str):
+    """
+    Save Layer1 topology for a snapshot with validation
+
+    Request body:
+    {
+        "edges": [
+            {
+                "node1": {"hostname": "R1", "interfaceName": "GigabitEthernet0/0"},
+                "node2": {"hostname": "R2", "interfaceName": "GigabitEthernet0/1"}
+            }
+        ]
+    }
+    """
+    try:
+        data = request.get_json()
+        if not data:
+            return error_response("Request body is required", 400)
+
+        validation_errors = validate_layer1_topology(data, name)
+        if validation_errors:
+            return error_response(
+                "Layer1 topology validation failed",
+                400,
+                errors=validation_errors
+            )
+
+        result = snapshot_service.save_layer1_topology(name, data)
+
+        snapshot_path = snapshot_service.get_snapshot_path(name)
+        batfish_service.initialize_network(str(snapshot_path), name)
+        logger.info(f"Reloaded Batfish snapshot '{name}' with updated Layer1 topology")
+
+        return success_response(result, "Layer1 topology saved and snapshot reloaded successfully")
+
+    except FileNotFoundError as e:
+        return error_response(str(e), 404)
+    except ValueError as e:
+        return error_response(str(e), 400)
+    except Exception as e:
+        import traceback
+        logger.error(f"Failed to save Layer1 topology: {e}")
+        logger.error(f"Traceback: {traceback.format_exc()}")
+        return error_response(str(e), 500)
+
+
+@app.route('/api/snapshots/<name>/layer1-topology', methods=['DELETE'])
+def delete_layer1_topology(name: str):
+    """
+    Delete Layer1 topology file from a snapshot
+    """
+    try:
+        snapshot_service.delete_layer1_topology(name)
+
+        snapshot_path = snapshot_service.get_snapshot_path(name)
+        batfish_service.initialize_network(str(snapshot_path), name)
+        logger.info(f"Reloaded Batfish snapshot '{name}' after Layer1 topology deletion")
+
+        return success_response({"name": name}, "Layer1 topology deleted and snapshot reloaded successfully")
+
+    except FileNotFoundError as e:
+        return error_response(str(e), 404)
+    except Exception as e:
+        logger.error(f"Failed to delete Layer1 topology: {e}")
+        return error_response(str(e), 500)
+
+
+@app.route('/api/snapshots/<name>/interfaces', methods=['GET'])
+def get_snapshot_interfaces(name: str):
+    """
+    Get all interfaces in a snapshot grouped by hostname
+
+    Returns a dictionary where keys are hostnames and values contain
+    device information with a list of interfaces
+    """
+    try:
+        interfaces = snapshot_service.get_snapshot_interfaces(name, batfish_service)
+        return success_response(interfaces)
+
+    except FileNotFoundError as e:
+        return error_response(str(e), 404)
+    except Exception as e:
+        logger.error(f"Failed to get snapshot interfaces: {e}")
+        return error_response(str(e), 500)
+
+
 # ========== API Documentation Endpoint ==========
 @app.route('/api/endpoints', methods=['GET'])
 def list_endpoints():

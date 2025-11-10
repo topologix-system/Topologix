@@ -52,9 +52,8 @@ export const NodeDetailsPanel = memo(function NodeDetailsPanel() {
   const nodeInterfaces = useMemo(() => {
     if (!selectedNodeId || !data?.interface_properties) return []
     return data.interface_properties.filter((iface) => {
-      // Extract node name from interface string (e.g., "r1[Ethernet0/0]" -> "r1")
-      const match = iface.interface.match(/^([^[]+)/)
-      return match && match[1] === selectedNodeId
+      // Filter by hostname field directly (backend returns {hostname: "r1", interface: "GigabitEthernet0/0"})
+      return iface.hostname === selectedNodeId
     })
   }, [data?.interface_properties, selectedNodeId])
 
@@ -164,13 +163,6 @@ export const NodeDetailsPanel = memo(function NodeDetailsPanel() {
     if (!selectedNodeId || !data?.switched_vlan_properties) return []
     return data.switched_vlan_properties.filter((v) => v.node === selectedNodeId)
   }, [data?.switched_vlan_properties, selectedNodeId])
-
-  const nodeSwitchedVlanEdges = useMemo(() => {
-    if (!selectedNodeId || !data?.switched_vlan_edges) return []
-    return data.switched_vlan_edges.filter(
-      (edge) => edge.interface?.startsWith(`${selectedNodeId}[`)
-    )
-  }, [data?.switched_vlan_edges, selectedNodeId])
 
   // Configuration structures data
   const nodeDefinedStructures = useMemo(() => {
@@ -319,7 +311,6 @@ export const NodeDetailsPanel = memo(function NodeDetailsPanel() {
           <VlanTab
             node={node}
             vlans={nodeSwitchedVlanProperties}
-            vlanEdges={nodeSwitchedVlanEdges}
           />
         )}
         {activeTab === 'config' && (
@@ -450,7 +441,7 @@ function InterfacesTab({ node, interfaces }: { node: any; interfaces: any[] }) {
         ) : (
           <div className="space-y-2">
             {interfaces.map((iface) => {
-              const ifaceName = iface.interface.replace(`${node.node}[`, '').replace(']', '')
+              const ifaceName = iface.interface  // Already just the interface name (e.g., "GigabitEthernet0/0")
               const isExpanded = expandedInterface === iface.interface
 
               return (
@@ -1542,7 +1533,7 @@ function AclTab({ node, filterReachability }: {
 }
 
 // VLAN Tab
-function VlanTab({ node, vlans, vlanEdges }: { node: any; vlans: any[]; vlanEdges: any[] }) {
+function VlanTab({ node, vlans }: { node: any; vlans: any[] }) {
   const { t } = useTranslation()
   return (
     <div className="space-y-4">
@@ -1579,27 +1570,7 @@ function VlanTab({ node, vlans, vlanEdges }: { node: any; vlans: any[]; vlanEdge
         </div>
       )}
 
-      {/* VLAN Edges */}
-      {vlanEdges.length > 0 && (
-        <div className="bg-gray-50 rounded-lg p-4">
-          <h3 className="font-medium text-gray-900 mb-3">
-            {t('nodeDetails.sections.vlanEdges')} ({vlanEdges.length})
-          </h3>
-          <div className="space-y-2">
-            {vlanEdges.map((edge, index) => (
-              <div key={index} className="bg-white p-3 rounded text-sm border border-gray-200">
-                <div className="grid grid-cols-2 gap-2 text-xs">
-                  <div className="text-gray-700">Interface: {edge.interface}</div>
-                  <div className="text-gray-700">Remote: {edge.remote_interface}</div>
-                  <div className="text-gray-700">VLAN: {edge.vlan}</div>
-                </div>
-              </div>
-            ))}
-          </div>
-        </div>
-      )}
-
-      {vlans.length === 0 && vlanEdges.length === 0 && (
+      {vlans.length === 0 && (
         <p className="text-sm text-gray-700">{t('nodeDetails.noVlanData')}</p>
       )}
     </div>

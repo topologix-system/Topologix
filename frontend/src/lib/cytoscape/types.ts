@@ -55,6 +55,7 @@ export interface CytoscapeElements {
 /**
  * Supported Cytoscape layout algorithms
  * - cola: Force-directed with constraints (default, best for most networks)
+ * - cola-spaced: Force-directed with increased node spacing for better visibility
  * - cose: Compound Spring Embedder (good for clustered networks)
  * - cose-bilkent: Advanced force-directed (best for large graphs)
  * - dagre: Hierarchical directed acyclic graph layout
@@ -63,13 +64,13 @@ export interface CytoscapeElements {
  * - random: Random positioning
  * - breadthfirst: Tree-based hierarchical layout
  */
-export type LayoutName = 'cola' | 'cose' | 'cose-bilkent' | 'dagre' | 'circle' | 'grid' | 'random' | 'breadthfirst'
+export type LayoutName = 'cola' | 'cola-spaced' | 'cose' | 'cose-bilkent' | 'dagre' | 'circle' | 'grid' | 'random' | 'breadthfirst'
 
 /**
  * Network topology layer types for filtering graph edges
  * Allows users to show/hide specific protocol layers in topology view
  */
-export type LayerType = 'physical' | 'layer3' | 'ospf' | 'bgp' | 'vxlan' | 'eigrp' | 'isis' | 'ipsec' | 'switched-vlan'
+export type LayerType = 'physical' | 'layer1' | 'layer3' | 'ospf' | 'bgp' | 'vxlan' | 'eigrp' | 'isis' | 'ipsec'
 
 /**
  * Configuration options for Cytoscape.js graph instance

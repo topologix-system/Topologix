@@ -1,6 +1,6 @@
 /**
  * Network edge/connection type definitions
- * Physical, layer 3, and protocol adjacency edges (OSPF, BGP, VXLAN, EIGRP, IS-IS, IPsec, switched VLAN)
+ * Physical, layer 3, and protocol adjacency edges (OSPF, BGP, VXLAN, EIGRP, IS-IS, IPsec)
  * Core data structures for topology graph visualization
  */
 export interface PhysicalEdge {
@@ -61,10 +61,4 @@ export interface IPsecEdge {
   local_interface: string
   remote_interface: string
   tunnel_interfaces: string[]
-}
-
-export interface SwitchedVlanEdge {
-  interface: string
-  remote_interface: string
-  vlan: number
 }

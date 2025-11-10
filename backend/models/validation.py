@@ -34,7 +34,7 @@ class InitIssue:
     parser_context: str = ""
 
     def to_dict(self) -> dict:
-        # source_linesを手動で安全に変換
+        # Safely convert source_lines manually
         result = {
             "nodes": self.nodes,
             "source_lines": self.source_lines if isinstance(self.source_lines, list) else [],

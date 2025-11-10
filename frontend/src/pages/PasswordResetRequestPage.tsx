@@ -13,6 +13,7 @@ import { useMutation } from '@tanstack/react-query'
 import { Network, AlertCircle, CheckCircle, ArrowLeft } from 'lucide-react'
 import { authAPI } from '../services/api'
 import { APP_VERSION, IS_PRODUCTION } from '../constants'
+import { logger } from '../utils/logger'
 
 export function PasswordResetRequestPage() {
   const { t } = useTranslation()
@@ -29,7 +30,7 @@ export function PasswordResetRequestPage() {
       // Keep email visible for user confirmation
     },
     onError: (error: any) => {
-      console.error('Password reset request failed:', error)
+      logger.error('Password reset request failed:', error)
     }
   })
 

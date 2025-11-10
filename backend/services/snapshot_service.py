@@ -7,6 +7,7 @@ Network configuration snapshot management service
 - Calculate snapshot directory sizes
 - List files within snapshots with metadata
 """
+import json
 import logging
 import os
 import shutil
@@ -249,6 +250,157 @@ class SnapshotService:
             raise FileNotFoundError(f"Snapshot '{safe_name}' not found")
 
         return snapshot_path
+
+    def get_layer1_topology(self, name: str) -> dict[str, Any] | None:
+        """
+        Get Layer1 topology JSON for a snapshot
+
+        Args:
+            name: Snapshot name
+
+        Returns:
+            Layer1 topology data wrapped in 'edges' key for frontend compatibility
+            Returns None if file doesn't exist
+
+        Raises:
+            FileNotFoundError: If snapshot does not exist
+        """
+        safe_name = secure_filename(name)
+        snapshot_path = self.snapshots_dir / safe_name
+
+        if not snapshot_path.exists():
+            raise FileNotFoundError(f"Snapshot '{safe_name}' not found")
+
+        layer1_file = snapshot_path / 'layer1_topology.json'
+
+        if not layer1_file.exists():
+            return None
+
+        with open(layer1_file, 'r') as f:
+            data = json.load(f)
+            # Batfish expects top-level array, but frontend expects {"edges": [...]}
+            # If data is already wrapped, return as-is; otherwise wrap it
+            if isinstance(data, dict) and 'edges' in data:
+                return data
+            elif isinstance(data, list):
+                return {'edges': data}
+            else:
+                logger.warning(f"Unexpected Layer1 topology format in '{safe_name}'")
+                return {'edges': []}
+
+    def save_layer1_topology(self, name: str, topology_data: dict[str, Any]) -> dict[str, Any]:
+        """
+        Save Layer1 topology JSON to snapshot directory in Batfish-compatible format
+
+        Batfish expects layer1_topology.json in batfish/ subdirectory with structure:
+        {"edges": [{"node1": {...}, "node2": {...}}, ...]}
+
+        Args:
+            name: Snapshot name
+            topology_data: Layer1 topology data with 'edges' key
+
+        Returns:
+            Save result metadata
+
+        Raises:
+            FileNotFoundError: If snapshot does not exist
+            ValueError: If topology data is invalid
+        """
+        safe_name = secure_filename(name)
+        snapshot_path = self.snapshots_dir / safe_name
+
+        if not snapshot_path.exists():
+            raise FileNotFoundError(f"Snapshot '{safe_name}' not found")
+
+        if 'edges' not in topology_data:
+            raise ValueError("Invalid topology format: missing 'edges' key")
+
+        batfish_dir = snapshot_path / 'batfish'
+        batfish_dir.mkdir(exist_ok=True)
+
+        layer1_file = batfish_dir / 'layer1_topology.json'
+        edges = topology_data.get('edges', [])
+
+        with open(layer1_file, 'w') as f:
+            json.dump({'edges': edges}, f, indent=2)
+
+        logger.info(f"Saved Layer1 topology for snapshot '{safe_name}' with {len(edges)} edges to batfish/layer1_topology.json")
+
+        return {
+            'snapshot_name': safe_name,
+            'edge_count': len(edges),
+            'file_size_bytes': layer1_file.stat().st_size
+        }
+
+    def delete_layer1_topology(self, name: str) -> None:
+        """
+        Delete Layer1 topology file from snapshot
+
+        Args:
+            name: Snapshot name
+
+        Raises:
+            FileNotFoundError: If snapshot or topology file does not exist
+        """
+        safe_name = secure_filename(name)
+        snapshot_path = self.snapshots_dir / safe_name
+
+        if not snapshot_path.exists():
+            raise FileNotFoundError(f"Snapshot '{safe_name}' not found")
+
+        layer1_file = snapshot_path / 'layer1_topology.json'
+
+        if not layer1_file.exists():
+            raise FileNotFoundError(f"Layer1 topology file not found for snapshot '{safe_name}'")
+
+        layer1_file.unlink()
+        logger.info(f"Deleted Layer1 topology for snapshot '{safe_name}'")
+
+    def get_snapshot_interfaces(self, name: str, batfish_service) -> dict[str, Any]:
+        """
+        Get all interfaces in a snapshot grouped by hostname
+
+        Args:
+            name: Snapshot name
+            batfish_service: BatfishService instance
+
+        Returns:
+            Dictionary mapping hostname to list of interfaces
+
+        Raises:
+            FileNotFoundError: If snapshot does not exist
+        """
+        safe_name = secure_filename(name)
+        snapshot_path = self.snapshots_dir / safe_name
+
+        if not snapshot_path.exists():
+            raise FileNotFoundError(f"Snapshot '{safe_name}' not found")
+
+        interfaces_data = batfish_service.get_interface_properties()
+
+        devices = {}
+        for interface in interfaces_data:
+            hostname = interface.get('hostname', '')
+            interface_name = interface.get('interface', '')
+            active = interface.get('active', False)
+            description = interface.get('description', '')
+
+            if hostname not in devices:
+                devices[hostname] = {
+                    'hostname': hostname,
+                    'interfaces': []
+                }
+
+            devices[hostname]['interfaces'].append({
+                'name': interface_name,
+                'active': active,
+                'description': description
+            })
+
+        for device in devices.values():
+            device['interfaces'].sort(key=lambda x: x['name'])
+
+        return devices
 
     def _get_directory_size(self, path: Path) -> int:
         """Calculate total size of directory in bytes"""

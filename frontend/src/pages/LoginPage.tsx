@@ -12,6 +12,7 @@ import { useTranslation } from 'react-i18next'
 import { Network, AlertCircle } from 'lucide-react'
 import { useAuthStore } from '../store/useAuthStore'
 import { APP_VERSION, IS_PRODUCTION } from '../constants'
+import { logger } from '../utils/logger'
 
 export function LoginPage() {
   const { t } = useTranslation()
@@ -43,7 +44,7 @@ export function LoginPage() {
       await login(username, password)
       navigate(from, { replace: true })
     } catch (err) {
-      console.error('Login failed:', err)
+      logger.error('Login failed:', err)
     }
   }
 

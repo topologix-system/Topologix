@@ -12,6 +12,7 @@ import { useTranslation } from 'react-i18next'
 import { User, AlertCircle, CheckCircle, ArrowLeft } from 'lucide-react'
 import { useUser, useUpdateUser } from '../hooks/useUsers'
 import { authAPI } from '../services/api'
+import { logger } from '../utils/logger'
 
 export function UserEditPage() {
   const { t } = useTranslation()
@@ -79,7 +80,7 @@ export function UserEditPage() {
         navigate('/admin/users')
       }, 2000)
     } catch (err: any) {
-      console.error('User update failed:', err)
+      logger.error('User update failed:', err)
     }
   }
 

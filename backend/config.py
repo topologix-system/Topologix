@@ -63,7 +63,10 @@ class Config:
     PERMANENT_SESSION_LIFETIME: int = 3600  # 1 hour
 
     # Security - JWT Configuration
-    JWT_ACCESS_TOKEN_EXPIRES: int = 3600  # 1 hour in seconds
+    JWT_ACCESS_TOKEN_EXPIRES: int = int(os.getenv(
+        'JWT_ACCESS_TOKEN_EXPIRES',
+        '3600'  # 1 hour in seconds (OWASP ASVS 3.5.2 L2 compliant - max 12 hours)
+    ))
     JWT_REFRESH_TOKEN_EXPIRES: int = 604800  # 7 days in seconds
     JWT_ALGORITHM: str = 'HS256'
 

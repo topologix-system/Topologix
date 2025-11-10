@@ -17,7 +17,7 @@ services:
 
   # Backend API Service (Python + Flask)
   backend:
-    image: ghcr.io/topologix-system/topologix/backend:latest
+    image: ${BACKEND_IMAGE:-ghcr.io/topologix-system/topologix/backend:latest}
     container_name: topologix-backend
     # Command: default to gunicorn for production; override BACKEND_COMMAND for dev
     # Production (default): gunicorn --worker-class gevent --bind 0.0.0.0:5000 app:app
@@ -51,6 +51,9 @@ services:
       - SECRET_KEY=${SECRET_KEY}
       - JWT_SECRET_KEY=${JWT_SECRET_KEY}
       - CSRF_SECRET_KEY=${CSRF_SECRET_KEY}
+
+      # JWT Access Token Expiration (1 hour default, OWASP ASVS L2 compliant)
+      - JWT_ACCESS_TOKEN_EXPIRES=${JWT_ACCESS_TOKEN_EXPIRES:-3600}
 
       # Login security (OSS defaults - secure but not too restrictive)
       - LOGIN_MAX_ATTEMPTS_PER_USER=${LOGIN_MAX_ATTEMPTS_PER_USER:-5}
@@ -105,7 +108,7 @@ services:
 
   # Frontend Web UI (React + Vite)
   frontend:
-    image: ghcr.io/topologix-system/topologix/frontend:latest
+    image: ${FRONTEND_IMAGE:-ghcr.io/topologix-system/topologix/frontend:latest}
     container_name: topologix-frontend
     ports:
       - "3000:80"

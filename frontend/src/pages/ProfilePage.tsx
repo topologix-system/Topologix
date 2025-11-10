@@ -12,6 +12,7 @@ import { Link } from 'react-router-dom'
 import { User, AlertCircle, CheckCircle, ArrowLeft } from 'lucide-react'
 import { useCurrentUser, useUpdateUser } from '../hooks/useUsers'
 import { PasswordChangeForm } from '../components/PasswordChangeForm'
+import { logger } from '../utils/logger'
 
 export function ProfilePage() {
   const { t } = useTranslation()
@@ -59,7 +60,7 @@ export function ProfilePage() {
       }, 3000)
     } catch (err: any) {
       // Error is stored in mutation.error
-      console.error('Profile update failed:', err)
+      logger.error('Profile update failed:', err)
     }
   }
 

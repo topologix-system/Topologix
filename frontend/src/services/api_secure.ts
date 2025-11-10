@@ -7,6 +7,8 @@
  */
 import axios, { AxiosInstance, AxiosError, AxiosRequestConfig } from 'axios'
 import { runtimeConfig } from '../config/runtimeConfig'
+import { isTokenExpired } from '../lib/auth/tokenManager'
+import { logger } from '../utils/logger'
 import type {
   APIResponse,
   NetworkInitializeRequest,
@@ -46,6 +48,7 @@ interface AuthState {
   accessToken: string | null
   refreshToken: string | null
   csrfToken: string | null
+  tokenExpiresAt: number | null
   user: {
     username: string
     roles: string[]
@@ -53,10 +56,13 @@ interface AuthState {
   } | null
 }
 
+const tokenExpiresAtStr = localStorage.getItem('token_expires_at')
+
 let authState: AuthState = {
   accessToken: localStorage.getItem('access_token'),
   refreshToken: localStorage.getItem('refresh_token'),
   csrfToken: sessionStorage.getItem('csrf_token'),
+  tokenExpiresAt: tokenExpiresAtStr ? parseInt(tokenExpiresAtStr, 10) : null,
   user: null
 }
 
@@ -65,7 +71,7 @@ if (storedUser) {
   try {
     authState.user = JSON.parse(storedUser)
   } catch (e) {
-    console.error('Failed to parse stored user data')
+    logger.error('Failed to parse stored user data')
   }
 }
 
@@ -79,7 +85,50 @@ const apiClient: AxiosInstance = axios.create({
 })
 
 apiClient.interceptors.request.use(
-  (config) => {
+  async (config) => {
+    // Check if token is expired BEFORE sending request
+    if (authState.accessToken && isTokenExpired(authState.accessToken)) {
+      logger.warn('[API Secure] Access token expired, attempting silent cleanup')
+
+      try {
+        // Fire-and-forget: Notify server (non-blocking)
+        // Use axios directly to bypass interceptor and prevent infinite loop
+        axios.post(
+          `${API_BASE_URL}/api/auth/logout`,
+          { reason: 'token_expired' },
+          {
+            headers: {
+              'Authorization': `Bearer ${authState.accessToken}`,
+              'X-CSRF-Token': authState.csrfToken || ''
+            },
+            timeout: 3000
+          }
+        ).catch(err => {
+          logger.warn('[API Secure] Server logout notification failed (non-blocking):', err.message)
+        })
+      } finally {
+        // Clear local state (always executes)
+        authState.accessToken = null
+        authState.refreshToken = null
+        authState.csrfToken = null
+        authState.tokenExpiresAt = null
+        authState.user = null
+
+        localStorage.removeItem('access_token')
+        localStorage.removeItem('refresh_token')
+        localStorage.removeItem('user')
+        localStorage.removeItem('token_expires_at')
+        sessionStorage.removeItem('csrf_token')
+
+        window.dispatchEvent(new CustomEvent('auth:unauthorized', {
+          detail: { reason: 'token_expired', timestamp: Date.now() }
+        }))
+      }
+
+      // Reject request to prevent sending expired token
+      return Promise.reject(new Error('Token expired'))
+    }
+
     if (authState.accessToken) {
       config.headers['Authorization'] = `Bearer ${authState.accessToken}`
     }
@@ -105,34 +154,52 @@ apiClient.interceptors.response.use(
     if (error.response?.status === 401 && !originalRequest._retry) {
       originalRequest._retry = true
 
-      if (authState.refreshToken) {
+      if (authState.refreshToken && !isTokenExpired(authState.refreshToken)) {
         try {
           const refreshResponse = await axios.post(
             `${API_BASE_URL}/api/auth/refresh`,
             { refresh_token: authState.refreshToken }
           )
 
-          const { access_token } = refreshResponse.data.data
+          const { access_token, expires_in } = refreshResponse.data.data
           authState.accessToken = access_token
+
+          // Calculate and store expiration time
+          const expiresAt = Date.now() + (expires_in * 1000)
+          authState.tokenExpiresAt = expiresAt
+
           localStorage.setItem('access_token', access_token)
+          localStorage.setItem('token_expires_at', expiresAt.toString())
 
           if (originalRequest.headers) {
             originalRequest.headers['Authorization'] = `Bearer ${access_token}`
           }
           return apiClient(originalRequest)
         } catch (refreshError) {
-          authAPI.logout()
-          window.location.href = '/login'
+          // Refresh failed - let React Query global handler deal with it
+          logger.error('[API Secure] Refresh token failed')
+          await authAPI.logout()
           return Promise.reject(refreshError)
         }
       } else {
-        window.location.href = '/login'
+        // No refresh token or expired - logout
+        logger.error('[API Secure] No valid refresh token available')
+        await authAPI.logout()
       }
     }
 
-    if (error.response?.status === 403) {
-      const errorData = error.response.data as any
-      if (errorData?.message?.includes('CSRF')) {
+    if (error.response?.status === 403 && !originalRequest._retry) {
+      originalRequest._retry = true
+
+      interface CSRFErrorResponse {
+        message?: string
+        error?: string
+      }
+
+      const errorData = error.response.data as CSRFErrorResponse
+      const message = (errorData?.message || errorData?.error || '').toLowerCase()
+
+      if (message.includes('csrf')) {
         try {
           const csrfResponse = await apiClient.get('/auth/csrf-token')
           authState.csrfToken = csrfResponse.data.data.csrf_token
@@ -143,24 +210,24 @@ apiClient.interceptors.response.use(
           }
           return apiClient(originalRequest)
         } catch (csrfError) {
-          console.error('Failed to refresh CSRF token')
+          logger.error('Failed to refresh CSRF token')
         }
       } else {
-        console.error('Permission denied:', errorData?.message)
+        logger.error('Permission denied:', message)
       }
     }
 
     if (error.response?.status === 429) {
       const retryAfter = error.response.headers['retry-after']
-      console.error(`Rate limit exceeded. Retry after ${retryAfter} seconds`)
+      logger.error(`Rate limit exceeded. Retry after ${retryAfter} seconds`)
     }
 
     if (error.response) {
-      console.error('API Error:', error.response.status, error.response.data)
+      logger.error('API Error:', error.response.status, error.response.data)
     } else if (error.request) {
-      console.error('Network Error: No response from server')
+      logger.error('Network Error: No response from server')
     } else {
-      console.error('Request Error:', error.message)
+      logger.error('Request Error:', error.message)
     }
 
     return Promise.reject(error)
@@ -191,9 +258,14 @@ export const authAPI = {
     authState.csrfToken = data.csrf_token
     authState.user = data.user
 
+    // Calculate and store token expiration
+    const expiresAt = Date.now() + (data.expires_in * 1000)
+    authState.tokenExpiresAt = expiresAt
+
     localStorage.setItem('access_token', data.access_token)
     localStorage.setItem('refresh_token', data.refresh_token)
     localStorage.setItem('user', JSON.stringify(data.user))
+    localStorage.setItem('token_expires_at', expiresAt.toString())
     sessionStorage.setItem('csrf_token', data.csrf_token)
 
     return data
@@ -203,18 +275,20 @@ export const authAPI = {
     try {
       await apiClient.post('/auth/logout')
     } catch (e) {
-      console.error('Logout error:', e)
+      logger.error('Logout error:', e)
     } finally {
       authState = {
         accessToken: null,
         refreshToken: null,
         csrfToken: null,
+        tokenExpiresAt: null,
         user: null
       }
 
       localStorage.removeItem('access_token')
       localStorage.removeItem('refresh_token')
       localStorage.removeItem('user')
+      localStorage.removeItem('token_expires_at')
       sessionStorage.removeItem('csrf_token')
     }
   },
@@ -224,7 +298,11 @@ export const authAPI = {
   },
 
   isAuthenticated() {
-    return !!authState.accessToken
+    // Check both token existence AND expiration
+    if (!authState.accessToken) return false
+
+    // Use token expiration check
+    return !isTokenExpired(authState.accessToken)
   },
 
   hasRole(role: string) {

@@ -305,7 +305,6 @@
       "ipOwners": "IP Owners",
       "layer3Edges": "Layer 3 Edges",
       "physicalEdges": "Physical Edges",
-      "switchedVlanEdges": "Switched VLAN Edges",
       "forwardingLoops": "Forwarding Loops",
       "nodeProperties": "Node Properties",
       "interfaceProperties": "Interface Properties",
@@ -377,6 +376,72 @@
     "filesCount": "{{count}} files",
     "lastModified": "Last modified: {{date}}"
   },
+  "comparison": {
+    "title": "Snapshot Comparison",
+    "description": "Compare network configurations between two snapshots",
+    "selectSnapshots": "Select Snapshots to Compare",
+    "baseSnapshot": "Base Snapshot (Before)",
+    "comparisonSnapshot": "Comparison Snapshot (After)",
+    "selectBase": "-- Select Base Snapshot --",
+    "selectComparison": "-- Select Comparison Snapshot --",
+    "compareButton": "Compare Snapshots",
+    "comparing": "Comparing...",
+    "noResults": "No comparison results yet",
+    "selectToCompare": "Select two snapshots and click Compare to see differences",
+    "tabs": {
+      "nodes": "Nodes",
+      "topology": "Topology",
+      "routes": "Routes",
+      "reachability": "Reachability"
+    },
+    "summary": {
+      "nodeChanges": "Node Changes",
+      "topologyChanges": "Topology Changes",
+      "routeChanges": "Route Changes",
+      "reachability": "Reachability",
+      "changesDetected": "changes detected",
+      "added": "added",
+      "removed": "removed",
+      "modified": "modified"
+    },
+    "nodes": {
+      "title": "Node Changes",
+      "addedNodes": "Added Nodes ({{count}})",
+      "removedNodes": "Removed Nodes ({{count}})",
+      "noChanges": "No node changes detected"
+    },
+    "topology": {
+      "title": "Topology Changes (Edges)",
+      "addedEdges": "Added Edges ({{count}})",
+      "removedEdges": "Removed Edges ({{count}})",
+      "noChanges": "No topology changes detected"
+    },
+    "routes": {
+      "title": "Routing Table Changes",
+      "addedRoutes": "Added Routes ({{count}})",
+      "removedRoutes": "Removed Routes ({{count}})",
+      "modifiedRoutes": "Modified Routes ({{count}})",
+      "noChanges": "No routing table changes detected",
+      "fields": {
+        "node": "Node",
+        "vrf": "VRF",
+        "network": "Network",
+        "nextHop": "Next Hop",
+        "protocol": "Protocol",
+        "change": "Change"
+      }
+    },
+    "reachability": {
+      "title": "Reachability Changes",
+      "changeType": "Change Type",
+      "noChanges": "No reachability changes detected"
+    },
+    "errors": {
+      "selectBoth": "Please select both base and comparison snapshots",
+      "selectDifferent": "Please select different snapshots to compare",
+      "comparisonFailed": "Comparison failed: {{message}}"
+    }
+  },
   "topologyViewer": {
     "title": "Topology Viewer",
     "loading": "Loading topology...",
@@ -394,20 +459,21 @@
     "layers": {
       "title": "Layers",
       "physical": "Physical",
+      "layer1": "Layer 1 (Manual)",
       "layer3": "Layer 3",
       "ospf": "OSPF",
       "bgp": "BGP",
       "vxlan": "VXLAN",
       "eigrp": "EIGRP",
       "isis": "IS-IS",
-      "ipsec": "IPsec",
-      "switchedVlan": "Switched VLAN"
+      "ipsec": "IPsec"
     },
     "controls": {
       "zoomIn": "Zoom In",
       "zoomOut": "Zoom Out",
       "fit": "Fit to Screen",
       "fitToScreen": "Fit topology to screen",
+      "arrangeNodes": "Arrange Nodes",
       "refresh": "Refresh topology data",
       "reset": "Reset View",
       "export": "Export",
@@ -591,5 +657,55 @@
     "invalidTokenMessage": "The password reset link is invalid or missing. Please request a new one.",
     "requestNewLink": "Request New Link",
     "resetSuccess": "Your password has been reset successfully. You can now login with your new password."
+  },
+  "layer1Editor": {
+    "title": "Layer 1 Topology Editor",
+    "back": "Back to Snapshots",
+    "saveAll": "Save All Changes",
+    "saving": "Saving...",
+    "saved": "Saved successfully",
+    "unsavedChanges": "You have unsaved changes",
+    "loading": "Loading...",
+    "connections": "Connections",
+    "devices": "Devices",
+    "addConnection": "Add Connection",
+    "editConnection": "Edit Connection",
+    "noConnections": "No connections defined yet. Add a connection to get started.",
+    "noDevices": "No devices found in snapshot",
+    "noInterfaces": "No interfaces available",
+    "totalConnections": "{{count}} connection",
+    "totalConnections_other": "{{count}} connections",
+    "totalDevices": "{{count}} device",
+    "totalDevices_other": "{{count}} devices",
+    "interfaceCount": "{{count}} interface",
+    "interfaceCount_other": "{{count}} interfaces",
+    "node1": "Node 1",
+    "node2": "Node 2",
+    "hostname": "Hostname",
+    "interface": "Interface",
+    "selectHostname": "Select or search hostname",
+    "selectInterface": "Select or search interface",
+    "device1": "Device 1",
+    "device2": "Device 2",
+    "interface1": "Interface 1",
+    "interface2": "Interface 2",
+    "actions": "Actions",
+    "add": "Add",
+    "update": "Update",
+    "edit": "Edit",
+    "delete": "Delete",
+    "confirmDelete": "Are you sure you want to delete this connection?",
+    "active": "Active",
+    "inactive": "Inactive",
+    "expandAll": "Expand All",
+    "collapseAll": "Collapse All",
+    "noResults": "No results found",
+    "cancel": "Cancel",
+    "errors": {
+      "noSnapshot": "No snapshot selected",
+      "selfConnection": "Cannot connect device to itself",
+      "saveFailed": "Failed to save topology",
+      "unknown": "An unknown error occurred"
+    }
   }
 }

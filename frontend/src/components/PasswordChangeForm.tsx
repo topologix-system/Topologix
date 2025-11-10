@@ -11,6 +11,7 @@ import { useTranslation } from 'react-i18next'
 import { AlertCircle, CheckCircle, Lock } from 'lucide-react'
 import { useChangePassword } from '../hooks/useUsers'
 import { PasswordPolicyHelper } from './PasswordPolicyHelper'
+import { logger } from '../utils/logger'
 
 interface PasswordChangeFormProps {
   userId: number
@@ -61,7 +62,7 @@ export function PasswordChangeForm({ userId }: PasswordChangeFormProps) {
       setNewPassword('')
       setConfirmPassword('')
     } catch (err: any) {
-      console.error('Password change failed:', err)
+      logger.error('Password change failed:', err)
     }
   }
 

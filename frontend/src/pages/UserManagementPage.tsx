@@ -12,6 +12,7 @@ import { Users, AlertCircle, ArrowLeft } from 'lucide-react'
 import { useUsers, useCurrentUser, useDeleteUser } from '../hooks/useUsers'
 import { UserTable } from '../components/UserTable'
 import { authAPI } from '../services/api'
+import { logger } from '../utils/logger'
 
 export function UserManagementPage() {
   const { t } = useTranslation()
@@ -34,7 +35,7 @@ export function UserManagementPage() {
     try {
       await deleteUserMutation.mutateAsync(userId)
     } catch (err: any) {
-      console.error('User deletion failed:', err)
+      logger.error('User deletion failed:', err)
     }
   }
 

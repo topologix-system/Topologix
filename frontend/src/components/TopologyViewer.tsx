@@ -3,6 +3,7 @@ import {
   ZoomIn,
   ZoomOut,
   Maximize,
+  Maximize2,
   Download,
   RefreshCw,
   Layers,
@@ -11,6 +12,7 @@ import {
 } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
 
+import { logger } from '../utils/logger'
 import { useCytoscapeLazy } from '../hooks/useCytoscapeLazy'
 import { useAllNetworkData } from '../hooks'
 import { useUIStore, usePositionStore, useSnapshotStore } from '../store'
@@ -55,27 +57,27 @@ export const TopologyViewer = memo(function TopologyViewer() {
    */
   const handleContainerRef = useCallback(
     async (node: HTMLDivElement | null) => {
-      console.log('[TopologyViewer] handleContainerRef called, node:', !!node)
+      logger.log('[TopologyViewer] handleContainerRef called, node:', !!node)
 
       if (!node) {
-        console.log('[TopologyViewer] No container node provided')
+        logger.log('[TopologyViewer] No container node provided')
         return
       }
 
       containerRef.current = node
 
       if (cy.cyRef.current) {
-        console.log('[TopologyViewer] Cytoscape instance already exists, skipping initialization')
+        logger.log('[TopologyViewer] Cytoscape instance already exists, skipping initialization')
         cytoscapeInitializedRef.current = true
         return
       }
 
       if (isUpdatingRef.current) {
-        console.log('[TopologyViewer] Already initializing, skipping')
+        logger.log('[TopologyViewer] Already initializing, skipping')
         return
       }
 
-      console.log('[TopologyViewer] Initializing Cytoscape')
+      logger.log('[TopologyViewer] Initializing Cytoscape')
       isUpdatingRef.current = true
       cytoscapeInitializedRef.current = false
 
@@ -83,19 +85,20 @@ export const TopologyViewer = memo(function TopologyViewer() {
         const instance = await cy.initialize(node, [])
 
         if (!instance) {
-          console.error('[TopologyViewer] Failed to initialize Cytoscape')
+          logger.error('[TopologyViewer] Failed to initialize Cytoscape')
           cytoscapeInitializedRef.current = false
           isUpdatingRef.current = false
           return
         }
 
-        console.log('[TopologyViewer] Cytoscape initialized successfully')
+        logger.log('[TopologyViewer] Cytoscape initialized successfully')
         cytoscapeInitializedRef.current = true
 
         if (networkData) {
-          console.log('[TopologyViewer] Network data available, adding elements')
+          logger.log('[TopologyViewer] Network data available, adding elements')
           const elements = buildGraphElements(networkData.node_properties, {
             physical: networkData.edges,
+            layer1: networkData.layer1_edges,
             layer3: networkData.layer3_edges,
             ospf: networkData.ospf_edges,
             bgp: networkData.bgp_edges,
@@ -103,9 +106,8 @@ export const TopologyViewer = memo(function TopologyViewer() {
             eigrp: networkData.eigrp_edges,
             isis: networkData.isis_edges,
             ipsec: networkData.ipsec_edges,
-            'switched-vlan': networkData.switched_vlan_edges,
           }, visibleLayers)
-          console.log('[TopologyViewer] Built', elements.nodes.length, 'nodes and', elements.edges.length, 'edges')
+          logger.log('[TopologyViewer] Built', elements.nodes.length, 'nodes and', elements.edges.length, 'edges')
           cy.updateElements([...elements.nodes, ...elements.edges])
         }
       } finally {
@@ -120,13 +122,14 @@ export const TopologyViewer = memo(function TopologyViewer() {
    * Preserves current layout and zoom level
    */
   const handleRefresh = useCallback(() => {
-    console.log('[TopologyViewer] Refresh button clicked')
+    logger.log('[TopologyViewer] Refresh button clicked')
     refetch()
 
     if (networkData) {
-      console.log('[TopologyViewer] Refreshing with existing network data')
+      logger.log('[TopologyViewer] Refreshing with existing network data')
       const elements = buildGraphElements(networkData.node_properties, {
         physical: networkData.edges,
+        layer1: networkData.layer1_edges,
         layer3: networkData.layer3_edges,
         ospf: networkData.ospf_edges,
         bgp: networkData.bgp_edges,
@@ -134,13 +137,12 @@ export const TopologyViewer = memo(function TopologyViewer() {
         eigrp: networkData.eigrp_edges,
         isis: networkData.isis_edges,
         ipsec: networkData.ipsec_edges,
-        'switched-vlan': networkData.switched_vlan_edges,
       }, visibleLayers)
 
-      console.log('[TopologyViewer] Refresh: updating with', elements.nodes.length, 'nodes and', elements.edges.length, 'edges')
+      logger.log('[TopologyViewer] Refresh: updating with', elements.nodes.length, 'nodes and', elements.edges.length, 'edges')
       cy.updateElements([...elements.nodes, ...elements.edges])
     } else {
-      console.log('[TopologyViewer] No network data to refresh')
+      logger.log('[TopologyViewer] No network data to refresh')
     }
   }, [networkData, cy, refetch, visibleLayers])
 
@@ -150,19 +152,19 @@ export const TopologyViewer = memo(function TopologyViewer() {
    * IMPORTANT: Data fetching is done via React Query, not useEffect
    */
   useEffect(() => {
-    console.log('[TopologyViewer] useEffect triggered for networkData update')
-    console.log('[TopologyViewer] networkData:', !!networkData, 'cytoscapeInitialized:', cytoscapeInitializedRef.current, 'cyRef:', !!cy.cyRef.current)
+    logger.log('[TopologyViewer] useEffect triggered for networkData update')
+    logger.log('[TopologyViewer] networkData:', !!networkData, 'cytoscapeInitialized:', cytoscapeInitializedRef.current, 'cyRef:', !!cy.cyRef.current)
 
     if (!networkData) {
-      console.log('[TopologyViewer] No network data available')
+      logger.log('[TopologyViewer] No network data available')
       return
     }
 
     if (!cy.cyRef.current) {
-      console.log('[TopologyViewer] Cytoscape instance not available')
+      logger.log('[TopologyViewer] Cytoscape instance not available')
 
       if (containerRef.current && !isUpdatingRef.current) {
-        console.log('[TopologyViewer] Container exists, triggering initialization')
+        logger.log('[TopologyViewer] Container exists, triggering initialization')
         cytoscapeInitializedRef.current = false
         handleContainerRef(containerRef.current)
       }
@@ -170,14 +172,15 @@ export const TopologyViewer = memo(function TopologyViewer() {
     }
 
     if (isUpdatingRef.current) {
-      console.log('[TopologyViewer] Initialization in progress, skipping update')
+      logger.log('[TopologyViewer] Initialization in progress, skipping update')
       return
     }
 
     // Build graph elements from all network data layers
-    console.log('[TopologyViewer] Building graph elements from network data')
+    logger.log('[TopologyViewer] Building graph elements from network data')
     const elements = buildGraphElements(networkData.node_properties, {
       physical: networkData.edges,
+      layer1: networkData.layer1_edges,
       layer3: networkData.layer3_edges,
       ospf: networkData.ospf_edges,
       bgp: networkData.bgp_edges,
@@ -185,7 +188,6 @@ export const TopologyViewer = memo(function TopologyViewer() {
       eigrp: networkData.eigrp_edges,
       isis: networkData.isis_edges,
       ipsec: networkData.ipsec_edges,
-      'switched-vlan': networkData.switched_vlan_edges,
     }, visibleLayers)
 
     // Check for saved node positions from previous snapshot view
@@ -194,18 +196,18 @@ export const TopologyViewer = memo(function TopologyViewer() {
 
     // Restore saved positions or apply automatic layout
     if (hasSavedPositions) {
-      console.log(`[TopologyViewer] Found ${Object.keys(savedPositions).length} saved positions for snapshot: ${currentSnapshotName}`)
-      console.log('[TopologyViewer] Updating graph WITHOUT layout (will restore saved positions)')
+      logger.log(`[TopologyViewer] Found ${Object.keys(savedPositions).length} saved positions for snapshot: ${currentSnapshotName}`)
+      logger.log('[TopologyViewer] Updating graph WITHOUT layout (will restore saved positions)')
       cy.updateElements([...elements.nodes, ...elements.edges], false)
 
-      console.log('[TopologyViewer] Restoring node positions immediately')
+      logger.log('[TopologyViewer] Restoring node positions immediately')
       cy.restoreNodePositions(savedPositions)
 
       setTimeout(() => {
         cy.fit()
       }, 50)
     } else {
-      console.log(`[TopologyViewer] No saved positions for snapshot: ${currentSnapshotName}, applying layout`)
+      logger.log(`[TopologyViewer] No saved positions for snapshot: ${currentSnapshotName}, applying layout`)
       cy.updateElements([...elements.nodes, ...elements.edges], true)
     }
   }, [networkData, cy, handleContainerRef, visibleLayers, currentSnapshotName, getPositions])
@@ -217,7 +219,7 @@ export const TopologyViewer = memo(function TopologyViewer() {
   useEffect(() => {
     return () => {
       if (cytoscapeInitializedRef.current && cy.cyRef.current) {
-        console.log('[TopologyViewer] Component unmounting, destroying Cytoscape')
+        logger.log('[TopologyViewer] Component unmounting, destroying Cytoscape')
         cy.destroy()
         cytoscapeInitializedRef.current = false
       }
@@ -230,15 +232,15 @@ export const TopologyViewer = memo(function TopologyViewer() {
    * Includes proper cleanup to prevent memory leaks
    */
   useEffect(() => {
-    console.log('[TopologyViewer] Setting up event listeners, initialized:', cytoscapeInitializedRef.current)
+    logger.log('[TopologyViewer] Setting up event listeners, initialized:', cytoscapeInitializedRef.current)
 
     if (!cy.cyRef.current || !cytoscapeInitializedRef.current) {
-      console.log('[TopologyViewer] Cytoscape not ready for event listeners')
+      logger.log('[TopologyViewer] Cytoscape not ready for event listeners')
       return
     }
 
     const instance = cy.cyRef.current
-    console.log('[TopologyViewer] Registering event listeners on Cytoscape instance')
+    logger.log('[TopologyViewer] Registering event listeners on Cytoscape instance')
 
     /**
      * Handle node selection with error handling and data validation
@@ -249,14 +251,14 @@ export const TopologyViewer = memo(function TopologyViewer() {
         const nodeId = event.target?.data?.('id')
 
         if (!nodeId) {
-          console.warn('[TopologyViewer] Node tapped but no ID found:', event.target)
+          logger.warn('[TopologyViewer] Node tapped but no ID found:', event.target)
           return
         }
 
-        console.log('[TopologyViewer] Node tapped:', nodeId)
+        logger.log('[TopologyViewer] Node tapped:', nodeId)
         setSelectedNode(nodeId)
       } catch (error) {
-        console.error('[TopologyViewer] Error handling node tap:', error, {
+        logger.error('[TopologyViewer] Error handling node tap:', error, {
           target: event.target,
           hasData: typeof event.target?.data === 'function'
         })
@@ -272,14 +274,14 @@ export const TopologyViewer = memo(function TopologyViewer() {
         const edgeId = event.target?.data?.('id')
 
         if (!edgeId) {
-          console.warn('[TopologyViewer] Edge tapped but no ID found:', event.target)
+          logger.warn('[TopologyViewer] Edge tapped but no ID found:', event.target)
           return
         }
 
-        console.log('[TopologyViewer] Edge tapped:', edgeId)
+        logger.log('[TopologyViewer] Edge tapped:', edgeId)
         setSelectedEdge(edgeId)
       } catch (error) {
-        console.error('[TopologyViewer] Error handling edge tap:', error, {
+        logger.error('[TopologyViewer] Error handling edge tap:', error, {
           target: event.target,
           hasData: typeof event.target?.data === 'function'
         })
@@ -293,12 +295,12 @@ export const TopologyViewer = memo(function TopologyViewer() {
     const handleBackgroundTap = (event: any) => {
       try {
         if (event.target === instance) {
-          console.log('[TopologyViewer] Background tapped, clearing selection')
+          logger.log('[TopologyViewer] Background tapped, clearing selection')
           setSelectedNode(null)
           setSelectedEdge(null)
         }
       } catch (error) {
-        console.error('[TopologyViewer] Error handling background tap:', error)
+        logger.error('[TopologyViewer] Error handling background tap:', error)
       }
     }
 
@@ -316,16 +318,16 @@ export const TopologyViewer = memo(function TopologyViewer() {
         // Save positions after 500ms delay (debounce)
         savePositionTimeoutRef.current = setTimeout(() => {
           if (!currentSnapshotName) {
-            console.log('[TopologyViewer] Cannot save positions: no snapshot selected')
+            logger.log('[TopologyViewer] Cannot save positions: no snapshot selected')
             return
           }
 
           const positions = cy.saveNodePositions()
           savePositions(currentSnapshotName, positions)
-          console.log(`[TopologyViewer] Node positions saved for snapshot: ${currentSnapshotName}`)
+          logger.log(`[TopologyViewer] Node positions saved for snapshot: ${currentSnapshotName}`)
         }, 500)
       } catch (error) {
-        console.error('[TopologyViewer] Error handling node free event:', error)
+        logger.error('[TopologyViewer] Error handling node free event:', error)
       }
     }
 
@@ -334,10 +336,10 @@ export const TopologyViewer = memo(function TopologyViewer() {
     instance.on('tap', handleBackgroundTap)
     instance.on('free', 'node', handleNodeFree)
 
-    console.log('[TopologyViewer] Event listeners registered successfully')
+    logger.log('[TopologyViewer] Event listeners registered successfully')
 
     return () => {
-      console.log('[TopologyViewer] Cleaning up event listeners')
+      logger.log('[TopologyViewer] Cleaning up event listeners')
 
       if (savePositionTimeoutRef.current) {
         clearTimeout(savePositionTimeoutRef.current)
@@ -350,12 +352,12 @@ export const TopologyViewer = memo(function TopologyViewer() {
           instance.off('tap', 'edge', handleEdgeTap)
           instance.off('tap', handleBackgroundTap)
           instance.off('free', 'node', handleNodeFree)
-          console.log('[TopologyViewer] Event listeners removed successfully')
+          logger.log('[TopologyViewer] Event listeners removed successfully')
         } catch (error) {
-          console.error('[TopologyViewer] Error removing event listeners:', error)
+          logger.error('[TopologyViewer] Error removing event listeners:', error)
         }
       } else {
-        console.log('[TopologyViewer] Cytoscape instance already destroyed, skipping cleanup')
+        logger.log('[TopologyViewer] Cytoscape instance already destroyed, skipping cleanup')
       }
     }
   }, [cy, cytoscapeInitializedRef.current, setSelectedNode, setSelectedEdge, currentSnapshotName, savePositions])
@@ -397,7 +399,7 @@ export const TopologyViewer = memo(function TopologyViewer() {
       }, 100)
     } catch (error) {
       const errorMessage = error instanceof Error ? error.message : t('topologyViewer.errors.exportFailed')
-      console.error('PNG Export Error:', error)
+      logger.error('PNG Export Error:', error)
       alert(`Export Failed: ${errorMessage}`)
     }
   }, [cy, t])
@@ -479,6 +481,15 @@ export const TopologyViewer = memo(function TopologyViewer() {
           <Maximize className="w-5 h-5" aria-hidden="true" />
           <span className="sr-only">{t('topologyViewer.controls.fitToScreen')}</span>
         </button>
+        <button
+          onClick={() => handleLayoutChange('cola-spaced')}
+          className="p-2 hover:bg-gray-100 rounded transition-colors focus:outline-none focus:ring-2 focus:ring-primary-600 focus:ring-offset-1"
+          aria-label={t('topologyViewer.controls.arrangeNodes')}
+          title="Arrange Nodes"
+        >
+          <Maximize2 className="w-5 h-5" aria-hidden="true" />
+          <span className="sr-only">{t('topologyViewer.controls.arrangeNodes')}</span>
+        </button>
         <div className="border-t border-gray-200 my-1" role="separator" aria-hidden="true" />
         <button
           onClick={handleRefresh}
@@ -528,6 +539,16 @@ export const TopologyViewer = memo(function TopologyViewer() {
                 className="w-4 h-4 text-primary-600 focus:ring-2 focus:ring-primary-600 focus:ring-offset-1 rounded"
               />
               <span className="text-sm text-gray-700">{t('topologyViewer.layers.physical')}</span>
+            </label>
+
+            <label className="flex items-center gap-2 cursor-pointer hover:bg-gray-50 px-2 py-1 rounded">
+              <input
+                type="checkbox"
+                checked={visibleLayers.has('layer1')}
+                onChange={() => toggleVisibleLayer('layer1')}
+                className="w-4 h-4 text-primary-600 focus:ring-2 focus:ring-primary-600 focus:ring-offset-1 rounded"
+              />
+              <span className="text-sm text-gray-700">{t('topologyViewer.layers.layer1')}</span>
             </label>
 
             <label className="flex items-center gap-2 cursor-pointer hover:bg-gray-50 px-2 py-1 rounded">
@@ -598,16 +619,6 @@ export const TopologyViewer = memo(function TopologyViewer() {
                 className="w-4 h-4 text-primary-600 focus:ring-2 focus:ring-primary-600 focus:ring-offset-1 rounded"
               />
               <span className="text-sm text-gray-700">{t('topologyViewer.layers.ipsec')}</span>
-            </label>
-
-            <label className="flex items-center gap-2 cursor-pointer hover:bg-gray-50 px-2 py-1 rounded">
-              <input
-                type="checkbox"
-                checked={visibleLayers.has('switched-vlan')}
-                onChange={() => toggleVisibleLayer('switched-vlan')}
-                className="w-4 h-4 text-primary-600 focus:ring-2 focus:ring-primary-600 focus:ring-offset-1 rounded"
-              />
-              <span className="text-sm text-gray-700">{t('topologyViewer.layers.switchedVlan')}</span>
             </label>
           </div>
         )}

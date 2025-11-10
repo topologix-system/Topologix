@@ -44,7 +44,6 @@ import {
   useLayer3Edges,
   useLayer1Topology,
   useLayer2Topology,
-  useSwitchedVlanEdges,
   useVXLANVNIProperties,
   useVXLANEdges,
   useIPSecSessionStatus,
@@ -199,7 +198,6 @@ export function NetworkAnalysisPanel() {
   // Topology queries
   const layer1Topology = useLayer1Topology()
   const layer2Topology = useLayer2Topology()
-  const switchedVlanEdges = useSwitchedVlanEdges()
   const vxlanVNI = useVXLANVNIProperties()
   const vxlanEdges = useVXLANEdges()
   const ipsecSessionStatus = useIPSecSessionStatus()
@@ -492,12 +490,6 @@ export function NetworkAnalysisPanel() {
               icon={<GitBranch className="w-5 h-5 text-blue-500" />}
               isLoading={layer3Edges.isLoading}
               data={layer3Edges.data}
-            />
-            <Section
-              title={t('analysis.sections.switchedVlanEdges')}
-              icon={<GitBranch className="w-5 h-5 text-indigo-500" />}
-              isLoading={switchedVlanEdges.isLoading}
-              data={switchedVlanEdges.data}
             />
             <Section
               title={t('analysis.sections.vxlanVniProperties')}

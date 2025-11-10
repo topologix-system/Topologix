@@ -305,7 +305,6 @@
       "ipOwners": "IP所有者",
       "layer3Edges": "レイヤー3 エッジ",
       "physicalEdges": "物理エッジ",
-      "switchedVlanEdges": "スイッチドVLANエッジ",
       "forwardingLoops": "転送ループ",
       "nodeProperties": "ノードプロパティ",
       "interfaceProperties": "インターフェースプロパティ",
@@ -377,6 +376,72 @@
     "filesCount": "{{count}} ファイル",
     "lastModified": "最終更新: {{date}}"
   },
+  "comparison": {
+    "title": "スナップショット比較",
+    "description": "2つのスナップショット間のネットワーク設定を比較",
+    "selectSnapshots": "比較するスナップショットを選択",
+    "baseSnapshot": "ベーススナップショット（変更前）",
+    "comparisonSnapshot": "比較スナップショット（変更後）",
+    "selectBase": "-- ベーススナップショットを選択 --",
+    "selectComparison": "-- 比較スナップショットを選択 --",
+    "compareButton": "スナップショットを比較",
+    "comparing": "比較中...",
+    "noResults": "比較結果がありません",
+    "selectToCompare": "2つのスナップショットを選択し、比較をクリックして差分を表示",
+    "tabs": {
+      "nodes": "ノード",
+      "topology": "トポロジ",
+      "routes": "ルート",
+      "reachability": "到達性"
+    },
+    "summary": {
+      "nodeChanges": "ノード変更",
+      "topologyChanges": "トポロジ変更",
+      "routeChanges": "ルート変更",
+      "reachability": "到達性",
+      "changesDetected": "変更検出",
+      "added": "追加",
+      "removed": "削除",
+      "modified": "変更"
+    },
+    "nodes": {
+      "title": "ノード変更",
+      "addedNodes": "追加されたノード（{{count}}）",
+      "removedNodes": "削除されたノード（{{count}}）",
+      "noChanges": "ノードの変更はありません"
+    },
+    "topology": {
+      "title": "トポロジ変更（エッジ）",
+      "addedEdges": "追加されたエッジ（{{count}}）",
+      "removedEdges": "削除されたエッジ（{{count}}）",
+      "noChanges": "トポロジの変更はありません"
+    },
+    "routes": {
+      "title": "ルーティングテーブル変更",
+      "addedRoutes": "追加されたルート（{{count}}）",
+      "removedRoutes": "削除されたルート（{{count}}）",
+      "modifiedRoutes": "変更されたルート（{{count}}）",
+      "noChanges": "ルーティングテーブルの変更はありません",
+      "fields": {
+        "node": "ノード",
+        "vrf": "VRF",
+        "network": "ネットワーク",
+        "nextHop": "ネクストホップ",
+        "protocol": "プロトコル",
+        "change": "変更"
+      }
+    },
+    "reachability": {
+      "title": "到達性変更",
+      "changeType": "変更タイプ",
+      "noChanges": "到達性の変更はありません"
+    },
+    "errors": {
+      "selectBoth": "ベースと比較の両方のスナップショットを選択してください",
+      "selectDifferent": "異なるスナップショットを選択してください",
+      "comparisonFailed": "比較失敗: {{message}}"
+    }
+  },
   "topologyViewer": {
     "title": "トポロジービューアー",
     "loading": "トポロジーを読み込み中...",
@@ -394,20 +459,21 @@
     "layers": {
       "title": "レイヤー",
       "physical": "物理層",
+      "layer1": "レイヤー1（手動設定）",
       "layer3": "レイヤー3",
       "ospf": "OSPF",
       "bgp": "BGP",
       "vxlan": "VXLAN",
       "eigrp": "EIGRP",
       "isis": "IS-IS",
-      "ipsec": "IPsec",
-      "switchedVlan": "スイッチドVLAN"
+      "ipsec": "IPsec"
     },
     "controls": {
       "zoomIn": "拡大",
       "zoomOut": "縮小",
       "fit": "画面に合わせる",
       "fitToScreen": "トポロジーを画面に合わせる",
+      "arrangeNodes": "ノード配置",
       "refresh": "トポロジーデータを更新",
       "reset": "ビューをリセット",
       "export": "エクスポート",
@@ -591,5 +657,52 @@
     "invalidTokenMessage": "パスワードリセットリンクが無効または不足しています。新しいリンクを要求してください。",
     "requestNewLink": "新しいリンクを要求",
     "resetSuccess": "パスワードが正常にリセットされました。新しいパスワードでログインできます。"
+  },
+  "layer1Editor": {
+    "title": "レイヤー1トポロジーエディタ",
+    "back": "スナップショット一覧に戻る",
+    "saveAll": "すべての変更を保存",
+    "saving": "保存中...",
+    "saved": "保存されました",
+    "unsavedChanges": "未保存の変更があります",
+    "loading": "読み込み中...",
+    "connections": "接続",
+    "devices": "デバイス",
+    "addConnection": "接続を追加",
+    "editConnection": "接続を編集",
+    "noConnections": "接続が定義されていません。接続を追加して開始してください。",
+    "noDevices": "スナップショットにデバイスが見つかりません",
+    "noInterfaces": "使用可能なインターフェースがありません",
+    "totalConnections": "{{count}}件の接続",
+    "totalDevices": "{{count}}台のデバイス",
+    "interfaceCount": "{{count}}個のインターフェース",
+    "node1": "ノード1",
+    "node2": "ノード2",
+    "hostname": "ホスト名",
+    "interface": "インターフェース",
+    "selectHostname": "ホスト名を選択または検索",
+    "selectInterface": "インターフェースを選択または検索",
+    "device1": "デバイス1",
+    "device2": "デバイス2",
+    "interface1": "インターフェース1",
+    "interface2": "インターフェース2",
+    "actions": "操作",
+    "add": "追加",
+    "update": "更新",
+    "edit": "編集",
+    "delete": "削除",
+    "confirmDelete": "この接続を削除してもよろしいですか？",
+    "active": "有効",
+    "inactive": "無効",
+    "expandAll": "すべて展開",
+    "collapseAll": "すべて折りたたむ",
+    "noResults": "結果が見つかりません",
+    "cancel": "キャンセル",
+    "errors": {
+      "noSnapshot": "スナップショットが選択されていません",
+      "selfConnection": "デバイスを自分自身に接続することはできません",
+      "saveFailed": "トポロジーの保存に失敗しました",
+      "unknown": "不明なエラーが発生しました"
+    }
   }
 }

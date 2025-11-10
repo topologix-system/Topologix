@@ -6,9 +6,10 @@
  * - All queries depend on active snapshot selection from Zustand store
  */
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
-import { networkAPI } from '../services/api'
+import { networkAPI, authAPI } from '../services/api'
 import type { NetworkInitializeRequest } from '../types'
 import { useSnapshotStore } from '../store'
+import { useAuthStore } from '../store/useAuthStore'
 
 /**
  * Query key factory for network-related React Query caches
@@ -30,11 +31,16 @@ export const networkKeys = {
  * Query backend health status with automatic polling
  * Refetches every 60 seconds to monitor backend availability
  * Used in application header for connection status indicator
+ * Only polls when authentication is disabled or user is authenticated (reactive)
  */
 export function useHealth() {
+  // Zustand store subscription - reactive to auth state changes
+  const isAuthenticated = useAuthStore((state) => state.isAuthenticated)
+
   return useQuery({
     queryKey: networkKeys.health(),
     queryFn: () => networkAPI.health(),
+    enabled: !authAPI.isAuthEnabled() || isAuthenticated,
     staleTime: 30 * 1000,
     gcTime: 60 * 1000,
     refetchInterval: 60 * 1000,

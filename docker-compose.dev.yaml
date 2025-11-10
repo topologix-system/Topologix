@@ -1,4 +1,5 @@
 services:
+  # Batfish Network Analysis Service
   batfish:
     image: batfish/allinone:latest
     container_name: batfish
@@ -8,13 +9,14 @@ services:
       - "9997:9997"
     volumes:
       - batfish-data:/data
-      - ./snapshots:/notebooks/snapshots
-      - ./backend/snapshots:/snapshots
+      - snapshots-data:/notebooks/snapshots
     networks:
       - topologix-network
     restart: unless-stopped
 
+  # Backend API Service (Python + Flask)
   backend:
+    # override.yml の build が優先される（image は無視される）
     build:
       context: ./backend
       dockerfile: Dockerfile
@@ -22,12 +24,12 @@ services:
     command:
       - /bin/sh
       - -c
-      - ${BACKEND_COMMAND:-python app.py}
+      - ${BACKEND_COMMAND:-gunicorn --worker-class gevent --bind 0.0.0.0:5000 app:app}
     ports:
       - "5000:5000"
     environment:
-      - FLASK_ENV=${FLASK_ENV:-development}
-      - FLASK_DEBUG=${FLASK_DEBUG:-True}
+      - FLASK_ENV=${FLASK_ENV:-production}
+      - FLASK_DEBUG=${FLASK_DEBUG:-False}
       - BATFISH_HOST=${BATFISH_HOST:-batfish}
       - BATFISH_PORT=${BATFISH_PORT:-9996}
       - CORS_ORIGINS=${CORS_ORIGINS:-http://localhost:3000,http://127.0.0.1:3000}
@@ -37,6 +39,7 @@ services:
       - SECRET_KEY=${SECRET_KEY}
       - JWT_SECRET_KEY=${JWT_SECRET_KEY}
       - CSRF_SECRET_KEY=${CSRF_SECRET_KEY}
+      - JWT_ACCESS_TOKEN_EXPIRES=${JWT_ACCESS_TOKEN_EXPIRES:-3600}
       - LOGIN_MAX_ATTEMPTS_PER_USER=${LOGIN_MAX_ATTEMPTS_PER_USER:-5}
       - LOGIN_MAX_ATTEMPTS_PER_IP=${LOGIN_MAX_ATTEMPTS_PER_IP:-10}
       - LOGIN_RATE_WINDOW_MINUTES=${LOGIN_RATE_WINDOW_MINUTES:-15}
@@ -53,11 +56,13 @@ services:
       - PASSWORD_RESET_TOKEN_EXPIRY=${PASSWORD_RESET_TOKEN_EXPIRY:-3600}
       - PASSWORD_RESET_URL_BASE=${PASSWORD_RESET_URL_BASE:-http://localhost:3000}
       - TRUSTED_PROXY_COUNT=${TRUSTED_PROXY_COUNT:-1}
+    # volumes はマージされる（元の3つ + override の2つ）
     volumes:
-      - ./backend:/app
-      - ./snapshots:/snapshots
+      - snapshots-data:/snapshots
       - backend-db:/app/data
       - flask-sessions:/app/flask_session
+      - ./backend:/app
+      - ./snapshots:/app/snapshots
     networks:
       - topologix-network
     depends_on:
@@ -70,23 +75,18 @@ services:
       retries: 3
       start_period: 40s
 
+  # Frontend Web UI (React + Vite)
   frontend:
+    # override.yml の build が優先される（image は無視される）
     build:
       context: ./frontend
       dockerfile: Dockerfile
-      args:
-        VITE_API_BASE_URL: "${VITE_API_BASE_URL:-}"
-        VITE_AUTH_ENABLED: "${VITE_AUTH_ENABLED:-true}"
-        VITE_TIMEZONE: "${VITE_TIMEZONE:-Asia/Tokyo}"
     container_name: topologix-frontend
     ports:
       - "3000:80"
     environment:
       - VITE_API_BASE_URL=${VITE_API_BASE_URL:-}
       - VITE_AUTH_ENABLED=${VITE_AUTH_ENABLED:-true}
-    volumes:
-      - frontend-modules:/app/node_modules
-      - ./frontend:/app
     networks:
       - topologix-network
     depends_on:
@@ -103,9 +103,9 @@ networks:
 volumes:
   batfish-data:
     name: topologix-batfish-data
+  snapshots-data:
+    name: topologix-snapshots
   backend-db:
     name: topologix-backend-db
   flask-sessions:
     name: topologix-flask-sessions
-  frontend-modules:
-    name: topologix-frontend-modules

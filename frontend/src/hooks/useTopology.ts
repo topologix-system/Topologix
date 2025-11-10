@@ -18,7 +18,6 @@ export const topologyKeys = {
   ipsecSessionStatus: () => [...topologyKeys.all, 'ipsec-session-status'] as const,
   ipsecEdges: () => [...topologyKeys.all, 'ipsec-edges'] as const,
   ipsecPeerConfiguration: () => [...topologyKeys.all, 'ipsec-peer-configuration'] as const,
-  switchedVlanEdges: () => [...topologyKeys.all, 'switched-vlan-edges'] as const,
   interfaceMTU: () => [...topologyKeys.all, 'interface-mtu'] as const,
   ipSpaceAssignment: () => [...topologyKeys.all, 'ip-space-assignment'] as const,
 }
@@ -118,21 +117,6 @@ export function useIPSecPeerConfiguration(enabled = true) {
   return useQuery({
     queryKey: topologyKeys.ipsecPeerConfiguration(),
     queryFn: () => topologyAPI.getIPSecPeerConfiguration(),
-    enabled,
-    staleTime: 60000,
-  })
-}
-
-/**
- * Query switched VLAN edges
- * Returns VLAN trunk connections between switches
- * Layer 2 connectivity for VLAN propagation
- * @param enabled - Optional flag to conditionally enable query (default: true)
- */
-export function useSwitchedVlanEdges(enabled = true) {
-  return useQuery({
-    queryKey: topologyKeys.switchedVlanEdges(),
-    queryFn: () => topologyAPI.getSwitchedVlanEdges(),
     enabled,
     staleTime: 60000,
   })

@@ -1,4 +1,5 @@
-FROM python:3.11-slim
+# Fixed Python 3.11.11 for build reproducibility
+FROM python:3.11.11-slim
 
 WORKDIR /app
 

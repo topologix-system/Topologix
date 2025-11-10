@@ -13,6 +13,7 @@ import { Network, AlertCircle, CheckCircle } from 'lucide-react'
 import { useRegister } from '../hooks/useUsers'
 import { APP_VERSION, IS_PRODUCTION } from '../constants'
 import { PasswordPolicyHelper } from '../components/PasswordPolicyHelper'
+import { logger } from '../utils/logger'
 
 export function RegisterPage() {
   const { t } = useTranslation()
@@ -51,7 +52,7 @@ export function RegisterPage() {
       }, 2000)
     } catch (err: any) {
       // Error is stored in mutation.error
-      console.error('Registration failed:', err)
+      logger.error('Registration failed:', err)
     }
   }
 
