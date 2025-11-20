@@ -2,6 +2,10 @@
 
 Network Topology Visualization Tool powered by Batfish
 
+
+https://github.com/user-attachments/assets/7b45560a-ab6e-4245-8f22-57b41e195bb5
+
+
 ## What You Can Do
 
 - **Auto-generate network topology diagrams** - Just upload your config files and visualize your entire network
