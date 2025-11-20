@@ -163,15 +163,6 @@ export const defaultStyles: cytoscape.Stylesheet[] = [
       'width': 2,
     },
   },
-  {
-    selector: 'edge[edge_type="layer1"]',
-    style: {
-      'line-color': '#94a3b8',
-      'target-arrow-color': '#94a3b8',
-      'width': 2,
-      'line-style': 'solid',
-    },
-  },
 
   {
     selector: 'edge:selected',

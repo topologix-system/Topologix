@@ -2,7 +2,6 @@ import { useTranslation } from 'react-i18next'
 import { Router } from 'lucide-react'
 import { useNodes } from '../hooks'
 import { useUIStore } from '../store'
-import { logger } from '../utils/logger'
 
 /**
  * Node selector dropdown component
@@ -22,7 +21,7 @@ export function NodeSelector() {
    */
   const handleNodeChange = (event: React.ChangeEvent<HTMLSelectElement>) => {
     const nodeId = event.target.value
-    logger.log('[NodeSelector] Node selection changed:', nodeId)
+    console.log('[NodeSelector] Node selection changed:', nodeId)
 
     if (nodeId === '') {
       setSelectedNode(null)

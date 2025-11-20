@@ -6,7 +6,6 @@ JWT authentication and authorization
 - Password reset token generation and validation
 """
 import logging
-import os
 from datetime import datetime, timedelta, timezone
 from functools import wraps
 from typing import Optional, Dict, Any, List
@@ -123,9 +122,13 @@ class JWTManager:
         """
         self.secret_key = secret_key or secrets.token_urlsafe(32)
         self.algorithm = "HS256"
-        self.access_token_expires = timedelta(
-            seconds=int(os.getenv('JWT_ACCESS_TOKEN_EXPIRES', '3600'))  # 1 hour (OWASP ASVS L2 compliant)
-        )
+
+        # Read JWT access token expiration from config or use default (1 hour)
+        expires_seconds = 3600  # Default: 1 hour
+        if app and hasattr(app, 'config'):
+            expires_seconds = app.config.get('JWT_ACCESS_TOKEN_EXPIRES', 3600)
+        self.access_token_expires = timedelta(seconds=expires_seconds)
+
         self.refresh_token_expires = timedelta(days=7)
         self.token_blacklist = set()  # In production, use Redis or database
 

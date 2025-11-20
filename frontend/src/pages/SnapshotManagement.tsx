@@ -341,7 +341,7 @@ export function SnapshotManagement() {
                   Files in {selectedSnapshot}
                 </h2>
                 <Link
-                  to={`/snapshots/${selectedSnapshot}/layer1-topology`}
+                  to={`/snapshots/${selectedSnapshot}/layer1-editor`}
                   className="inline-flex items-center gap-2 px-4 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 transition-colors"
                 >
                   <Cable className="w-4 h-4" />

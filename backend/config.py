@@ -36,8 +36,8 @@ class Config:
     HOST: str = '127.0.0.1' if ENV == 'production' else '0.0.0.0'
     PORT: int = int(os.getenv('PORT', '5000'))
 
-    # Authentication - Optional (disabled by default for OSS distribution)
-    AUTH_ENABLED: bool = os.getenv('AUTH_ENABLED', 'false').lower() == 'true'
+    # Authentication - Optional (enabled by default for security)
+    AUTH_ENABLED: bool = os.getenv('AUTH_ENABLED', 'true').lower() == 'true'
     AUTH_DEFAULT_ADMIN_USER: str = os.getenv('AUTH_DEFAULT_ADMIN_USER', 'admin')
     AUTH_DEFAULT_ADMIN_PASS: str = os.getenv('AUTH_DEFAULT_ADMIN_PASS', '')  # Empty requires initial setup
     AUTH_FORCE_PASSWORD_CHANGE: bool = True  # Force password change on first login
@@ -55,6 +55,11 @@ class Config:
     _CSRF_SECRET_VALUE, _CSRF_SECRET_AUTO = _load_secret('CSRF_SECRET_KEY')
     CSRF_SECRET_KEY: str = _CSRF_SECRET_VALUE
     CSRF_SECRET_KEY_AUTO_GENERATED: bool = _CSRF_SECRET_AUTO
+
+    # Security - CSRF Mode Configuration
+    # 'session': Session-based synchronized token pattern (current implementation)
+    # 'double-submit': Stateless cookie-based double-submit pattern (long-term solution)
+    CSRF_MODE: str = os.getenv('CSRF_MODE', 'session')
 
     # Security - Session Configuration
     SESSION_COOKIE_SECURE: bool = ENV == 'production'
@@ -80,15 +85,13 @@ class Config:
     PASSWORD_MAX_AGE_DAYS: int = 90
 
     # Security - Login Rate Limiting (OSS defaults - secure but not too restrictive)
-    LOGIN_MAX_ATTEMPTS_PER_USER: int = int(os.getenv('LOGIN_MAX_ATTEMPTS_PER_USER', '5'))
     LOGIN_MAX_ATTEMPTS_PER_IP: int = int(os.getenv('LOGIN_MAX_ATTEMPTS_PER_IP', '10'))
     LOGIN_RATE_WINDOW_MINUTES: int = int(os.getenv('LOGIN_RATE_WINDOW_MINUTES', '15'))
     LOGIN_LOCKOUT_DURATION_MINUTES: int = int(os.getenv('LOGIN_LOCKOUT_DURATION_MINUTES', '30'))
-    LOGIN_IP_BLOCK_DURATION_MINUTES: int = int(os.getenv('LOGIN_IP_BLOCK_DURATION_MINUTES', '30'))
 
     # Security - Account Lockout
     ACCOUNT_LOCKOUT_THRESHOLD: int = int(os.getenv('ACCOUNT_LOCKOUT_THRESHOLD', '5'))
-    ACCOUNT_LOCKOUT_DURATION: int = int(os.getenv('ACCOUNT_LOCKOUT_DURATION', '1800'))  # 30 minutes in seconds
+    # Note: Lockout duration is configured via LOGIN_LOCKOUT_DURATION_MINUTES (in minutes)
 
     # Security - Reverse Proxy Configuration
     # Set to True when behind reverse proxy (Caddy/nginx) for proper IP address extraction

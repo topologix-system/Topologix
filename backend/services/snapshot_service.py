@@ -251,19 +251,27 @@ class SnapshotService:
 
         return snapshot_path
 
-    def get_layer1_topology(self, name: str) -> dict[str, Any] | None:
+    def _get_directory_size(self, path: Path) -> int:
+        """Calculate total size of directory in bytes"""
+        total = 0
+        for entry in path.rglob('*'):
+            if entry.is_file():
+                total += entry.stat().st_size
+        return total
+
+    def get_layer1_topology(self, name: str) -> dict[str, Any]:
         """
-        Get Layer1 topology JSON for a snapshot
+        Get Layer1 topology configuration for a snapshot
 
         Args:
             name: Snapshot name
 
         Returns:
-            Layer1 topology data wrapped in 'edges' key for frontend compatibility
-            Returns None if file doesn't exist
+            Layer1 topology data with edges array
 
         Raises:
             FileNotFoundError: If snapshot does not exist
+            ValueError: If layer1_topology.json contains invalid JSON
         """
         safe_name = secure_filename(name)
         snapshot_path = self.snapshots_dir / safe_name
@@ -271,33 +279,27 @@ class SnapshotService:
         if not snapshot_path.exists():
             raise FileNotFoundError(f"Snapshot '{safe_name}' not found")
 
-        layer1_file = snapshot_path / 'layer1_topology.json'
+        layer1_file = snapshot_path / 'batfish' / 'layer1_topology.json'
 
         if not layer1_file.exists():
-            return None
+            return {"edges": []}
 
-        with open(layer1_file, 'r') as f:
-            data = json.load(f)
-            # Batfish expects top-level array, but frontend expects {"edges": [...]}
-            # If data is already wrapped, return as-is; otherwise wrap it
-            if isinstance(data, dict) and 'edges' in data:
-                return data
-            elif isinstance(data, list):
-                return {'edges': data}
-            else:
-                logger.warning(f"Unexpected Layer1 topology format in '{safe_name}'")
-                return {'edges': []}
+        try:
+            with open(layer1_file, 'r', encoding='utf-8') as f:
+                topology = json.load(f)
+            logger.info(f"Loaded Layer1 topology for snapshot '{safe_name}'")
+            return topology
+        except json.JSONDecodeError as e:
+            logger.error(f"Invalid JSON in layer1_topology.json for '{safe_name}': {e}")
+            raise ValueError(f"Invalid Layer1 topology file: {e}")
 
     def save_layer1_topology(self, name: str, topology_data: dict[str, Any]) -> dict[str, Any]:
         """
-        Save Layer1 topology JSON to snapshot directory in Batfish-compatible format
-
-        Batfish expects layer1_topology.json in batfish/ subdirectory with structure:
-        {"edges": [{"node1": {...}, "node2": {...}}, ...]}
+        Save Layer1 topology configuration with comprehensive validation
 
         Args:
             name: Snapshot name
-            topology_data: Layer1 topology data with 'edges' key
+            topology_data: Layer1 topology data with edges array
 
         Returns:
             Save result metadata
@@ -312,35 +314,69 @@ class SnapshotService:
         if not snapshot_path.exists():
             raise FileNotFoundError(f"Snapshot '{safe_name}' not found")
 
+        # Validate topology data structure
+        if not isinstance(topology_data, dict):
+            raise ValueError("Topology data must be a JSON object")
+
         if 'edges' not in topology_data:
-            raise ValueError("Invalid topology format: missing 'edges' key")
+            raise ValueError("Topology data must contain 'edges' array")
 
+        if not isinstance(topology_data['edges'], list):
+            raise ValueError("'edges' must be an array")
+
+        # Validate each edge
+        for idx, edge in enumerate(topology_data['edges']):
+            if not isinstance(edge, dict):
+                raise ValueError(f"Edge at index {idx} must be an object")
+
+            if 'node1' not in edge or 'node2' not in edge:
+                raise ValueError(f"Edge at index {idx} must contain 'node1' and 'node2'")
+
+            for node_key in ['node1', 'node2']:
+                node = edge[node_key]
+                if not isinstance(node, dict):
+                    raise ValueError(f"Edge at index {idx}: '{node_key}' must be an object")
+
+                if 'hostname' not in node or 'interfaceName' not in node:
+                    raise ValueError(
+                        f"Edge at index {idx}: '{node_key}' must contain 'hostname' and 'interfaceName'"
+                    )
+
+        # Save to batfish/ directory only (Batfish reads from this location)
         batfish_dir = snapshot_path / 'batfish'
-        batfish_dir.mkdir(exist_ok=True)
-
         layer1_file = batfish_dir / 'layer1_topology.json'
-        edges = topology_data.get('edges', [])
 
-        with open(layer1_file, 'w') as f:
-            json.dump({'edges': edges}, f, indent=2)
+        try:
+            # Ensure batfish directory exists
+            batfish_dir.mkdir(exist_ok=True)
 
-        logger.info(f"Saved Layer1 topology for snapshot '{safe_name}' with {len(edges)} edges to batfish/layer1_topology.json")
+            # Write to batfish/ directory
+            with open(layer1_file, 'w', encoding='utf-8') as f:
+                json.dump(topology_data, f, indent=2, ensure_ascii=False)
 
-        return {
-            'snapshot_name': safe_name,
-            'edge_count': len(edges),
-            'file_size_bytes': layer1_file.stat().st_size
-        }
+            file_size = layer1_file.stat().st_size
+            edge_count = len(topology_data['edges'])
+
+            logger.info(f"Saved Layer1 topology for snapshot '{safe_name}': {edge_count} edges, {file_size} bytes")
+
+            return {
+                'snapshot_name': safe_name,
+                'edge_count': edge_count,
+                'file_size_bytes': file_size
+            }
+        except Exception as e:
+            logger.error(f"Failed to write layer1_topology.json for '{safe_name}': {e}")
+            raise
 
     def delete_layer1_topology(self, name: str) -> None:
         """
-        Delete Layer1 topology file from snapshot
+        Delete Layer1 topology configuration
 
         Args:
             name: Snapshot name
 
         Raises:
-            FileNotFoundError: If snapshot or topology file does not exist
+            FileNotFoundError: If snapshot or Layer1 file does not exist
         """
         safe_name = secure_filename(name)
         snapshot_path = self.snapshots_dir / safe_name
@@ -348,7 +384,7 @@ class SnapshotService:
         if not snapshot_path.exists():
             raise FileNotFoundError(f"Snapshot '{safe_name}' not found")
 
-        layer1_file = snapshot_path / 'layer1_topology.json'
+        layer1_file = snapshot_path / 'batfish' / 'layer1_topology.json'
 
         if not layer1_file.exists():
             raise FileNotFoundError(f"Layer1 topology file not found for snapshot '{safe_name}'")
@@ -358,14 +394,14 @@ class SnapshotService:
 
     def get_snapshot_interfaces(self, name: str, batfish_service) -> dict[str, Any]:
         """
-        Get all interfaces in a snapshot grouped by hostname
+        Get all interfaces for devices in a snapshot
 
         Args:
             name: Snapshot name
-            batfish_service: BatfishService instance
+            batfish_service: Batfish service instance
 
         Returns:
-            Dictionary mapping hostname to list of interfaces
+            Dictionary mapping hostnames to interface lists
 
         Raises:
             FileNotFoundError: If snapshot does not exist
@@ -376,36 +412,47 @@ class SnapshotService:
         if not snapshot_path.exists():
             raise FileNotFoundError(f"Snapshot '{safe_name}' not found")
 
+        # Check if snapshot is already initialized
+        # Only initialize if different snapshot or not initialized
+        if batfish_service.current_snapshot_name != safe_name:
+            logger.info(f"Initializing snapshot '{safe_name}' for Layer1 editor")
+            batfish_service.initialize_network(str(snapshot_path), snapshot_name=safe_name)
+
+            # After initialization, call node_properties first to ensure Batfish parsing is complete
+            # This gives Batfish time to fully analyze the snapshot before querying interfaces
+            _ = batfish_service.get_node_properties()
+        else:
+            logger.debug(f"Using existing Batfish session for snapshot '{safe_name}'")
+
+        # Get interface properties from Batfish
         interfaces_data = batfish_service.get_interface_properties()
 
-        devices = {}
-        for interface in interfaces_data:
-            hostname = interface.get('hostname', '')
-            interface_name = interface.get('interface', '')
-            active = interface.get('active', False)
-            description = interface.get('description', '')
+        # Group interfaces by hostname
+        result = {}
 
-            if hostname not in devices:
-                devices[hostname] = {
+        for interface in interfaces_data:
+            hostname = interface.get('hostname')
+            interface_name = interface.get('interface')
+
+            if not hostname or not interface_name:
+                continue
+
+            if hostname not in result:
+                result[hostname] = {
                     'hostname': hostname,
                     'interfaces': []
                 }
 
-            devices[hostname]['interfaces'].append({
+            result[hostname]['interfaces'].append({
                 'name': interface_name,
-                'active': active,
-                'description': description
+                'active': interface.get('active', False),
+                'description': interface.get('description', '')
             })
 
-        for device in devices.values():
+        # Sort interfaces by name for each device
+        for device in result.values():
             device['interfaces'].sort(key=lambda x: x['name'])
 
-        return devices
+        logger.info(f"Retrieved interfaces for snapshot '{safe_name}': {len(result)} devices")
 
-    def _get_directory_size(self, path: Path) -> int:
-        """Calculate total size of directory in bytes"""
-        total = 0
-        for entry in path.rglob('*'):
-            if entry.is_file():
-                total += entry.stat().st_size
-        return total
+        return result

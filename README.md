@@ -12,15 +12,15 @@ Network Topology Visualization Tool powered by Batfish
 
 ## Quick Start
 
-### 1. Prepare Environment
-
-Copy the example environment file:
+### 1. Clone and Configure
 
 ```bash
+git clone https://github.com/topologix-system/topologix.git
+cd topologix
 cp .env.example .env
 ```
 
-Edit `.env` if needed (see Environment Variables below).
+**Optional:** Edit `.env` to customize settings (see [Environment Variables](#environment-variables))
 
 ### 2. Start Services
 
@@ -28,17 +28,31 @@ Edit `.env` if needed (see Environment Variables below).
 docker compose up -d
 ```
 
+**Note:** First startup takes 2-3 minutes to build images and initialize services.
+
 On first startup, Topologix automatically initializes the database and creates Docker volumes. To reset to a clean state, run `docker compose down -v`.
 
 ### 3. Access Application
 
-- **Frontend**: http://localhost:3000
+Open http://localhost:3000 in your browser.
+
+**First-time setup:**
+- If `AUTH_ENABLED=true` (default): You'll see a setup wizard to create admin account
+- If `AUTH_ENABLED=false`: Direct access to the topology viewer
+
+**Additional endpoints:**
 - **Backend API**: http://localhost:5000/api
 - **Health Check**: http://localhost:5000/api/health
 
+### 4. Upload Network Configs
+
+See [Network Configuration Files](#network-configuration-files) section below.
+
 ## Environment Variables
 
-Edit `.env` to configure the application. Key settings:
+Configure Topologix by editing `.env`. See [.env.example](.env.example) for complete documentation.
+
+### Key Configuration Variables
 
 ### Backend
 
@@ -78,6 +92,33 @@ Supported databases:
 | `VITE_API_BASE_URL` | Backend API URL | `http://localhost:5000` |
 | `VITE_AUTH_ENABLED` | Enable authentication (must match backend) | `true` |
 | `VITE_TIMEZONE` | Display timezone (IANA format) | `Asia/Tokyo` |
+
+### Quick Configuration Examples
+
+**Development (default):**
+```bash
+cp .env.example .env
+# No changes needed for basic testing
+```
+
+**Production deployment:**
+```bash
+cp .env.example .env
+# Edit .env and set:
+# - FLASK_ENV=production
+# - JWT_SECRET_KEY=<generate strong secret>
+# - CORS_ORIGINS=https://yourdomain.com
+# - DATABASE_URL=postgresql://... (recommended over SQLite)
+```
+
+**Disable authentication (testing only):**
+```bash
+# In .env:
+AUTH_ENABLED=false
+VITE_AUTH_ENABLED=false
+```
+
+For all variables and detailed explanations, see [.env.example](.env.example).
 
 ## Network Configuration Files
 

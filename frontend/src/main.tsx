@@ -1,18 +1,12 @@
 /**
- * Application entry point with optimized code splitting strategy
- * - Lazy loads all routes and panels to reduce initial bundle size for faster startup
- * - Configures React Query: 5min stale time, 10min cache, smart retry logic with exponential backoff
- * - React StrictMode intentionally double-mounts components in dev (see TopologyViewer cleanup hooks)
- * - Conditional React Query DevTools for development environment only
- * - Async i18n initialization for non-blocking language file loading
+ * Application entry point with lazy loading and React Query configuration
+ * See inline code for specific cache strategy and component mounting behavior
  */
 import React, { Suspense, lazy } from 'react'
 import ReactDOM from 'react-dom/client'
 import { createBrowserRouter, RouterProvider } from 'react-router-dom'
-import { QueryClient, QueryClientProvider, QueryCache, MutationCache } from '@tanstack/react-query'
+import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import './index.css'
-import { authAPI } from './services/api'
-import { logger } from './utils/logger'
 
 // Lazy load components for code splitting
 const Layout = lazy(() => import('./components/Layout').then(m => ({ default: m.Layout })))
@@ -40,48 +34,8 @@ const ReactQueryDevtools = lazy(() =>
 const loadI18n = () => import('./i18n/config')
 loadI18n() // Initialize i18n asynchronously
 
-// Type guard for axios error
-function isAxiosError(error: unknown): error is { response?: { status?: number } } {
-  return typeof error === 'object' && error !== null && 'response' in error
-}
-
-// Global error handler for 401 Unauthorized errors and token expiration
-const handleUnauthorizedError = (error: unknown) => {
-  // Check for Axios 401 errors
-  if (isAxiosError(error) && error.response?.status === 401) {
-    logger.error('[Global Error Handler] 401 Unauthorized - clearing auth state')
-
-    // Trigger custom event for unauthorized access (no API call to prevent infinite loop)
-    window.dispatchEvent(new CustomEvent('auth:unauthorized', {
-      detail: { source: 'global_handler', timestamp: Date.now() }
-    }))
-    return
-  }
-
-  // Check for token expiration errors from request interceptor
-  if (error instanceof Error && error.message === 'Token expired') {
-    logger.error('[Global Error Handler] Token expired error - clearing auth state')
-
-    // Trigger custom event for token expiration (same as 401 handling)
-    window.dispatchEvent(new CustomEvent('auth:unauthorized', {
-      detail: { source: 'interceptor_rejection', timestamp: Date.now() }
-    }))
-    return
-  }
-}
-
-// Create React Query client with global error handling and optimized cache strategy
+// Create React Query client with optimized cache strategy
 const queryClient = new QueryClient({
-  queryCache: new QueryCache({
-    onError: (error) => {
-      handleUnauthorizedError(error)
-    },
-  }),
-  mutationCache: new MutationCache({
-    onError: (error) => {
-      handleUnauthorizedError(error)
-    },
-  }),
   defaultOptions: {
     queries: {
       staleTime: 5 * 60 * 1000, // 5 minutes - increased for better performance
@@ -89,7 +43,7 @@ const queryClient = new QueryClient({
       refetchOnWindowFocus: false,
       refetchOnReconnect: 'always',
       retry: (failureCount, error: any) => {
-        // Only retry on network errors, not on 4xx errors (including 401)
+        // Only retry on network errors, not on 4xx errors
         if (error?.response?.status >= 400 && error?.response?.status < 500) {
           return false
         }
@@ -161,31 +115,11 @@ const router = createBrowserRouter([
     ],
   },
   {
-    path: '/snapshots/compare',
-    element: (
-      <Suspense fallback={<RouteLoadingFallback />}>
-        <ProtectedRoute>
-          <SnapshotComparison />
-        </ProtectedRoute>
-      </Suspense>
-    ),
-  },
-  {
     path: '/snapshots',
     element: (
       <Suspense fallback={<RouteLoadingFallback />}>
         <ProtectedRoute>
           <SnapshotManagement />
-        </ProtectedRoute>
-      </Suspense>
-    ),
-  },
-  {
-    path: '/snapshots/:snapshotName/layer1-topology',
-    element: (
-      <Suspense fallback={<RouteLoadingFallback />}>
-        <ProtectedRoute>
-          <Layer1TopologyEditor />
         </ProtectedRoute>
       </Suspense>
     ),
@@ -240,32 +174,33 @@ const router = createBrowserRouter([
       </Suspense>
     ),
   },
+  {
+    path: '/snapshots/:snapshotName/layer1-editor',
+    element: (
+      <Suspense fallback={<RouteLoadingFallback />}>
+        <ProtectedRoute>
+          <Layer1TopologyEditor />
+        </ProtectedRoute>
+      </Suspense>
+    ),
+  },
+  {
+    path: '/snapshots/compare',
+    element: (
+      <Suspense fallback={<RouteLoadingFallback />}>
+        <ProtectedRoute>
+          <SnapshotComparison />
+        </ProtectedRoute>
+      </Suspense>
+    ),
+  },
 ])
-
-// Component to handle global unauthorized events
-function AuthEventListener() {
-  React.useEffect(() => {
-    const handleUnauthorized = () => {
-      // Redirect to login page
-      window.location.href = '/login'
-    }
-
-    window.addEventListener('auth:unauthorized', handleUnauthorized)
-
-    return () => {
-      window.removeEventListener('auth:unauthorized', handleUnauthorized)
-    }
-  }, [])
-
-  return null
-}
 
 ReactDOM.createRoot(document.getElementById('root')!).render(
   // StrictMode intentionally double-mounts components in development
   // This is normal React behavior - see TopologyViewer cleanup hooks for handling
   <React.StrictMode>
     <QueryClientProvider client={queryClient}>
-      <AuthEventListener />
       <RouterProvider router={router} />
       {import.meta.env.DEV && (
         <Suspense fallback={null}>

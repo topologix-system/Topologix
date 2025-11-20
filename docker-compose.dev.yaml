@@ -16,7 +16,6 @@ services:
 
   # Backend API Service (Python + Flask)
   backend:
-    # override.yml の build が優先される（image は無視される）
     build:
       context: ./backend
       dockerfile: Dockerfile
@@ -36,13 +35,15 @@ services:
       - AUTH_ENABLED=${AUTH_ENABLED:-true}
       - AUTH_DEFAULT_ADMIN_USER=${AUTH_DEFAULT_ADMIN_USER:-admin}
       - AUTH_DEFAULT_ADMIN_PASS=${AUTH_DEFAULT_ADMIN_PASS}
+      - ALLOW_REGISTRATION=${ALLOW_REGISTRATION:-true}
       - SECRET_KEY=${SECRET_KEY}
       - JWT_SECRET_KEY=${JWT_SECRET_KEY}
       - CSRF_SECRET_KEY=${CSRF_SECRET_KEY}
+      - CSRF_MODE=${CSRF_MODE:-session}
       - JWT_ACCESS_TOKEN_EXPIRES=${JWT_ACCESS_TOKEN_EXPIRES:-3600}
-      - LOGIN_MAX_ATTEMPTS_PER_USER=${LOGIN_MAX_ATTEMPTS_PER_USER:-5}
       - LOGIN_MAX_ATTEMPTS_PER_IP=${LOGIN_MAX_ATTEMPTS_PER_IP:-10}
       - LOGIN_RATE_WINDOW_MINUTES=${LOGIN_RATE_WINDOW_MINUTES:-15}
+      - ACCOUNT_LOCKOUT_THRESHOLD=${ACCOUNT_LOCKOUT_THRESHOLD:-5}
       - LOGIN_LOCKOUT_DURATION_MINUTES=${LOGIN_LOCKOUT_DURATION_MINUTES:-30}
       - DATABASE_URL=${DATABASE_URL:-sqlite:////app/data/topologix.db}
       - EMAIL_PROVIDER=${EMAIL_PROVIDER:-console}
@@ -55,8 +56,8 @@ services:
       - SMTP_USE_TLS=${SMTP_USE_TLS:-true}
       - PASSWORD_RESET_TOKEN_EXPIRY=${PASSWORD_RESET_TOKEN_EXPIRY:-3600}
       - PASSWORD_RESET_URL_BASE=${PASSWORD_RESET_URL_BASE:-http://localhost:3000}
+      - BEHIND_REVERSE_PROXY=${BEHIND_REVERSE_PROXY:-false}
       - TRUSTED_PROXY_COUNT=${TRUSTED_PROXY_COUNT:-1}
-    # volumes はマージされる（元の3つ + override の2つ）
     volumes:
       - snapshots-data:/snapshots
       - backend-db:/app/data
@@ -69,7 +70,7 @@ services:
       - batfish
     restart: unless-stopped
     healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:5000/api/health"]
+      test: ["CMD", "python3", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:5000/api/health')"]
       interval: 30s
       timeout: 10s
       retries: 3
@@ -77,7 +78,6 @@ services:
 
   # Frontend Web UI (React + Vite)
   frontend:
-    # override.yml の build が優先される（image は無視される）
     build:
       context: ./frontend
       dockerfile: Dockerfile
@@ -87,6 +87,7 @@ services:
     environment:
       - VITE_API_BASE_URL=${VITE_API_BASE_URL:-}
       - VITE_AUTH_ENABLED=${VITE_AUTH_ENABLED:-true}
+      - VITE_TIMEZONE=${VITE_TIMEZONE:-Asia/Tokyo}
     networks:
       - topologix-network
     depends_on:

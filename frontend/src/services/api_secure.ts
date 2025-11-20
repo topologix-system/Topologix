@@ -4,11 +4,13 @@
  * - Required for production deployments with strict security policies
  * - Always uses authentication (no disable option unlike api.ts)
  * - Validates all user inputs against ReDoS patterns before submission
+ * - Uses CSRFService for stateless double-submit cookie pattern
  */
 import axios, { AxiosInstance, AxiosError, AxiosRequestConfig } from 'axios'
 import { runtimeConfig } from '../config/runtimeConfig'
 import { isTokenExpired } from '../lib/auth/tokenManager'
 import { logger } from '../utils/logger'
+import { CSRFService } from './csrfService'
 import type {
   APIResponse,
   NetworkInitializeRequest,
@@ -61,7 +63,7 @@ const tokenExpiresAtStr = localStorage.getItem('token_expires_at')
 let authState: AuthState = {
   accessToken: localStorage.getItem('access_token'),
   refreshToken: localStorage.getItem('refresh_token'),
-  csrfToken: sessionStorage.getItem('csrf_token'),
+  csrfToken: null,  // CSRF token now managed via cookie (CSRFService)
   tokenExpiresAt: tokenExpiresAtStr ? parseInt(tokenExpiresAtStr, 10) : null,
   user: null
 }
@@ -88,42 +90,25 @@ apiClient.interceptors.request.use(
   async (config) => {
     // Check if token is expired BEFORE sending request
     if (authState.accessToken && isTokenExpired(authState.accessToken)) {
-      logger.warn('[API Secure] Access token expired, attempting silent cleanup')
+      logger.warn('[API Secure] Access token expired, clearing local state')
 
-      try {
-        // Fire-and-forget: Notify server (non-blocking)
-        // Use axios directly to bypass interceptor and prevent infinite loop
-        axios.post(
-          `${API_BASE_URL}/api/auth/logout`,
-          { reason: 'token_expired' },
-          {
-            headers: {
-              'Authorization': `Bearer ${authState.accessToken}`,
-              'X-CSRF-Token': authState.csrfToken || ''
-            },
-            timeout: 3000
-          }
-        ).catch(err => {
-          logger.warn('[API Secure] Server logout notification failed (non-blocking):', err.message)
-        })
-      } finally {
-        // Clear local state (always executes)
-        authState.accessToken = null
-        authState.refreshToken = null
-        authState.csrfToken = null
-        authState.tokenExpiresAt = null
-        authState.user = null
+      // Clear local state immediately (no server notification to avoid infinite loop)
+      authState.accessToken = null
+      authState.refreshToken = null
+      authState.csrfToken = null
+      authState.tokenExpiresAt = null
+      authState.user = null
 
-        localStorage.removeItem('access_token')
-        localStorage.removeItem('refresh_token')
-        localStorage.removeItem('user')
-        localStorage.removeItem('token_expires_at')
-        sessionStorage.removeItem('csrf_token')
+      localStorage.removeItem('access_token')
+      localStorage.removeItem('refresh_token')
+      localStorage.removeItem('user')
+      localStorage.removeItem('token_expires_at')
+      // Note: CSRF cookie is cleared by server on logout
 
-        window.dispatchEvent(new CustomEvent('auth:unauthorized', {
-          detail: { reason: 'token_expired', timestamp: Date.now() }
-        }))
-      }
+      // Dispatch event to trigger redirect to login
+      window.dispatchEvent(new CustomEvent('auth:unauthorized', {
+        detail: { reason: 'token_expired', timestamp: Date.now() }
+      }))
 
       // Reject request to prevent sending expired token
       return Promise.reject(new Error('Token expired'))
@@ -133,9 +118,17 @@ apiClient.interceptors.request.use(
       config.headers['Authorization'] = `Bearer ${authState.accessToken}`
     }
 
+    // Add CSRF token for state-changing methods (double-submit pattern with async retrieval)
     if (['POST', 'PUT', 'DELETE', 'PATCH'].includes(config.method?.toUpperCase() || '')) {
-      if (authState.csrfToken) {
-        config.headers['X-CSRF-Token'] = authState.csrfToken
+      try {
+        // ASYNC TOKEN RETRIEVAL: Use async getToken() for automatic refresh + retry logic
+        const csrfToken = await CSRFService.getToken()
+        config.headers['X-CSRF-Token'] = csrfToken
+        logger.debug('[API Secure] CSRF token added to request (async)')
+      } catch (error) {
+        logger.error('[API Secure] Failed to obtain CSRF token for request:', error)
+        // Fail fast - reject the request instead of proceeding without token
+        return Promise.reject(new Error(`CSRF token unavailable: ${error}`))
       }
     }
 
@@ -201,19 +194,25 @@ apiClient.interceptors.response.use(
 
       if (message.includes('csrf')) {
         try {
-          const csrfResponse = await apiClient.get('/auth/csrf-token')
-          authState.csrfToken = csrfResponse.data.data.csrf_token
-          sessionStorage.setItem('csrf_token', authState.csrfToken)
+          logger.warn('[API Secure] CSRF validation failed, refreshing token')
+
+          // ASYNC TOKEN RETRIEVAL: Use async getToken() which includes refresh logic
+          const newCsrfToken = await CSRFService.getToken()
 
           if (originalRequest.headers) {
-            originalRequest.headers['X-CSRF-Token'] = authState.csrfToken
+            originalRequest.headers['X-CSRF-Token'] = newCsrfToken
+            logger.info('[API Secure] CSRF token refreshed (async), retrying request')
+            return apiClient(originalRequest)
+          } else {
+            logger.error('[API Secure] Request headers not available for retry')
           }
-          return apiClient(originalRequest)
         } catch (csrfError) {
-          logger.error('Failed to refresh CSRF token')
+          logger.error('[API Secure] Failed to refresh CSRF token:', csrfError)
+          // Let the error propagate to React Query error handler
+          return Promise.reject(csrfError)
         }
       } else {
-        logger.error('Permission denied:', message)
+        logger.error('[API Secure] Permission denied:', message)
       }
     }
 
@@ -267,6 +266,9 @@ export const authAPI = {
     localStorage.setItem('user', JSON.stringify(data.user))
     localStorage.setItem('token_expires_at', expiresAt.toString())
     sessionStorage.setItem('csrf_token', data.csrf_token)
+
+    // Store CSRF token in memory for immediate availability (prevents race condition)
+    CSRFService.setMemoryToken(data.csrf_token)
 
     return data
   },

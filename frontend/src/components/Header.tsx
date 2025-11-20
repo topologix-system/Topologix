@@ -7,7 +7,6 @@ import { useUIStore, useSnapshotStore, useAuthStore } from '../store'
 import { useHealth, useSnapshots, useActivateSnapshot } from '../hooks'
 import { LanguageSwitcher } from './LanguageSwitcher'
 import { authAPI } from '../services/api'
-import { logger } from '../utils/logger'
 
 /**
  * Application header component with snapshot selection and user menu
@@ -44,15 +43,15 @@ export function Header() {
     (snapshotName: string) => {
       if (!snapshotName) return
 
-      logger.log('[Header] Activating snapshot:', snapshotName)
+      console.log('[Header] Activating snapshot:', snapshotName)
 
       activateMutation.mutate(snapshotName, {
         onSuccess: () => {
-          logger.log('[Header] Snapshot activated successfully:', snapshotName)
+          console.log('[Header] Snapshot activated successfully:', snapshotName)
           setCurrentSnapshotName(snapshotName)
         },
         onError: (error) => {
-          logger.error('[Header] Failed to activate snapshot:', snapshotName, error)
+          console.error('[Header] Failed to activate snapshot:', snapshotName, error)
         },
       })
     },
@@ -66,14 +65,14 @@ export function Header() {
   const handleSnapshotReload = useCallback(() => {
     if (!currentSnapshotName) return
 
-    logger.log('[Header] Reloading snapshot:', currentSnapshotName)
+    console.log('[Header] Reloading snapshot:', currentSnapshotName)
 
     activateMutation.mutate(currentSnapshotName, {
       onSuccess: () => {
-        logger.log('[Header] Snapshot reloaded successfully:', currentSnapshotName)
+        console.log('[Header] Snapshot reloaded successfully:', currentSnapshotName)
       },
       onError: (error) => {
-        logger.error('[Header] Failed to reload snapshot:', currentSnapshotName, error)
+        console.error('[Header] Failed to reload snapshot:', currentSnapshotName, error)
       },
     })
   }, [currentSnapshotName, activateMutation])

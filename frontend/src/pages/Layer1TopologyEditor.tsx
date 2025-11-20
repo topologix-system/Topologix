@@ -1,4 +1,4 @@
-import { useState, useCallback, useEffect } from 'react'
+import { useState, useCallback } from 'react'
 import { useParams, useNavigate, Link } from 'react-router-dom'
 import { useTranslation } from 'react-i18next'
 import { ArrowLeft, Save, AlertCircle, CheckCircle } from 'lucide-react'
@@ -27,34 +27,30 @@ export function Layer1TopologyEditor() {
   )
   const saveMutation = useSaveLayer1TopologyEditor()
 
-  const [localEdges, setLocalEdges] = useState<Layer1Edge[]>(topology?.edges || [])
+  const [localEdges, setLocalEdges] = useState<Layer1Edge[]>([])
   const [editingIndex, setEditingIndex] = useState<number | null>(null)
   const [hasChanges, setHasChanges] = useState(false)
   const [saveSuccess, setSaveSuccess] = useState(false)
 
-  // Sync localEdges with topology data when it loads
-  useEffect(() => {
-    if (topology && !hasChanges && localEdges.length === 0 && topology.edges.length > 0) {
-      setLocalEdges(topology.edges)
-    }
-  }, [topology, hasChanges, localEdges.length])
-
-  const editingEdge = editingIndex !== null ? localEdges[editingIndex] : null
+  // Use topology edges when not editing, otherwise use local copy
+  const displayEdges = hasChanges ? localEdges : (topology?.edges || [])
+  const editingEdge = editingIndex !== null ? displayEdges[editingIndex] : null
 
   const handleAddConnection = useCallback(
     (edge: Layer1Edge) => {
+      const currentEdges = hasChanges ? localEdges : (topology?.edges || [])
       if (editingIndex !== null) {
-        const newEdges = [...localEdges]
+        const newEdges = [...currentEdges]
         newEdges[editingIndex] = edge
         setLocalEdges(newEdges)
         setEditingIndex(null)
       } else {
-        setLocalEdges([...localEdges, edge])
+        setLocalEdges([...currentEdges, edge])
       }
       setHasChanges(true)
       setSaveSuccess(false)
     },
-    [localEdges, editingIndex]
+    [localEdges, editingIndex, hasChanges, topology?.edges]
   )
 
   const handleEditConnection = useCallback((edge: Layer1Edge, index: number) => {
@@ -63,7 +59,8 @@ export function Layer1TopologyEditor() {
 
   const handleDeleteConnection = useCallback(
     (index: number) => {
-      const newEdges = localEdges.filter((_, i) => i !== index)
+      const currentEdges = hasChanges ? localEdges : (topology?.edges || [])
+      const newEdges = currentEdges.filter((_, i) => i !== index)
       setLocalEdges(newEdges)
       setHasChanges(true)
       setSaveSuccess(false)
@@ -71,7 +68,7 @@ export function Layer1TopologyEditor() {
         setEditingIndex(null)
       }
     },
-    [localEdges, editingIndex]
+    [localEdges, editingIndex, hasChanges, topology?.edges]
   )
 
   const handleCancelEdit = useCallback(() => {
@@ -196,7 +193,7 @@ export function Layer1TopologyEditor() {
 
           <div className="col-span-6 overflow-y-auto space-y-6">
             <Layer1ConnectionTable
-              edges={localEdges}
+              edges={displayEdges}
               onEdit={handleEditConnection}
               onDelete={handleDeleteConnection}
             />

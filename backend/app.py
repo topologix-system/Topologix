@@ -27,8 +27,15 @@ if config.AUTH_ENABLED:
         JWTManager, require_auth, require_role,
         sanitize_input, validate_path, validate_file_upload,
         validate_snapshot_name, validate_node_name, validate_json_input,
-        CSRFProtect, SecurityHeaders, RateLimiter
+        SecurityHeaders, RateLimiter
     )
+    # Import CSRF protection based on mode
+    if config.CSRF_MODE == 'double-submit':
+        from security.csrf_double_submit import DoubleSubmitCSRFProtect as CSRFProtect
+        print("[INFO] CSRF Mode: Double-Submit Cookie Pattern (stateless)")
+    else:
+        from security.csrf import CSRFProtect
+        print("[INFO] CSRF Mode: Session-Based Synchronized Token Pattern")
     # Import database modules (only when AUTH_ENABLED=true)
     from database import init_db
     from database.seed import initialize_database
@@ -74,6 +81,7 @@ if config.AUTH_ENABLED:
     app.config['SESSION_COOKIE_SAMESITE'] = config.SESSION_COOKIE_SAMESITE
     app.config['PERMANENT_SESSION_LIFETIME'] = config.PERMANENT_SESSION_LIFETIME
     app.config['MAX_CONTENT_LENGTH'] = config.MAX_CONTENT_LENGTH
+    app.config['JWT_ACCESS_TOKEN_EXPIRES'] = config.JWT_ACCESS_TOKEN_EXPIRES
 
 # Initialize CORS
 # When auth is disabled, use simpler CORS configuration
@@ -392,8 +400,16 @@ if config.AUTH_ENABLED:
                 user['id'], user['username'], user['roles']
             )
 
-            # Generate CSRF token
-            csrf_token = csrf_protect.generate_csrf_token()
+            # Generate CSRF token (mode-dependent)
+            if config.CSRF_MODE == 'double-submit':
+                # Generate token with user binding for double-submit pattern
+                csrf_token = csrf_protect.generate_csrf_token(
+                    user_id=user['id'],
+                    session_id=request.headers.get('X-Session-ID')
+                )
+            else:
+                # Session-based mode
+                csrf_token = csrf_protect.generate_csrf_token()
 
             logger.info(f"Successful login for {username} from {request.remote_addr}")
 
@@ -410,6 +426,10 @@ if config.AUTH_ENABLED:
                     "csrf_token": csrf_token
                 }
             })
+
+            # Set CSRF cookie for double-submit pattern
+            if config.CSRF_MODE == 'double-submit':
+                csrf_protect.set_csrf_cookie(response, csrf_token)
 
             # Set secure cookie for web clients (production only)
             if config.ENV == 'production':
@@ -441,11 +461,17 @@ if config.AUTH_ENABLED:
             # Clear session
             session.clear()
 
-            response = success_response({}, "Logout successful")
+            response = make_response(success_response({}, "Logout successful"))
 
             # Clear cookies
             response.set_cookie('access_token', '', expires=0)
-            response.set_cookie('csrf_token', '', expires=0)
+
+            # Clear CSRF cookie (mode-dependent)
+            if config.CSRF_MODE == 'double-submit':
+                csrf_protect.clear_csrf_cookie(response)
+            else:
+                # Session-based mode uses generic cookie clear
+                response.set_cookie('csrf_token', '', expires=0)
 
             return response
 
@@ -517,8 +543,20 @@ if config.AUTH_ENABLED:
     @require_auth
     def get_csrf_token():
         """Get CSRF token for authenticated user"""
-        csrf_token = csrf_protect.generate_csrf_token()
-        return success_response({'csrf_token': csrf_token})
+        if config.CSRF_MODE == 'double-submit':
+            # Generate token with user binding for double-submit pattern
+            csrf_token = csrf_protect.generate_csrf_token(
+                user_id=request.user_id,
+                session_id=request.headers.get('X-Session-ID')
+            )
+            # Create response and set cookie
+            response = make_response(success_response({'csrf_token': csrf_token}))
+            csrf_protect.set_csrf_cookie(response, csrf_token)
+            return response
+        else:
+            # Session-based mode (no cookie needed)
+            csrf_token = csrf_protect.generate_csrf_token()
+            return success_response({'csrf_token': csrf_token})
 
     # ========== User Management Endpoints ==========
 
@@ -1550,8 +1588,8 @@ def get_reachability():
     Optional request body:
     {
         "headers": {
-            "srcIps": "10.0.0.1",
-            "dstIps": "10.0.0.2"
+            "srcIps": "192.0.2.1",
+            "dstIps": "192.0.2.2"
         }
     }
     """
@@ -1690,7 +1728,7 @@ def test_filters():
 
     Request body:
     {
-        "headers": {"srcIps": "10.0.0.1", "dstIps": "192.168.1.1", "dstPorts": "22"},
+        "headers": {"srcIps": "192.0.2.1", "dstIps": "198.51.100.1", "dstPorts": "22"},
         "nodes": "router1",
         "filters": "ACL_NAME",
         "startLocation": "router1[GigabitEthernet0/1]"
@@ -1732,7 +1770,7 @@ def search_filters():
 
     Request body:
     {
-        "headers": {"srcIps": "10.0.0.1", "dstIps": "192.168.1.1"},
+        "headers": {"srcIps": "192.0.2.1", "dstIps": "198.51.100.1"},
         "action": "PERMIT",
         "filters": "ACL_NAME",
         "nodes": "router1"
@@ -1761,7 +1799,7 @@ def find_matching_filter_lines():
 
     Request body:
     {
-        "headers": {"srcIps": "10.0.0.1", "dstIps": "192.168.1.1"},
+        "headers": {"srcIps": "192.0.2.1", "dstIps": "198.51.100.1"},
         "filters": "ACL_NAME",
         "nodes": "router1"
     }
@@ -1790,8 +1828,8 @@ def traceroute():
     Request body:
     {
         "headers": {
-            "srcIps": "10.0.0.1",
-            "dstIps": "192.168.1.1",
+            "srcIps": "192.0.2.1",
+            "dstIps": "198.51.100.1",
             "ipProtocols": ["TCP", "UDP"],
             "srcPorts": "1000-2000",
             "dstPorts": "80,443",
@@ -1852,8 +1890,8 @@ def bidirectional_traceroute():
     Example:
     {
         "headers": {
-            "srcIps": "10.0.0.1",
-            "dstIps": "192.168.1.1",
+            "srcIps": "192.0.2.1",
+            "dstIps": "198.51.100.1",
             "ipProtocols": ["TCP"],
             "dstPorts": "80"
         },
@@ -2371,7 +2409,7 @@ def get_lpm_routes():
 
     Request body:
     {
-        "ip": "10.0.0.1"
+        "ip": "192.0.2.1"
     }
     """
     try:
@@ -2397,7 +2435,7 @@ def get_prefix_tracer():
 
     Request body:
     {
-        "prefix": "10.0.0.0/24",
+        "prefix": "192.0.2.0/24",
         "nodes": "router1"
     }
     """
@@ -2427,8 +2465,8 @@ def get_differential_reachability():
     Request body:
     {
         "headers": {
-            "srcIps": "10.0.0.1",
-            "dstIps": "192.168.1.1"
+            "srcIps": "192.0.2.1",
+            "dstIps": "198.51.100.1"
         }
     }
     """
@@ -2453,8 +2491,8 @@ def get_bidirectional_reachability():
     Request body:
     {
         "headers": {
-            "srcIps": "10.0.0.1",
-            "dstIps": "192.168.1.1"
+            "srcIps": "192.0.2.1",
+            "dstIps": "198.51.100.1"
         }
     }
     """
@@ -2501,7 +2539,7 @@ def resolve_ip_specifier():
 
     Request body:
     {
-        "ips": "10.0.0.0/24"
+        "ips": "192.0.2.0/24"
     }
     """
     try:
@@ -2559,8 +2597,8 @@ def test_route_policies():
     {
         "direction": "IN",
         "inputRoute": {
-            "network": "10.0.0.0/24",
-            "nextHopIp": "192.168.1.1",
+            "network": "192.0.2.0/24",
+            "nextHopIp": "198.51.100.1",
             "protocol": "bgp"
         },
         "nodes": "router1",
@@ -2753,20 +2791,24 @@ def activate_snapshot(name: str):
         return error_response(str(e), 500)
 
 
+# ========== Snapshot Comparison Endpoint ==========
 @app.route('/api/snapshots/compare', methods=['POST'])
-@require_auth
 def compare_snapshots():
     """
-    Compare two snapshots to identify differences in nodes, edges, routes, and reachability
+    Compare two network snapshots
 
     Request body:
-    {
-        "base_snapshot": "snapshot1",
-        "comparison_snapshot": "snapshot2"
-    }
+        {
+            "base_snapshot": "snapshot1",
+            "comparison_snapshot": "snapshot2"
+        }
+
+    Returns:
+        Comparison results with nodes, edges, routes, and reachability changes
     """
     try:
         data = request.get_json()
+
         if not data:
             return error_response("Request body is required", 400)
 
@@ -2774,169 +2816,36 @@ def compare_snapshots():
         comparison_snapshot = data.get('comparison_snapshot')
 
         if not base_snapshot or not comparison_snapshot:
-            return error_response("Both base_snapshot and comparison_snapshot are required", 400)
+            return error_response("Both 'base_snapshot' and 'comparison_snapshot' are required", 400)
 
-        # Validate snapshot names
-        if config.AUTH_ENABLED:
-            base_snapshot = validate_snapshot_name(base_snapshot)
-            comparison_snapshot = validate_snapshot_name(comparison_snapshot)
-
-        # Verify snapshots exist (get_snapshot_path raises FileNotFoundError if not found)
-        try:
-            snapshot_service.get_snapshot_path(base_snapshot)
-            snapshot_service.get_snapshot_path(comparison_snapshot)
-        except FileNotFoundError as e:
-            return error_response(str(e), 404)
-
-        logger.info(f"Comparing snapshots: {base_snapshot} vs {comparison_snapshot}")
-
-        # Perform comparison
+        # Use existing compare_snapshots method from batfish_service
         result = batfish_service.compare_snapshots(base_snapshot, comparison_snapshot)
 
-        return success_response(result, f"Snapshots compared successfully")
+        return success_response(result, "Snapshots compared successfully")
 
-    except ValueError as e:
-        logger.error(f"Validation error in snapshot comparison: {e}")
-        return error_response(str(e), 400)
     except FileNotFoundError as e:
-        logger.error(f"Snapshot not found: {e}")
         return error_response(str(e), 404)
+    except ValueError as e:
+        return error_response(str(e), 400)
     except Exception as e:
-        import traceback
         logger.error(f"Failed to compare snapshots: {e}")
+        import traceback
         logger.error(f"Traceback: {traceback.format_exc()}")
         return error_response(str(e), 500)
 
 
 # ========== Layer1 Topology Management Endpoints ==========
-def validate_layer1_topology(topology_data: dict, snapshot_name: str) -> list[dict]:
-    """
-    Validate Layer1 topology data against snapshot devices and interfaces
-
-    Args:
-        topology_data: Layer1 topology JSON with edges
-        snapshot_name: Name of snapshot to validate against
-
-    Returns:
-        List of validation errors (empty if valid)
-    """
-    errors = []
-
-    if 'edges' not in topology_data:
-        errors.append({
-            'type': 'invalid_structure',
-            'message': "Missing 'edges' key in topology data"
-        })
-        return errors
-
-    edges = topology_data['edges']
-    if not isinstance(edges, list):
-        errors.append({
-            'type': 'invalid_structure',
-            'message': "'edges' must be a list"
-        })
-        return errors
-
-    try:
-        interfaces_by_device = snapshot_service.get_snapshot_interfaces(snapshot_name, batfish_service)
-    except Exception as e:
-        errors.append({
-            'type': 'validation_error',
-            'message': f"Failed to retrieve interfaces: {str(e)}"
-        })
-        return errors
-
-    seen_connections = set()
-
-    for idx, edge in enumerate(edges):
-        if not isinstance(edge, dict):
-            errors.append({
-                'type': 'invalid_structure',
-                'message': f"Edge at index {idx} must be an object",
-                'edge_index': idx
-            })
-            continue
-
-        node1 = edge.get('node1', {})
-        node2 = edge.get('node2', {})
-
-        if not isinstance(node1, dict) or not isinstance(node2, dict):
-            errors.append({
-                'type': 'invalid_structure',
-                'message': f"Edge at index {idx} must have 'node1' and 'node2' objects",
-                'edge_index': idx
-            })
-            continue
-
-        hostname1 = node1.get('hostname', '')
-        interface1 = node1.get('interfaceName', '')
-        hostname2 = node2.get('hostname', '')
-        interface2 = node2.get('interfaceName', '')
-
-        if hostname1 == hostname2:
-            errors.append({
-                'type': 'self_connection',
-                'message': f"Edge at index {idx}: Cannot connect device to itself ({hostname1})",
-                'edge_index': idx
-            })
-
-        if hostname1 not in interfaces_by_device:
-            errors.append({
-                'type': 'hostname_not_found',
-                'message': f"Edge at index {idx}: Hostname '{hostname1}' not found in snapshot",
-                'edge_index': idx
-            })
-        else:
-            device_interfaces = [iface['name'] for iface in interfaces_by_device[hostname1]['interfaces']]
-            if interface1 not in device_interfaces:
-                errors.append({
-                    'type': 'interface_not_found',
-                    'message': f"Edge at index {idx}: Interface '{interface1}' not found on device '{hostname1}'",
-                    'edge_index': idx
-                })
-
-        if hostname2 not in interfaces_by_device:
-            errors.append({
-                'type': 'hostname_not_found',
-                'message': f"Edge at index {idx}: Hostname '{hostname2}' not found in snapshot",
-                'edge_index': idx
-            })
-        else:
-            device_interfaces = [iface['name'] for iface in interfaces_by_device[hostname2]['interfaces']]
-            if interface2 not in device_interfaces:
-                errors.append({
-                    'type': 'interface_not_found',
-                    'message': f"Edge at index {idx}: Interface '{interface2}' not found on device '{hostname2}'",
-                    'edge_index': idx
-                })
-
-        connection_key = tuple(sorted([f"{hostname1}:{interface1}", f"{hostname2}:{interface2}"]))
-        if connection_key in seen_connections:
-            errors.append({
-                'type': 'duplicate_connection',
-                'message': f"Edge at index {idx}: Duplicate connection between {hostname1}:{interface1} and {hostname2}:{interface2}",
-                'edge_index': idx
-            })
-        seen_connections.add(connection_key)
-
-    return errors
-
-
 @app.route('/api/snapshots/<name>/layer1-topology', methods=['GET'])
 def get_snapshot_layer1_topology(name: str):
     """
-    Get Layer1 topology for a snapshot
+    Get Layer1 topology configuration for a snapshot
 
-    Returns the layer1_topology.json file content if it exists
+    Returns:
+        Layer1 topology data with edges array
     """
     try:
         topology = snapshot_service.get_layer1_topology(name)
-
-        if topology is None:
-            return success_response({'edges': []}, "No Layer1 topology defined")
-
-        return success_response(topology)
-
+        return success_response(topology, "Layer1 topology retrieved successfully")
     except FileNotFoundError as e:
         return error_response(str(e), 404)
     except Exception as e:
@@ -2945,66 +2854,67 @@ def get_snapshot_layer1_topology(name: str):
 
 
 @app.route('/api/snapshots/<name>/layer1-topology', methods=['PUT'])
-def save_layer1_topology(name: str):
+def save_snapshot_layer1_topology(name: str):
     """
-    Save Layer1 topology for a snapshot with validation
+    Save Layer1 topology configuration for a snapshot
 
     Request body:
-    {
-        "edges": [
-            {
-                "node1": {"hostname": "R1", "interfaceName": "GigabitEthernet0/0"},
-                "node2": {"hostname": "R2", "interfaceName": "GigabitEthernet0/1"}
-            }
-        ]
-    }
+        {
+            "edges": [
+                {
+                    "node1": {"hostname": "router1", "interfaceName": "GigabitEthernet0/0"},
+                    "node2": {"hostname": "router2", "interfaceName": "GigabitEthernet0/1"}
+                }
+            ]
+        }
+
+    Returns:
+        Save result with metadata
     """
     try:
-        data = request.get_json()
-        if not data:
+        topology_data = request.get_json()
+
+        if not topology_data:
             return error_response("Request body is required", 400)
 
-        validation_errors = validate_layer1_topology(data, name)
-        if validation_errors:
-            return error_response(
-                "Layer1 topology validation failed",
-                400,
-                errors=validation_errors
-            )
+        if 'edges' not in topology_data:
+            return error_response("'edges' field is required in request body", 400)
 
-        result = snapshot_service.save_layer1_topology(name, data)
+        result = snapshot_service.save_layer1_topology(name, topology_data)
 
-        snapshot_path = snapshot_service.get_snapshot_path(name)
-        batfish_service.initialize_network(str(snapshot_path), name)
-        logger.info(f"Reloaded Batfish snapshot '{name}' with updated Layer1 topology")
+        # Auto-reload Batfish snapshot to reflect Layer1 topology changes
+        try:
+            snapshot_path = snapshot_service.get_snapshot_path(name)
+            batfish_service.initialize_network(str(snapshot_path), snapshot_name=name)
+            logger.info(f"Automatically reloaded Batfish snapshot '{name}' after Layer1 topology save")
+        except Exception as e:
+            logger.warning(f"Failed to auto-reload Batfish snapshot after Layer1 save: {e}")
+            # Continue with success response even if reload fails
 
-        return success_response(result, "Layer1 topology saved and snapshot reloaded successfully")
+        return success_response(result, "Layer1 topology saved successfully")
 
     except FileNotFoundError as e:
         return error_response(str(e), 404)
     except ValueError as e:
         return error_response(str(e), 400)
     except Exception as e:
-        import traceback
         logger.error(f"Failed to save Layer1 topology: {e}")
+        import traceback
         logger.error(f"Traceback: {traceback.format_exc()}")
         return error_response(str(e), 500)
 
 
 @app.route('/api/snapshots/<name>/layer1-topology', methods=['DELETE'])
-def delete_layer1_topology(name: str):
+def delete_snapshot_layer1_topology(name: str):
     """
-    Delete Layer1 topology file from a snapshot
+    Delete Layer1 topology configuration for a snapshot
+
+    Returns:
+        Success message
     """
     try:
         snapshot_service.delete_layer1_topology(name)
-
-        snapshot_path = snapshot_service.get_snapshot_path(name)
-        batfish_service.initialize_network(str(snapshot_path), name)
-        logger.info(f"Reloaded Batfish snapshot '{name}' after Layer1 topology deletion")
-
-        return success_response({"name": name}, "Layer1 topology deleted and snapshot reloaded successfully")
-
+        return success_response({"snapshot": name}, "Layer1 topology deleted successfully")
     except FileNotFoundError as e:
         return error_response(str(e), 404)
     except Exception as e:
@@ -3015,19 +2925,20 @@ def delete_layer1_topology(name: str):
 @app.route('/api/snapshots/<name>/interfaces', methods=['GET'])
 def get_snapshot_interfaces(name: str):
     """
-    Get all interfaces in a snapshot grouped by hostname
+    Get all interfaces for devices in a snapshot
 
-    Returns a dictionary where keys are hostnames and values contain
-    device information with a list of interfaces
+    Returns:
+        Dictionary mapping hostnames to interface lists
     """
     try:
         interfaces = snapshot_service.get_snapshot_interfaces(name, batfish_service)
-        return success_response(interfaces)
-
+        return success_response(interfaces, "Snapshot interfaces retrieved successfully")
     except FileNotFoundError as e:
         return error_response(str(e), 404)
     except Exception as e:
         logger.error(f"Failed to get snapshot interfaces: {e}")
+        import traceback
+        logger.error(f"Traceback: {traceback.format_exc()}")
         return error_response(str(e), 500)
 
 
@@ -3046,6 +2957,60 @@ def list_endpoints():
 
     return success_response(sorted(endpoints, key=lambda x: x['path']))
 
+
+# ========== Security Headers ==========
+if config.AUTH_ENABLED and config.CSRF_MODE == 'double-submit':
+    @app.after_request
+    def set_enhanced_security_headers(response):
+        """
+        Enhanced security headers for Double-Submit Cookie Pattern
+        Critical for mitigating XSS risks when HttpOnly=False for CSRF tokens
+        """
+        # Strict Content Security Policy to mitigate XSS
+        # Note: Adjust 'unsafe-inline' and 'unsafe-eval' based on your frontend requirements
+        response.headers['Content-Security-Policy'] = (
+            "default-src 'self'; "
+            "script-src 'self' 'unsafe-inline' 'unsafe-eval'; "
+            "style-src 'self' 'unsafe-inline'; "
+            "img-src 'self' data: https:; "
+            "connect-src 'self'; "
+            "font-src 'self' data:; "
+            "frame-ancestors 'none'; "
+            "base-uri 'self'; "
+            "form-action 'self';"
+        )
+
+        # Prevent clickjacking attacks
+        response.headers['X-Frame-Options'] = 'DENY'
+
+        # Prevent MIME type sniffing
+        response.headers['X-Content-Type-Options'] = 'nosniff'
+
+        # Enable browser XSS protection
+        response.headers['X-XSS-Protection'] = '1; mode=block'
+
+        # Enforce HTTPS (only in production)
+        if config.ENV == 'production':
+            response.headers['Strict-Transport-Security'] = (
+                'max-age=31536000; includeSubDomains; preload'
+            )
+
+        # Control referrer information
+        response.headers['Referrer-Policy'] = 'strict-origin-when-cross-origin'
+
+        # Permissions Policy (formerly Feature-Policy)
+        response.headers['Permissions-Policy'] = (
+            'geolocation=(), '
+            'microphone=(), '
+            'camera=(), '
+            'payment=(), '
+            'usb=(), '
+            'magnetometer=(), '
+            'gyroscope=(), '
+            'accelerometer=()'
+        )
+
+        return response
 
 # ========== Main ==========
 if __name__ == '__main__':

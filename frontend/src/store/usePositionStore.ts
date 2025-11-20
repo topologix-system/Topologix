@@ -7,7 +7,6 @@
  */
 import { create } from 'zustand'
 import { persist } from 'zustand/middleware'
-import { logger } from '../utils/logger'
 
 /**
  * Node position coordinates for graph layout
@@ -51,7 +50,7 @@ export const usePositionStore = create<PositionState>()(
       positions: {},
 
       savePositions: (snapshotName, positions) => {
-        logger.log(`[PositionStore] Saving positions for snapshot: ${snapshotName}, nodes: ${Object.keys(positions).length}`)
+        console.log(`[PositionStore] Saving positions for snapshot: ${snapshotName}, nodes: ${Object.keys(positions).length}`)
         set((state) => ({
           positions: {
             ...state.positions,
@@ -63,15 +62,15 @@ export const usePositionStore = create<PositionState>()(
       getPositions: (snapshotName) => {
         const positions = get().positions[snapshotName]
         if (positions) {
-          logger.log(`[PositionStore] Retrieved ${Object.keys(positions).length} positions for snapshot: ${snapshotName}`)
+          console.log(`[PositionStore] Retrieved ${Object.keys(positions).length} positions for snapshot: ${snapshotName}`)
         } else {
-          logger.log(`[PositionStore] No saved positions found for snapshot: ${snapshotName}`)
+          console.log(`[PositionStore] No saved positions found for snapshot: ${snapshotName}`)
         }
         return positions
       },
 
       clearPositions: (snapshotName) => {
-        logger.log(`[PositionStore] Clearing positions for snapshot: ${snapshotName}`)
+        console.log(`[PositionStore] Clearing positions for snapshot: ${snapshotName}`)
         set((state) => {
           const newPositions = { ...state.positions }
           delete newPositions[snapshotName]
@@ -80,7 +79,7 @@ export const usePositionStore = create<PositionState>()(
       },
 
       clearAllPositions: () => {
-        logger.log('[PositionStore] Clearing all saved positions')
+        console.log('[PositionStore] Clearing all saved positions')
         set({ positions: {} })
       },
     }),

@@ -41,7 +41,7 @@ export function decodeJWT(token: string): DecodedToken | null {
 
 /**
  * Check if JWT token is expired
- * Includes 30-second buffer to handle clock skew between client and server
+ * Includes 5-second buffer to handle clock skew between client and server (RFC 7519 recommendation)
  * @param token - JWT token string
  * @returns true if token is expired or invalid, false otherwise
  */
@@ -54,8 +54,8 @@ export function isTokenExpired(token: string | null): boolean {
   // Token expiration is in seconds, Date.now() is in milliseconds
   const currentTime = Date.now() / 1000
 
-  // Add 30 second buffer to handle clock skew
-  return decoded.exp < currentTime + 30
+  // Add 5 second buffer to handle clock skew (RFC 7519 recommendation)
+  return decoded.exp < currentTime + 5
 }
 
 /**

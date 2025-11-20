@@ -25,17 +25,6 @@ export const layoutConfigs: Record<LayoutName, cytoscape.LayoutOptions> = {
     randomize: false,
   },
 
-  'cola-spaced': {
-    name: 'cola',
-    animate: true,
-    animationDuration: 500,
-    nodeSpacing: 150,
-    edgeLength: 150,
-    fit: true,
-    padding: 50,
-    randomize: false,
-  },
-
   cose: {
     name: 'cose',
     animate: true,

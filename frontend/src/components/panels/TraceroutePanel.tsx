@@ -159,7 +159,7 @@ export function TraceroutePanel() {
               id="srcIps"
               value={formData.headers?.srcIps || ''}
               onChange={(e) => updateHeaders('srcIps', e.target.value)}
-              placeholder="e.g., 10.0.0.1 or 10.0.0.0/24"
+              placeholder="e.g., 192.0.2.1 or 192.0.2.0/24"
               className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-primary-600 focus:border-transparent"
             />
           </div>
@@ -173,7 +173,7 @@ export function TraceroutePanel() {
               id="dstIps"
               value={formData.headers?.dstIps || ''}
               onChange={(e) => updateHeaders('dstIps', e.target.value)}
-              placeholder="e.g., 192.168.1.1"
+              placeholder="e.g., 198.51.100.1"
               className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-primary-600 focus:border-transparent"
               required
             />
