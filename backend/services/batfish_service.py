@@ -13,7 +13,9 @@ Batfish network analysis service wrapper
 - DataFrame to dataclass conversion utilities
 - Comprehensive error handling for Batfish exceptions
 """
+import gc
 import logging
+import sys
 from typing import Any
 from pathlib import Path
 
@@ -198,6 +200,7 @@ class BatfishService:
             }
             nodes.append(node_data)
 
+        del df  # Free DataFrame memory
         return nodes
 
     # ========== Query 2: Interface Properties ==========
@@ -269,6 +272,7 @@ class BatfishService:
             }
             interfaces.append(interface_data)
 
+        del df  # Free DataFrame memory
         return interfaces
 
     # ========== Query 3: Routes ==========
@@ -308,6 +312,7 @@ class BatfishService:
             }
             routes.append(route_data)
 
+        del df  # Free DataFrame memory
         return routes
 
     # ========== Query 4-7: OSPF Queries ==========
@@ -341,6 +346,7 @@ class BatfishService:
             )
             processes.append(process)
 
+        del df  # Free DataFrame memory
         return processes
 
     def get_ospf_area_configuration(self) -> list[OSPFAreaConfig]:
@@ -389,6 +395,7 @@ class BatfishService:
             )
             areas.append(area)
 
+        del df  # Free DataFrame memory
         return areas
 
     def get_ospf_interface_configuration(self) -> list[OSPFInterfaceConfig]:
@@ -427,6 +434,7 @@ class BatfishService:
             )
             interfaces.append(interface)
 
+        del df  # Free DataFrame memory
         return interfaces
 
     def get_ospf_session_compatibility(self) -> list[OSPFSessionCompat]:
@@ -456,6 +464,7 @@ class BatfishService:
             )
             sessions.append(session)
 
+        del df  # Free DataFrame memory
         return sessions
 
     # ========== Query 8-10: Edges ==========
@@ -481,6 +490,7 @@ class BatfishService:
             }
             edges.append(edge_data)
 
+        del df  # Free DataFrame memory
         return edges
 
     def get_edges(self) -> list[dict[str, Any]]:
@@ -503,6 +513,7 @@ class BatfishService:
             }
             edges.append(edge_data)
 
+        del df  # Free DataFrame memory
         return edges
 
     def get_layer3_edges(self) -> list[dict[str, Any]]:
@@ -527,6 +538,7 @@ class BatfishService:
             }
             edges.append(edge_data)
 
+        del df  # Free DataFrame memory
         return edges
 
     # ========== Query 11: VLAN Properties ==========
@@ -549,6 +561,7 @@ class BatfishService:
             }
             vlans.append(vlan_data)
 
+        del df  # Free DataFrame memory
         return vlans
 
     # ========== Query 12: IP Owners ==========
@@ -572,6 +585,7 @@ class BatfishService:
             }
             owners.append(owner_data)
 
+        del df  # Free DataFrame memory
         return owners
 
     # ========== Query 13-15: Configuration Structures ==========
@@ -607,6 +621,7 @@ class BatfishService:
             )
             structures.append(structure)
 
+        del df  # Free DataFrame memory
         return structures
 
     def get_referenced_structures(self) -> list[ReferencedStructure]:
@@ -642,6 +657,7 @@ class BatfishService:
             )
             structures.append(structure)
 
+        del df  # Free DataFrame memory
         return structures
 
     def get_named_structures(self) -> list[NamedStructure]:
@@ -662,6 +678,7 @@ class BatfishService:
             )
             structures.append(structure)
 
+        del df  # Free DataFrame memory
         return structures
 
     # ========== Query 16-19: Validation and Parse Status ==========
@@ -683,6 +700,7 @@ class BatfishService:
             )
             statuses.append(status)
 
+        del df  # Free DataFrame memory
         return statuses
 
     def get_init_issues(self) -> list[InitIssue]:
@@ -725,6 +743,7 @@ class BatfishService:
             )
             issues.append(issue)
 
+        del df  # Free DataFrame memory
         return issues
 
     def get_parse_warnings(self) -> list[ParseWarning]:
@@ -764,6 +783,7 @@ class BatfishService:
             )
             warnings.append(warning)
 
+        del df  # Free DataFrame memory
         return warnings
 
     def get_vi_conversion_status(self) -> list[ViConversionStatus]:
@@ -782,6 +802,7 @@ class BatfishService:
             )
             statuses.append(status)
 
+        del df  # Free DataFrame memory
         return statuses
 
     # ========== Query 20: Reachability ==========
@@ -816,6 +837,7 @@ class BatfishService:
             )
             flow_traces.append(flow_trace)
 
+        del df  # Free DataFrame memory
         return flow_traces
 
     # ========== Query 21: Search Route Policies ==========
@@ -848,6 +870,7 @@ class BatfishService:
             }
             policies.append(policy_data)
 
+        del df  # Free DataFrame memory
         return policies
 
     # ========== Query 22: AAA Authentication Login ==========
@@ -868,6 +891,7 @@ class BatfishService:
             }
             aaa_configs.append(aaa_data)
 
+        del df  # Free DataFrame memory
         return aaa_configs
 
     # ========== Query 23-27: BGP Analysis ==========
@@ -895,6 +919,7 @@ class BatfishService:
             }
             edges.append(edge_data)
 
+        del df  # Free DataFrame memory
         return edges
 
     def get_bgp_peer_configuration(self) -> list[dict[str, Any]]:
@@ -916,6 +941,7 @@ class BatfishService:
                 "confederation": row.get("Confederation"),
                 "remote_as": row.get("Remote_AS"),
                 "remote_ip": row.get("Remote_IP", ""),
+                "peer_address": row.get("Remote_IP", ""),
                 "description": row.get("Description", ""),
                 "ebgp_multihop": row.get("EBGP_Multihop", False),
                 "peer_group": row.get("Peer_Group", ""),
@@ -929,6 +955,7 @@ class BatfishService:
             }
             peers.append(peer_data)
 
+        del df  # Free DataFrame memory
         return peers
 
     def get_bgp_process_configuration(self) -> list[dict[str, Any]]:
@@ -955,6 +982,7 @@ class BatfishService:
             }
             processes.append(process_data)
 
+        del df  # Free DataFrame memory
         return processes
 
     def get_bgp_session_status(self) -> list[dict[str, Any]]:
@@ -982,6 +1010,7 @@ class BatfishService:
             }
             sessions.append(session_data)
 
+        del df  # Free DataFrame memory
         return sessions
 
     def get_bgp_session_compatibility(self) -> list[dict[str, Any]]:
@@ -1009,6 +1038,7 @@ class BatfishService:
             }
             compatibility.append(compat_data)
 
+        del df  # Free DataFrame memory
         return compatibility
 
     def get_bgp_rib(self) -> list[dict[str, Any]]:
@@ -1041,6 +1071,7 @@ class BatfishService:
             }
             rib_entries.append(rib_data)
 
+        del df  # Free DataFrame memory
         return rib_entries
 
     # ========== Query 28-31: ACL/Firewall Analysis ==========
@@ -1065,6 +1096,7 @@ class BatfishService:
             }
             results.append(result_data)
 
+        del df  # Free DataFrame memory
         return results
 
     def get_filter_line_reachability(self) -> list[dict[str, Any]]:
@@ -1088,6 +1120,7 @@ class BatfishService:
             }
             results.append(result_data)
 
+        del df  # Free DataFrame memory
         return results
 
     def search_filters(self, headers=None, action=None, filters=None, nodes=None) -> list[dict[str, Any]]:
@@ -1111,6 +1144,7 @@ class BatfishService:
             }
             results.append(result_data)
 
+        del df  # Free DataFrame memory
         return results
 
     def find_matching_filter_lines(self, headers=None, filters=None, nodes=None) -> list[dict[str, Any]]:
@@ -1134,6 +1168,7 @@ class BatfishService:
             }
             results.append(result_data)
 
+        del df  # Free DataFrame memory
         return results
 
     # ========== Query 32-34: Advanced Path Analysis ==========
@@ -1183,6 +1218,7 @@ class BatfishService:
             }
             results.append(result_data)
 
+        del df  # Free DataFrame memory
         return results
 
     def bidirectional_traceroute(
@@ -1233,6 +1269,7 @@ class BatfishService:
             }
             results.append(result_data)
 
+        del df  # Free DataFrame memory
         return results
 
     # ========== PHASE 1: CRITICAL - Network Validation (12 queries) ==========
@@ -1255,6 +1292,7 @@ class BatfishService:
             }
             results.append(result_data)
 
+        del df  # Free DataFrame memory
         return results
 
     def get_undefined_references(self) -> list[dict[str, Any]]:
@@ -1276,6 +1314,7 @@ class BatfishService:
             }
             results.append(result_data)
 
+        del df  # Free DataFrame memory
         return results
 
     def resolve_filter_specifier(self, filters=None, nodes=None) -> list[dict[str, Any]]:
@@ -1295,6 +1334,7 @@ class BatfishService:
             }
             results.append(result_data)
 
+        del df  # Free DataFrame memory
         return results
 
     def resolve_node_specifier(self, nodes=None) -> list[dict[str, Any]]:
@@ -1313,6 +1353,7 @@ class BatfishService:
             }
             results.append(result_data)
 
+        del df  # Free DataFrame memory
         return results
 
     def resolve_interface_specifier(self, interfaces=None, nodes=None) -> list[dict[str, Any]]:
@@ -1332,6 +1373,7 @@ class BatfishService:
             }
             results.append(result_data)
 
+        del df  # Free DataFrame memory
         return results
 
     def get_vrrp_properties(self) -> list[dict[str, Any]]:
@@ -1355,6 +1397,7 @@ class BatfishService:
             }
             results.append(result_data)
 
+        del df  # Free DataFrame memory
         return results
 
     def get_hsrp_properties(self) -> list[dict[str, Any]]:
@@ -1378,6 +1421,7 @@ class BatfishService:
             }
             results.append(result_data)
 
+        del df  # Free DataFrame memory
         return results
 
     def get_mlag_properties(self) -> list[dict[str, Any]]:
@@ -1399,6 +1443,7 @@ class BatfishService:
             }
             results.append(result_data)
 
+        del df  # Free DataFrame memory
         return results
 
     def get_duplicate_router_ids(self) -> list[DuplicateRouterID]:
@@ -1503,6 +1548,15 @@ class BatfishService:
                     )
                     results.append(duplicate)
 
+        # Free DataFrame memory
+        if ospf_df is not None:
+            del ospf_df
+        if ospf_proc_df is not None:
+            del ospf_proc_df
+        if bgp_df is not None:
+            del bgp_df
+        if bgp_proc_df is not None:
+            del bgp_proc_df
         return results
 
     def get_detect_loops(self) -> list[dict[str, Any]]:
@@ -1522,6 +1576,7 @@ class BatfishService:
             }
             results.append(result_data)
 
+        del df  # Free DataFrame memory
         return results
 
     def get_multipath_consistency(self) -> list[dict[str, Any]]:
@@ -1544,6 +1599,7 @@ class BatfishService:
             }
             results.append(result_data)
 
+        del df  # Free DataFrame memory
         return results
 
     def get_loopback_multipath_consistency(self) -> list[dict[str, Any]]:
@@ -1564,6 +1620,7 @@ class BatfishService:
             }
             results.append(result_data)
 
+        del df  # Free DataFrame memory
         return results
 
     def compare_filters(self, filters=None, nodes=None) -> list[dict[str, Any]]:
@@ -1585,6 +1642,7 @@ class BatfishService:
             }
             results.append(result_data)
 
+        del df  # Free DataFrame memory
         return results
 
     # ========== PHASE 2: IMPORTANT - Additional Protocols (13 queries) ==========
@@ -1611,6 +1669,7 @@ class BatfishService:
             }
             results.append(result_data)
 
+        del df  # Free DataFrame memory
         return results
 
     def get_vxlan_edges(self) -> list[dict[str, Any]]:
@@ -1633,6 +1692,7 @@ class BatfishService:
             }
             results.append(result_data)
 
+        del df  # Free DataFrame memory
         return results
 
     def get_vxlan_vni_properties(self) -> list[dict[str, Any]]:
@@ -1656,6 +1716,7 @@ class BatfishService:
             }
             results.append(result_data)
 
+        del df  # Free DataFrame memory
         return results
 
     def get_eigrp_edges(self) -> list[dict[str, Any]]:
@@ -1678,6 +1739,7 @@ class BatfishService:
             }
             results.append(result_data)
 
+        del df  # Free DataFrame memory
         return results
 
     def get_eigrp_interface_configuration(self) -> list[dict[str, Any]]:
@@ -1714,6 +1776,7 @@ class BatfishService:
             }
             results.append(result_data)
 
+        del df  # Free DataFrame memory
         return results
 
     def get_isis_interface_configuration(self) -> list[dict[str, Any]]:
@@ -1749,6 +1812,7 @@ class BatfishService:
             }
             results.append(result_data)
 
+        del df  # Free DataFrame memory
         return results
 
     def get_ipsec_session_status(self) -> list[dict[str, Any]]:
@@ -1772,6 +1836,7 @@ class BatfishService:
             }
             results.append(result_data)
 
+        del df  # Free DataFrame memory
         return results
 
     def get_ipsec_edges(self) -> list[dict[str, Any]]:
@@ -1815,6 +1880,7 @@ class BatfishService:
             }
             results.append(result_data)
 
+        del df  # Free DataFrame memory
         return results
 
     def get_ipsec_peer_configuration(self) -> list[dict[str, Any]]:
@@ -1904,6 +1970,7 @@ class BatfishService:
             }
             results.append(result_data)
 
+        del df  # Free DataFrame memory
         return results
 
     def get_ip_space_assignment(self) -> list[dict[str, Any]]:
@@ -1943,6 +2010,7 @@ class BatfishService:
             }
             results.append(result_data)
 
+        del df  # Free DataFrame memory
         return results
 
     def get_prefix_tracer(self, prefix=None, nodes=None) -> list[dict[str, Any]]:
@@ -1965,6 +2033,7 @@ class BatfishService:
             }
             results.append(result_data)
 
+        del df  # Free DataFrame memory
         return results
 
     # ========== PHASE 3: NICE-TO-HAVE (10 queries) ==========
@@ -2008,6 +2077,7 @@ class BatfishService:
             }
             results.append(result_data)
 
+        del df  # Free DataFrame memory
         return results
 
     def get_bidirectional_reachability(self, headers=None) -> list[dict[str, Any]]:
@@ -2029,6 +2099,7 @@ class BatfishService:
             }
             results.append(result_data)
 
+        del df  # Free DataFrame memory
         return results
 
     def resolve_location_specifier(self, locations=None) -> list[dict[str, Any]]:
@@ -2047,6 +2118,7 @@ class BatfishService:
             }
             results.append(result_data)
 
+        del df  # Free DataFrame memory
         return results
 
     def resolve_ip_specifier(self, ips=None) -> list[dict[str, Any]]:
@@ -2065,6 +2137,7 @@ class BatfishService:
             }
             results.append(result_data)
 
+        del df  # Free DataFrame memory
         return results
 
     def get_f5_bigip_vip_configuration(self) -> list[dict[str, Any]]:
@@ -2087,6 +2160,7 @@ class BatfishService:
             }
             results.append(result_data)
 
+        del df  # Free DataFrame memory
         return results
 
     def get_route_policies(self, nodes=None) -> list[dict[str, Any]]:
@@ -2129,6 +2203,7 @@ class BatfishService:
             }
             results.append(result_data)
 
+        del df  # Free DataFrame memory
         return results
 
     def get_questions(self) -> list[dict[str, Any]]:
@@ -2158,7 +2233,8 @@ class BatfishService:
                 method = getattr(self.session.q, method_name)
                 doc = method().__doc__ if callable(method) else ""
                 description = doc.split('\n')[0] if doc else f"Batfish question: {method_name}"
-            except:
+            except Exception as e:
+                logger.debug(f"Failed to get method documentation for {method_name}: {e}")
                 description = f"Batfish question: {method_name}"
 
             result_data = {
@@ -2202,6 +2278,7 @@ class BatfishService:
                 }
                 results.append(result_data)
 
+        del df  # Free DataFrame memory
         return results
 
     # ========== Snapshot Comparison Functions ==========
@@ -2450,11 +2527,16 @@ class BatfishService:
         """
         Fetch all 70 types of Batfish data (35 original + 35 new)
 
+        NOTE: This method accumulates all query results in memory.
+        For large networks (100+ devices), consider using streaming endpoints
+        or implementing pagination for individual data types.
+
         Returns:
             Dictionary containing all query results
         """
         self._ensure_initialized()
 
+        initial_memory = sys.getsizeof({})
         logger.info("Fetching all Batfish data (70 query types)...")
 
         data = {}
@@ -2612,5 +2694,11 @@ class BatfishService:
             logger.error(f"Error in fetch_all_data: {e}", exc_info=True)
             raise
 
-        logger.info("All Batfish data fetched successfully (70 query types)")
+        # Force garbage collection to free DataFrame memory from individual queries
+        gc.collect()
+
+        # Log memory usage for monitoring
+        data_size = sys.getsizeof(data)
+        logger.info(f"All Batfish data fetched successfully (70 query types), data dict size: {data_size} bytes")
+
         return data

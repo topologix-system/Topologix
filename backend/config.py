@@ -84,11 +84,14 @@ class Config:
     LOGIN_MAX_ATTEMPTS_PER_IP: int = int(os.getenv('LOGIN_MAX_ATTEMPTS_PER_IP', '10'))
     LOGIN_RATE_WINDOW_MINUTES: int = int(os.getenv('LOGIN_RATE_WINDOW_MINUTES', '15'))
     LOGIN_LOCKOUT_DURATION_MINUTES: int = int(os.getenv('LOGIN_LOCKOUT_DURATION_MINUTES', '30'))
+    # Note: LOGIN_IP_BLOCK_DURATION_MINUTES is not used because IP-based rate limiting
+    # is intentionally disabled to prevent false positives in NAT/NAPT environments.
+    # See backend/security/auth.py line 433-436 for details.
     LOGIN_IP_BLOCK_DURATION_MINUTES: int = int(os.getenv('LOGIN_IP_BLOCK_DURATION_MINUTES', '30'))
 
     # Security - Account Lockout
     ACCOUNT_LOCKOUT_THRESHOLD: int = int(os.getenv('ACCOUNT_LOCKOUT_THRESHOLD', '5'))
-    ACCOUNT_LOCKOUT_DURATION: int = int(os.getenv('ACCOUNT_LOCKOUT_DURATION', '1800'))  # 30 minutes in seconds
+    # Note: Lockout duration is configured via LOGIN_LOCKOUT_DURATION_MINUTES (in minutes)
 
     # Security - Reverse Proxy Configuration
     # Set to True when behind reverse proxy (Caddy/nginx) for proper IP address extraction

@@ -15,7 +15,10 @@
     "connectionStatus": "Connection status: {{status}}",
     "loadingSnapshot": "Loading snapshot...",
     "openSidebar": "Open sidebar",
-    "closeSidebar": "Close sidebar"
+    "closeSidebar": "Close sidebar",
+    "myProfile": "My Profile",
+    "userManagement": "User Management",
+    "securityLogs": "Security Logs"
   },
   "sidebar": {
     "title": "Sidebar",
@@ -161,7 +164,30 @@
       "ospf": "OSPF",
       "security": "Security",
       "allPrefixes": "All Prefixes",
-      "hsrpGroups": "HSRP Groups"
+      "hsrpGroups": "HSRP Groups",
+      "fields": {
+        "mtu": "MTU",
+        "speed": "Speed",
+        "bandwidth": "Bandwidth",
+        "ip": "IP",
+        "network": "Network",
+        "proxyArp": "Proxy ARP",
+        "switchportMode": "Mode",
+        "accessVlan": "Access VLAN",
+        "nativeVlan": "Native VLAN",
+        "allowedVlans": "Allowed VLANs",
+        "ospfArea": "Area",
+        "ospfCost": "Cost",
+        "ospfNetworkType": "Network Type",
+        "ospfPassive": "Passive",
+        "inboundAcl": "Inbound ACL",
+        "outboundAcl": "Outbound ACL",
+        "zone": "Zone",
+        "active": "Active",
+        "adminStatus": "Admin Status",
+        "switchport": "Switchport",
+        "channelGroup": "Channel Group"
+      }
     },
     "services": {
       "dnsServers": "DNS Servers:",
@@ -174,7 +200,82 @@
       "noNtp": "No NTP servers configured",
       "noLogging": "No logging servers configured",
       "noSnmp": "No SNMP trap servers configured",
-      "noTacacs": "No TACACS+ servers configured"
+      "noTacacs": "No TACACS+ servers configured",
+      "list": "List",
+      "methods": "Methods"
+    },
+    "ospf": {
+      "fields": {
+        "processId": "Process ID",
+        "routerId": "Router ID",
+        "referenceBandwidth": "Reference Bandwidth",
+        "abr": "ABR",
+        "activeInterfaces": "Active Interfaces",
+        "passiveInterfaces": "Passive Interfaces",
+        "area": "Area",
+        "cost": "Cost",
+        "networkType": "Network Type",
+        "passive": "Passive",
+        "local": "Local",
+        "remote": "Remote",
+        "remoteInterface": "Remote Interface"
+      },
+      "defaults": {
+        "areaType": "Normal"
+      }
+    },
+    "acl": {
+      "fields": {
+        "line": "Line",
+        "action": "Action",
+        "reason": "Reason",
+        "blockedByLines": "Blocked by lines",
+        "sources": "Sources",
+        "destinations": "Destinations",
+        "node": "Node"
+      },
+      "defaults": {
+        "unnamedFilter": "Unnamed Filter"
+      }
+    },
+    "vlan": {
+      "fields": {
+        "vlanPrefix": "VLAN",
+        "vni": "VNI",
+        "interfaces": "Interfaces",
+        "interfaceVlans": "Interface VLANs"
+      }
+    },
+    "config": {
+      "fields": {
+        "type": "Type",
+        "name": "Name",
+        "lines": "Lines",
+        "context": "Context"
+      }
+    },
+    "eigrp": {
+      "fields": {
+        "interface": "Interface",
+        "remote": "Remote",
+        "ip": "IP",
+        "remoteIp": "Remote IP"
+      }
+    },
+    "isis": {
+      "fields": {
+        "interface": "Interface",
+        "remote": "Remote",
+        "level": "Level"
+      }
+    },
+    "vxlan": {
+      "fields": {
+        "vni": "VNI",
+        "localVtep": "Local VTEP",
+        "remoteVtep": "Remote VTEP",
+        "multicastGroup": "Multicast Group"
+      }
     },
     "routing": {
       "direct": "Direct"
@@ -200,7 +301,38 @@
       "nodeId": "Node ID",
       "format": "Format",
       "domain": "Domain",
-      "interfaces": "Interfaces"
+      "interfaces": "Interfaces",
+      "localAs": "Local AS",
+      "remoteAs": "Remote AS",
+      "localIp": "Local IP",
+      "remoteIp": "Remote IP",
+      "peerAddress": "Peer Address",
+      "routerId": "Router ID",
+      "confederationId": "Confederation ID",
+      "peerGroup": "Peer Group",
+      "remoteNode": "Remote Node",
+      "localInterface": "Local Interface",
+      "remoteInterface": "Remote Interface",
+      "neighbors": "Neighbors",
+      "origin": "Origin",
+      "best": "Best",
+      "description": "Description",
+      "importPolicy": "Import Policy",
+      "exportPolicy": "Export Policy",
+      "issues": "Issues",
+      "sessionType": "Session Type",
+      "addressFamilies": "Address Families",
+      "asPath": "AS Path",
+      "localPreference": "Local Preference",
+      "med": "MED",
+      "weight": "Weight",
+      "communities": "Communities"
+    },
+    "bgp": {
+      "status": {
+        "compatible": "Compatible",
+        "checkConfig": "Check Config"
+      }
     }
   },
   "nodeSelector": {
@@ -492,6 +624,13 @@
       "exportFailed": "Failed to export PNG",
       "loadFailed": "Failed to load network data",
       "connectionIssue": "Please check your connection and try again"
+    },
+    "retry": "Retry loading network data",
+    "exportFailed": "Export Failed",
+    "search": {
+      "placeholder": "Search nodes...",
+      "label": "Search for nodes in the topology",
+      "results": "Search results"
     }
   },
   "common": {
@@ -521,6 +660,7 @@
     "selectAll": "Select All",
     "deselectAll": "Deselect All",
     "noResults": "No results found",
+    "clear": "Clear",
     "itemsPerPage": "Items per page",
     "page": "Page",
     "of": "of",
@@ -531,12 +671,22 @@
     "interfaces": "Interfaces",
     "routes": "Routes",
     "backToDashboard": "Back to Dashboard",
+    "default": "default",
+    "none": "None",
+    "previousPage": "Previous page",
+    "nextPage": "Next page",
+    "or": "or",
+    "create": "Create",
+    "closeDialog": "Close dialog",
     "status": {
       "up": "UP",
       "down": "DOWN",
       "established": "ESTABLISHED",
       "active": "ACTIVE",
       "inactive": "INACTIVE"
+    },
+    "protocol": {
+      "bgp": "BGP"
     }
   },
   "errors": {
@@ -657,6 +807,160 @@
     "invalidTokenMessage": "The password reset link is invalid or missing. Please request a new one.",
     "requestNewLink": "Request New Link",
     "resetSuccess": "Your password has been reset successfully. You can now login with your new password."
+  },
+  "traceroute": {
+    "title": "Network Traceroute",
+    "description": "Simulate packet flow through your network to analyze reachability, routing paths, and potential issues.",
+    "sections": {
+      "configuration": "Configuration",
+      "pathConstraints": "Path Constraints",
+      "results": "Traceroute Results",
+      "flowDetails": "Flow Details",
+      "advanced": "Advanced Options"
+    },
+    "fields": {
+      "traceMode": "Trace Mode",
+      "sourceIp": "Source IP",
+      "destinationIp": "Destination IP",
+      "startLocation": "Start Location",
+      "maxTraces": "Max Traces",
+      "ipProtocols": "IP Protocols",
+      "applications": "Applications",
+      "sourcePorts": "Source Ports",
+      "destinationPorts": "Destination Ports",
+      "icmpTypes": "ICMP Types",
+      "icmpCodes": "ICMP Codes",
+      "dscpValues": "DSCP Values",
+      "ecnValues": "ECN Values",
+      "packetLength": "Packet Length",
+      "endLocation": "End Location",
+      "transitLocations": "Transit Locations (Must Pass Through)",
+      "forbiddenLocations": "Forbidden Locations (Must NOT Pass Through)"
+    },
+    "placeholders": {
+      "sourceIp": "e.g., 192.168.1.1",
+      "destinationIp": "e.g., 10.0.0.1",
+      "ipProtocols": "e.g., TCP, UDP, ICMP",
+      "applications": "e.g., HTTP, SSH, DNS",
+      "sourcePorts": "e.g., 1024-65535",
+      "destinationPorts": "e.g., 80, 443",
+      "icmpTypes": "e.g., 8 (Echo Request)",
+      "icmpCodes": "e.g., 0",
+      "dscpValues": "e.g., 0-63",
+      "ecnValues": "e.g., 0-3",
+      "packetLength": "e.g., 64-1500"
+    },
+    "modes": {
+      "unidirectional": "Unidirectional",
+      "bidirectional": "Bidirectional"
+    },
+    "options": {
+      "ignoreAcls": "Ignore ACLs/Filters"
+    },
+    "buttons": {
+      "run": "Run Traceroute",
+      "running": "Running...",
+      "reset": "Reset"
+    },
+    "labels": {
+      "flow": "Flow",
+      "trace": "Trace",
+      "hop": "Hop",
+      "hopsCount": "{{count}} hops",
+      "flowPair": "Flow Pair",
+      "stepsCount": "{{count}} steps"
+    },
+    "directions": {
+      "forward": "Forward",
+      "reverse": "Reverse"
+    },
+    "messages": {
+      "noTraces": "No traces available for this flow",
+      "noHops": "No hops in this trace"
+    },
+    "error": "Error"
+  },
+  "securityLogs": {
+    "title": "Security Logs",
+    "description": "Monitor login attempts and security events",
+    "accessDenied": "Access Denied",
+    "adminRequired": "You need admin privileges to access this page.",
+    "stats": {
+      "totalAttempts": "Total Attempts",
+      "allTime": "All time",
+      "successRate": "Success Rate",
+      "failedCount": "{{count}} failed",
+      "uniqueIps": "Unique IPs",
+      "blockedCount": "{{count}} blocked",
+      "last24h": "Last 24h"
+    },
+    "mostTargetedAccounts": "Most Targeted Accounts",
+    "filters": {
+      "title": "Filters",
+      "ipAddress": "IP Address",
+      "ipPlaceholder": "192.168.1.1 or 2001:db8::1",
+      "username": "Username",
+      "usernamePlaceholder": "admin",
+      "status": "Status",
+      "statusAll": "All",
+      "statusSuccess": "Success",
+      "statusFailed": "Failed",
+      "clear": "Clear Filters"
+    },
+    "loginAttempts": "Login Attempts",
+    "errors": {
+      "loadFailed": "Error loading logs",
+      "accessDenied": "Access denied. Admin privileges required.",
+      "tryAgain": "Failed to load security logs. Please try again later."
+    },
+    "pagination": {
+      "showing": "Showing page {{page}} of {{totalPages}} ({{total}} total records)"
+    },
+    "table": {
+      "noLogs": "No security logs found",
+      "status": "Status",
+      "time": "Time",
+      "ipAddress": "IP Address",
+      "username": "Username",
+      "userAgent": "User Agent",
+      "success": "Success",
+      "failed": "Failed"
+    }
+  },
+  "snapshots": {
+    "title": "Snapshot Management",
+    "backToTopology": "Back to Topology",
+    "compareSnapshots": "Compare Snapshots",
+    "newSnapshot": "New Snapshot",
+    "listTitle": "Snapshots",
+    "loading": "Loading snapshots...",
+    "noSnapshots": "No snapshots yet",
+    "createToStart": "Create one to get started",
+    "fileCount": "{{count}} files",
+    "filesIn": "Files in {{name}}",
+    "editLayer1": "Edit Layer 1 Topology",
+    "dropFiles": "Drop configuration files here",
+    "chooseFiles": "Choose Files",
+    "chooseFilesAria": "Choose configuration files to upload",
+    "supportedFormats": "Supported: .cfg, .conf, .txt (max 10MB)",
+    "uploading": "Uploading files...",
+    "table": {
+      "filename": "Filename",
+      "size": "Size",
+      "modified": "Modified"
+    },
+    "noFiles": "No files uploaded yet",
+    "uploadToStart": "Upload configuration files to get started",
+    "selectSnapshot": "Select a snapshot to manage files",
+    "createDialog": {
+      "title": "Create New Snapshot",
+      "nameLabel": "Snapshot Name",
+      "creating": "Creating..."
+    },
+    "deleteConfirm": {
+      "title": "Delete Snapshot",
+      "message": "Are you sure you want to delete \"{{name}}\"? This action cannot be undone."
+    }
   },
   "layer1Editor": {
     "title": "Layer 1 Topology Editor",

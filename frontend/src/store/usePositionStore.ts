@@ -4,10 +4,14 @@
  * - Implements debounced saves (300ms) to prevent excessive localStorage writes during dragging
  * - Maintains position history for all loaded snapshots during browser session
  * - Automatically restores saved positions when switching between snapshots
+ * - Limits stored snapshots to prevent unbounded localStorage growth
  */
 import { create } from 'zustand'
 import { persist } from 'zustand/middleware'
 import { logger } from '../utils/logger'
+
+// Maximum number of snapshot positions to keep in storage to prevent memory bloat
+const MAX_SNAPSHOTS = 50
 
 /**
  * Node position coordinates for graph layout
@@ -52,12 +56,25 @@ export const usePositionStore = create<PositionState>()(
 
       savePositions: (snapshotName, positions) => {
         logger.log(`[PositionStore] Saving positions for snapshot: ${snapshotName}, nodes: ${Object.keys(positions).length}`)
-        set((state) => ({
-          positions: {
+        set((state) => {
+          const newPositions = {
             ...state.positions,
             [snapshotName]: positions,
-          },
-        }))
+          }
+
+          // Enforce MAX_SNAPSHOTS limit to prevent unbounded localStorage growth
+          const snapshotKeys = Object.keys(newPositions)
+          if (snapshotKeys.length > MAX_SNAPSHOTS) {
+            // Remove oldest entries (first keys in object) to stay within limit
+            const keysToRemove = snapshotKeys.slice(0, snapshotKeys.length - MAX_SNAPSHOTS)
+            for (const key of keysToRemove) {
+              delete newPositions[key]
+            }
+            logger.log(`[PositionStore] Removed ${keysToRemove.length} old snapshot positions to stay within limit`)
+          }
+
+          return { positions: newPositions }
+        })
       },
 
       getPositions: (snapshotName) => {

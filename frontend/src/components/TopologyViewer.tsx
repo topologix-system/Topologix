@@ -1,4 +1,4 @@
-import { useRef, useCallback, useEffect, memo, useState } from 'react'
+import { useRef, useCallback, useEffect, memo, useState, useMemo } from 'react'
 import {
   ZoomIn,
   ZoomOut,
@@ -9,6 +9,8 @@ import {
   Layers,
   ChevronDown,
   ChevronUp,
+  Search,
+  X,
 } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
 
@@ -27,12 +29,16 @@ import type { LayoutName, LayerType } from '../lib/cytoscape/types'
 export const TopologyViewer = memo(function TopologyViewer() {
   const { t } = useTranslation()
   const [layersDropdownOpen, setLayersDropdownOpen] = useState(false)
+  const [searchQuery, setSearchQuery] = useState('')
+  const [searchDropdownOpen, setSearchDropdownOpen] = useState(false)
+  const searchInputRef = useRef<HTMLInputElement>(null)
 
   // Refs for managing Cytoscape lifecycle and preventing race conditions
   const cytoscapeInitializedRef = useRef(false) // Tracks if Cytoscape is fully initialized
   const containerRef = useRef<HTMLDivElement | null>(null) // DOM container reference
   const isUpdatingRef = useRef(false) // Prevents concurrent initialization
   const savePositionTimeoutRef = useRef<NodeJS.Timeout | null>(null) // Debounce timer for position saving
+  const fitTimeoutRef = useRef<NodeJS.Timeout | null>(null) // Timeout for delayed fit operation
 
   const currentLayout = useUIStore((state) => state.currentLayout)
   const setCurrentLayout = useUIStore((state) => state.setCurrentLayout)
@@ -50,6 +56,41 @@ export const TopologyViewer = memo(function TopologyViewer() {
 
   // Lazy-loaded Cytoscape instance (initialized only when needed)
   const cy = useCytoscapeLazy()
+
+  // Filter nodes based on search query
+  const filteredNodes = useMemo(() => {
+    if (!searchQuery.trim() || !networkData?.node_properties) return []
+    const query = searchQuery.toLowerCase()
+    return networkData.node_properties
+      .filter((node) =>
+        node.node?.toLowerCase().includes(query) ||
+        node.hostname?.toLowerCase().includes(query)
+      )
+      .slice(0, 10) // Limit to 10 results for performance
+  }, [searchQuery, networkData?.node_properties])
+
+  /**
+   * Selects a node and centers/zooms the graph view on it
+   */
+  const handleNodeSearch = useCallback((nodeId: string) => {
+    setSelectedNode(nodeId)
+    setSearchQuery('')
+    setSearchDropdownOpen(false)
+
+    // Center and zoom on the selected node
+    if (cy.cyRef.current) {
+      const node = cy.cyRef.current.getElementById(nodeId)
+      if (node.length > 0) {
+        cy.cyRef.current.animate({
+          center: { eles: node },
+          zoom: 1.5,
+        }, {
+          duration: 300,
+          easing: 'ease-out',
+        })
+      }
+    }
+  }, [cy, setSelectedNode])
 
   /**
    * Initializes Cytoscape instance when container ref is available
@@ -166,7 +207,8 @@ export const TopologyViewer = memo(function TopologyViewer() {
       if (containerRef.current && !isUpdatingRef.current) {
         logger.log('[TopologyViewer] Container exists, triggering initialization')
         cytoscapeInitializedRef.current = false
-        handleContainerRef(containerRef.current)
+        // Intentionally not awaiting - initialization state is managed via isUpdatingRef
+        void handleContainerRef(containerRef.current)
       }
       return
     }
@@ -203,12 +245,24 @@ export const TopologyViewer = memo(function TopologyViewer() {
       logger.log('[TopologyViewer] Restoring node positions immediately')
       cy.restoreNodePositions(savedPositions)
 
-      setTimeout(() => {
+      // Clear any pending fit timeout before setting a new one
+      if (fitTimeoutRef.current) {
+        clearTimeout(fitTimeoutRef.current)
+      }
+      fitTimeoutRef.current = setTimeout(() => {
         cy.fit()
       }, 50)
     } else {
       logger.log(`[TopologyViewer] No saved positions for snapshot: ${currentSnapshotName}, applying layout`)
       cy.updateElements([...elements.nodes, ...elements.edges], true)
+    }
+
+    // Cleanup fit timeout on effect re-run or unmount
+    return () => {
+      if (fitTimeoutRef.current) {
+        clearTimeout(fitTimeoutRef.current)
+        fitTimeoutRef.current = null
+      }
     }
   }, [networkData, cy, handleContainerRef, visibleLayers, currentSnapshotName, getPositions])
 
@@ -232,9 +286,9 @@ export const TopologyViewer = memo(function TopologyViewer() {
    * Includes proper cleanup to prevent memory leaks
    */
   useEffect(() => {
-    logger.log('[TopologyViewer] Setting up event listeners, initialized:', cytoscapeInitializedRef.current)
+    logger.log('[TopologyViewer] Setting up event listeners, isLoaded:', cy.isLoaded)
 
-    if (!cy.cyRef.current || !cytoscapeInitializedRef.current) {
+    if (!cy.cyRef.current || !cy.isLoaded) {
       logger.log('[TopologyViewer] Cytoscape not ready for event listeners')
       return
     }
@@ -360,7 +414,8 @@ export const TopologyViewer = memo(function TopologyViewer() {
         logger.log('[TopologyViewer] Cytoscape instance already destroyed, skipping cleanup')
       }
     }
-  }, [cy, cytoscapeInitializedRef.current, setSelectedNode, setSelectedEdge, currentSnapshotName, savePositions])
+  // Note: Using cy.isLoaded (reactive state) instead of cytoscapeInitializedRef.current (ref, not reactive)
+  }, [cy, cy.isLoaded, setSelectedNode, setSelectedEdge, currentSnapshotName, savePositions])
 
   /**
    * Applies selected layout algorithm to graph
@@ -400,7 +455,7 @@ export const TopologyViewer = memo(function TopologyViewer() {
     } catch (error) {
       const errorMessage = error instanceof Error ? error.message : t('topologyViewer.errors.exportFailed')
       logger.error('PNG Export Error:', error)
-      alert(`Export Failed: ${errorMessage}`)
+      alert(`${t('topologyViewer.exportFailed')}: ${errorMessage}`)
     }
   }, [cy, t])
 
@@ -425,9 +480,9 @@ export const TopologyViewer = memo(function TopologyViewer() {
           <button
             onClick={handleRefresh}
             className="mt-4 px-4 py-2 bg-primary-600 text-white rounded-lg hover:bg-primary-700 focus:outline-none focus:ring-2 focus:ring-primary-600 focus:ring-offset-2 transition-colors"
-            aria-label="Retry loading network data"
+            aria-label={t('topologyViewer.retry')}
           >
-            Retry
+            {t('common.retry')}
           </button>
         </div>
       </div>
@@ -458,7 +513,7 @@ export const TopologyViewer = memo(function TopologyViewer() {
           onClick={() => cy.zoomIn()}
           className="p-2 hover:bg-gray-100 rounded transition-colors focus:outline-none focus:ring-2 focus:ring-primary-600 focus:ring-offset-1"
           aria-label={t('topologyViewer.controls.zoomIn')}
-          title="Zoom In"
+          title={t('topologyViewer.controls.zoomIn')}
         >
           <ZoomIn className="w-5 h-5" aria-hidden="true" />
           <span className="sr-only">{t('topologyViewer.controls.zoomIn')}</span>
@@ -467,7 +522,7 @@ export const TopologyViewer = memo(function TopologyViewer() {
           onClick={() => cy.zoomOut()}
           className="p-2 hover:bg-gray-100 rounded transition-colors focus:outline-none focus:ring-2 focus:ring-primary-600 focus:ring-offset-1"
           aria-label={t('topologyViewer.controls.zoomOut')}
-          title="Zoom Out"
+          title={t('topologyViewer.controls.zoomOut')}
         >
           <ZoomOut className="w-5 h-5" aria-hidden="true" />
           <span className="sr-only">{t('topologyViewer.controls.zoomOut')}</span>
@@ -476,7 +531,7 @@ export const TopologyViewer = memo(function TopologyViewer() {
           onClick={() => cy.fit()}
           className="p-2 hover:bg-gray-100 rounded transition-colors focus:outline-none focus:ring-2 focus:ring-primary-600 focus:ring-offset-1"
           aria-label={t('topologyViewer.controls.fitToScreen')}
-          title="Fit to Screen"
+          title={t('topologyViewer.controls.fitToScreen')}
         >
           <Maximize className="w-5 h-5" aria-hidden="true" />
           <span className="sr-only">{t('topologyViewer.controls.fitToScreen')}</span>
@@ -485,7 +540,7 @@ export const TopologyViewer = memo(function TopologyViewer() {
           onClick={() => handleLayoutChange('cola-spaced')}
           className="p-2 hover:bg-gray-100 rounded transition-colors focus:outline-none focus:ring-2 focus:ring-primary-600 focus:ring-offset-1"
           aria-label={t('topologyViewer.controls.arrangeNodes')}
-          title="Arrange Nodes"
+          title={t('topologyViewer.controls.arrangeNodes')}
         >
           <Maximize2 className="w-5 h-5" aria-hidden="true" />
           <span className="sr-only">{t('topologyViewer.controls.arrangeNodes')}</span>
@@ -495,7 +550,7 @@ export const TopologyViewer = memo(function TopologyViewer() {
           onClick={handleRefresh}
           className="p-2 hover:bg-gray-100 rounded transition-colors focus:outline-none focus:ring-2 focus:ring-primary-600 focus:ring-offset-1"
           aria-label={t('topologyViewer.controls.refresh')}
-          title="Refresh"
+          title={t('topologyViewer.controls.refresh')}
         >
           <RefreshCw className="w-5 h-5" aria-hidden="true" />
           <span className="sr-only">{t('topologyViewer.controls.refresh')}</span>
@@ -504,12 +559,91 @@ export const TopologyViewer = memo(function TopologyViewer() {
           onClick={handleExportPNG}
           className="p-2 hover:bg-gray-100 rounded transition-colors focus:outline-none focus:ring-2 focus:ring-primary-600 focus:ring-offset-1"
           aria-label={t('topologyViewer.controls.exportPng')}
-          title="Export PNG"
+          title={t('topologyViewer.controls.exportPng')}
         >
           <Download className="w-5 h-5" aria-hidden="true" />
           <span className="sr-only">{t('topologyViewer.controls.exportPng')}</span>
         </button>
       </nav>
+
+      {/* Node Search Box */}
+      <div className="absolute top-4 left-1/2 -translate-x-1/2 z-20">
+        <div className="relative">
+          <div className="flex items-center bg-white rounded-lg shadow-lg">
+            <Search className="w-4 h-4 text-gray-400 ml-3" aria-hidden="true" />
+            <input
+              ref={searchInputRef}
+              type="text"
+              value={searchQuery}
+              onChange={(e) => {
+                setSearchQuery(e.target.value)
+                setSearchDropdownOpen(e.target.value.length > 0)
+              }}
+              onFocus={() => searchQuery && setSearchDropdownOpen(true)}
+              onKeyDown={(e) => {
+                if (e.key === 'Escape') {
+                  setSearchQuery('')
+                  setSearchDropdownOpen(false)
+                  searchInputRef.current?.blur()
+                }
+                if (e.key === 'Enter' && filteredNodes.length > 0) {
+                  handleNodeSearch(filteredNodes[0].node)
+                }
+              }}
+              placeholder={t('topologyViewer.search.placeholder')}
+              className="w-64 px-3 py-2 text-sm bg-transparent border-none focus:outline-none focus:ring-0"
+              aria-label={t('topologyViewer.search.label')}
+              aria-expanded={searchDropdownOpen}
+              aria-haspopup="listbox"
+              aria-controls="node-search-results"
+              autoComplete="off"
+            />
+            {searchQuery && (
+              <button
+                onClick={() => {
+                  setSearchQuery('')
+                  setSearchDropdownOpen(false)
+                  searchInputRef.current?.focus()
+                }}
+                className="p-2 hover:bg-gray-100 rounded-r-lg transition-colors"
+                aria-label={t('common.clear')}
+              >
+                <X className="w-4 h-4 text-gray-400" aria-hidden="true" />
+              </button>
+            )}
+          </div>
+
+          {searchDropdownOpen && filteredNodes.length > 0 && (
+            <ul
+              id="node-search-results"
+              className="absolute top-full left-0 right-0 mt-1 bg-white rounded-lg shadow-lg border border-gray-200 max-h-60 overflow-auto z-30"
+              role="listbox"
+              aria-label={t('topologyViewer.search.results')}
+            >
+              {filteredNodes.map((node) => (
+                <li
+                  key={node.node}
+                  role="option"
+                  aria-selected="false"
+                  className="px-4 py-2 hover:bg-primary-50 cursor-pointer text-sm border-b border-gray-100 last:border-b-0"
+                  onClick={() => handleNodeSearch(node.node)}
+                >
+                  <div className="font-medium text-gray-900">{node.hostname || node.node}</div>
+                  {node.hostname && node.hostname !== node.node && (
+                    <div className="text-xs text-gray-500">{node.node}</div>
+                  )}
+                </li>
+              ))}
+            </ul>
+          )}
+
+          {searchDropdownOpen && searchQuery && filteredNodes.length === 0 && (
+            <div className="absolute top-full left-0 right-0 mt-1 bg-white rounded-lg shadow-lg border border-gray-200 px-4 py-3 text-sm text-gray-500">
+              {t('common.noResults')}
+            </div>
+          )}
+        </div>
+      </div>
 
       <div className="absolute top-4 right-4 bg-white rounded-lg shadow-lg p-3 min-w-[200px]">
         <button

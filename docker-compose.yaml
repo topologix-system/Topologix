@@ -46,6 +46,8 @@ services:
       - AUTH_ENABLED=${AUTH_ENABLED:-true}
       - AUTH_DEFAULT_ADMIN_USER=${AUTH_DEFAULT_ADMIN_USER:-admin}
       - AUTH_DEFAULT_ADMIN_PASS=${AUTH_DEFAULT_ADMIN_PASS}
+      # Allow user self-registration (set to 'false' for admin-only registration)
+      - ALLOW_REGISTRATION=${ALLOW_REGISTRATION:-true}
 
       # Security Keys (auto-generated if not set, but should be set in production)
       - SECRET_KEY=${SECRET_KEY}
@@ -59,6 +61,8 @@ services:
       - LOGIN_MAX_ATTEMPTS_PER_USER=${LOGIN_MAX_ATTEMPTS_PER_USER:-5}
       - LOGIN_MAX_ATTEMPTS_PER_IP=${LOGIN_MAX_ATTEMPTS_PER_IP:-10}
       - LOGIN_RATE_WINDOW_MINUTES=${LOGIN_RATE_WINDOW_MINUTES:-15}
+      # Account lockout configuration (OWASP recommendation: 5-10 attempts)
+      - ACCOUNT_LOCKOUT_THRESHOLD=${ACCOUNT_LOCKOUT_THRESHOLD:-5}
       - LOGIN_LOCKOUT_DURATION_MINUTES=${LOGIN_LOCKOUT_DURATION_MINUTES:-30}
 
       # Database configuration (only used when AUTH_ENABLED=true)
@@ -80,6 +84,10 @@ services:
       - PASSWORD_RESET_URL_BASE=${PASSWORD_RESET_URL_BASE:-http://localhost:3000}
 
       # Reverse proxy configuration (see .env.example for details)
+      # Set to 'true' when behind reverse proxy (nginx, Caddy, etc.)
+      # CRITICAL: Must match actual infrastructure to prevent IP spoofing
+      - BEHIND_REVERSE_PROXY=${BEHIND_REVERSE_PROXY:-false}
+      # Number of trusted proxies in chain:
       # - 1 for single nginx (typical Docker setup)
       # - 2 for Caddy/nginx -> nginx -> Flask
       - TRUSTED_PROXY_COUNT=${TRUSTED_PROXY_COUNT:-1}

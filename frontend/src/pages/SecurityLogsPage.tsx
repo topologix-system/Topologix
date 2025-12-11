@@ -66,9 +66,9 @@ export function SecurityLogsPage() {
         <div className="bg-red-50 border border-red-200 rounded-lg p-4 flex items-start gap-2">
           <AlertCircle className="w-5 h-5 text-red-600 flex-shrink-0 mt-0.5" aria-hidden="true" />
           <div>
-            <p className="text-sm font-medium text-red-800">Access Denied</p>
+            <p className="text-sm font-medium text-red-800">{t('securityLogs.accessDenied')}</p>
             <p className="text-xs text-red-600 mt-1">
-              You need admin privileges to access this page.
+              {t('securityLogs.adminRequired')}
             </p>
           </div>
         </div>
@@ -254,13 +254,13 @@ export function SecurityLogsPage() {
             className="inline-flex items-center text-sm text-gray-600 hover:text-gray-900 mb-4"
           >
             <ArrowLeft className="w-4 h-4 mr-1" />
-            Back to Dashboard
+            {t('common.backToDashboard')}
           </Link>
           <div className="flex items-center gap-3">
             <Shield className="w-8 h-8 text-primary-600" />
             <div>
-              <h1 className="text-3xl font-bold text-gray-900">Security Logs</h1>
-              <p className="text-gray-600 mt-1">Monitor login attempts and security events</p>
+              <h1 className="text-3xl font-bold text-gray-900">{t('securityLogs.title')}</h1>
+              <p className="text-gray-600 mt-1">{t('securityLogs.description')}</p>
             </div>
           </div>
         </div>
@@ -281,9 +281,9 @@ export function SecurityLogsPage() {
             <div className="bg-white rounded-lg shadow p-6">
               <div className="flex items-center justify-between">
                 <div>
-                  <p className="text-sm font-medium text-gray-600">Total Attempts</p>
+                  <p className="text-sm font-medium text-gray-600">{t('securityLogs.stats.totalAttempts')}</p>
                   <p className="text-2xl font-bold text-gray-900 mt-2">{stats.total_attempts}</p>
-                  <p className="text-xs text-gray-500 mt-1">All time</p>
+                  <p className="text-xs text-gray-500 mt-1">{t('securityLogs.stats.allTime')}</p>
                 </div>
                 <Activity className="w-8 h-8 text-blue-600" />
               </div>
@@ -292,10 +292,10 @@ export function SecurityLogsPage() {
             <div className="bg-white rounded-lg shadow p-6">
               <div className="flex items-center justify-between">
                 <div>
-                  <p className="text-sm font-medium text-gray-600">Success Rate</p>
+                  <p className="text-sm font-medium text-gray-600">{t('securityLogs.stats.successRate')}</p>
                   <p className="text-2xl font-bold text-gray-900 mt-2">{stats.success_rate}%</p>
                   <p className="text-xs text-gray-500 mt-1">
-                    {stats.failed_attempts} failed
+                    {t('securityLogs.stats.failedCount', { count: stats.failed_attempts })}
                   </p>
                 </div>
                 <TrendingUp className="w-8 h-8 text-green-600" />
@@ -305,10 +305,10 @@ export function SecurityLogsPage() {
             <div className="bg-white rounded-lg shadow p-6">
               <div className="flex items-center justify-between">
                 <div>
-                  <p className="text-sm font-medium text-gray-600">Unique IPs</p>
+                  <p className="text-sm font-medium text-gray-600">{t('securityLogs.stats.uniqueIps')}</p>
                   <p className="text-2xl font-bold text-gray-900 mt-2">{stats.unique_ips}</p>
                   <p className="text-xs text-gray-500 mt-1">
-                    {stats.blocked_ips} blocked
+                    {t('securityLogs.stats.blockedCount', { count: stats.blocked_ips })}
                   </p>
                 </div>
                 <Globe className="w-8 h-8 text-purple-600" />
@@ -318,12 +318,12 @@ export function SecurityLogsPage() {
             <div className="bg-white rounded-lg shadow p-6">
               <div className="flex items-center justify-between">
                 <div>
-                  <p className="text-sm font-medium text-gray-600">Last 24h</p>
+                  <p className="text-sm font-medium text-gray-600">{t('securityLogs.stats.last24h')}</p>
                   <p className="text-2xl font-bold text-gray-900 mt-2">
                     {stats.recent_24h.total}
                   </p>
                   <p className="text-xs text-gray-500 mt-1">
-                    {stats.recent_24h.failed} failed
+                    {t('securityLogs.stats.failedCount', { count: stats.recent_24h.failed })}
                   </p>
                 </div>
                 <Users className="w-8 h-8 text-orange-600" />
@@ -335,7 +335,7 @@ export function SecurityLogsPage() {
         {/* Most Targeted Accounts */}
         {stats && stats.most_targeted_accounts.length > 0 && (
           <div className="bg-white rounded-lg shadow p-6 mb-8">
-            <h2 className="text-lg font-semibold text-gray-900 mb-4">Most Targeted Accounts</h2>
+            <h2 className="text-lg font-semibold text-gray-900 mb-4">{t('securityLogs.mostTargetedAccounts')}</h2>
             <div className="flex flex-wrap gap-2">
               {stats.most_targeted_accounts.map((account) => (
                 <span
@@ -354,7 +354,7 @@ export function SecurityLogsPage() {
 
         {/* Filters */}
         <div className="bg-white rounded-lg shadow p-6 mb-6">
-          <h2 className="text-lg font-semibold text-gray-900 mb-4">Filters</h2>
+          <h2 className="text-lg font-semibold text-gray-900 mb-4">{t('securityLogs.filters.title')}</h2>
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
             {/* IP Address Filter - UPDATED */}
             <div>
@@ -362,7 +362,7 @@ export function SecurityLogsPage() {
                 htmlFor="filter-ip"
                 className="block text-sm font-medium text-gray-700 mb-1"
               >
-                IP Address
+                {t('securityLogs.filters.ipAddress')}
               </label>
               <input
                 type="text"
@@ -372,7 +372,7 @@ export function SecurityLogsPage() {
                     ? 'border-red-300 focus:ring-red-500 focus:border-red-500'
                     : 'border-gray-300 focus:ring-primary-500 focus:border-primary-500'
                 }`}
-                placeholder="192.168.1.1 or 2001:db8::1"
+                placeholder={t('securityLogs.filters.ipPlaceholder')}
                 value={ipInput}
                 onChange={(e) => handleIPInputChange(e.target.value)}
                 onBlur={handleIPBlur}
@@ -398,7 +398,7 @@ export function SecurityLogsPage() {
                 htmlFor="filter-username"
                 className="block text-sm font-medium text-gray-700 mb-1"
               >
-                Username
+                {t('securityLogs.filters.username')}
               </label>
               <input
                 type="text"
@@ -408,7 +408,7 @@ export function SecurityLogsPage() {
                     ? 'border-red-300 focus:ring-red-500 focus:border-red-500'
                     : 'border-gray-300 focus:ring-primary-500 focus:border-primary-500'
                 }`}
-                placeholder="admin"
+                placeholder={t('securityLogs.filters.usernamePlaceholder')}
                 value={usernameInput}
                 onChange={(e) => handleUsernameInputChange(e.target.value)}
                 onBlur={handleUsernameBlur}
@@ -430,7 +430,7 @@ export function SecurityLogsPage() {
 
             <div>
               <label htmlFor="filter-success" className="block text-sm font-medium text-gray-700 mb-1">
-                Status
+                {t('securityLogs.filters.status')}
               </label>
               <select
                 id="filter-success"
@@ -443,9 +443,9 @@ export function SecurityLogsPage() {
                   )
                 }
               >
-                <option value="">All</option>
-                <option value="true">Success</option>
-                <option value="false">Failed</option>
+                <option value="">{t('securityLogs.filters.statusAll')}</option>
+                <option value="true">{t('securityLogs.filters.statusSuccess')}</option>
+                <option value="false">{t('securityLogs.filters.statusFailed')}</option>
               </select>
             </div>
 
@@ -454,7 +454,7 @@ export function SecurityLogsPage() {
                 onClick={handleClearFilters}
                 className="w-full px-4 py-2 bg-gray-100 hover:bg-gray-200 text-gray-700 rounded-md transition"
               >
-                Clear Filters
+                {t('securityLogs.filters.clear')}
               </button>
             </div>
           </div>
@@ -463,7 +463,7 @@ export function SecurityLogsPage() {
         {/* Logs Table */}
         <div className="bg-white rounded-lg shadow overflow-hidden">
           <div className="px-6 py-4 border-b border-gray-200">
-            <h2 className="text-lg font-semibold text-gray-900">Login Attempts</h2>
+            <h2 className="text-lg font-semibold text-gray-900">{t('securityLogs.loginAttempts')}</h2>
           </div>
 
           {logsError ? (
@@ -471,11 +471,11 @@ export function SecurityLogsPage() {
               <div className="bg-red-50 border border-red-200 rounded-lg p-4 flex items-start gap-2">
                 <AlertCircle className="w-5 h-5 text-red-600 flex-shrink-0 mt-0.5" aria-label="Error" />
                 <div>
-                  <p className="text-sm font-medium text-red-800">Error loading logs</p>
+                  <p className="text-sm font-medium text-red-800">{t('securityLogs.errors.loadFailed')}</p>
                   <p className="text-xs text-red-600 mt-1">
                     {logsError instanceof AxiosError && logsError.response?.status === 403
-                      ? 'Access denied. Admin privileges required.'
-                      : 'Failed to load security logs. Please try again later.'}
+                      ? t('securityLogs.errors.accessDenied')
+                      : t('securityLogs.errors.tryAgain')}
                   </p>
                 </div>
               </div>
@@ -488,14 +488,17 @@ export function SecurityLogsPage() {
           {logsData && logsData.total_pages > 1 && (
             <div className="px-6 py-4 border-t border-gray-200 flex items-center justify-between">
               <div className="text-sm text-gray-700">
-                Showing page {logsData.page} of {logsData.total_pages} ({logsData.total} total
-                records)
+                {t('securityLogs.pagination.showing', {
+                  page: logsData.page,
+                  totalPages: logsData.total_pages,
+                  total: logsData.total
+                })}
               </div>
               <div className="flex items-center gap-2">
                 <button
                   onClick={handlePreviousPage}
                   disabled={page === 1}
-                  aria-label="Previous page"
+                  aria-label={t('common.previousPage')}
                   className="px-3 py-1 border border-gray-300 rounded-md hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed"
                 >
                   <ChevronLeft className="w-5 h-5" aria-hidden="true" />
@@ -503,7 +506,7 @@ export function SecurityLogsPage() {
                 <button
                   onClick={handleNextPage}
                   disabled={page >= logsData.total_pages}
-                  aria-label="Next page"
+                  aria-label={t('common.nextPage')}
                   className="px-3 py-1 border border-gray-300 rounded-md hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed"
                 >
                   <ChevronRight className="w-5 h-5" aria-hidden="true" />

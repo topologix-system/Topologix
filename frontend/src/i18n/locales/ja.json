@@ -15,7 +15,10 @@
     "connectionStatus": "接続状態: {{status}}",
     "loadingSnapshot": "スナップショット読み込み中...",
     "openSidebar": "サイドバーを開く",
-    "closeSidebar": "サイドバーを閉じる"
+    "closeSidebar": "サイドバーを閉じる",
+    "myProfile": "マイプロフィール",
+    "userManagement": "ユーザー管理",
+    "securityLogs": "セキュリティログ"
   },
   "sidebar": {
     "title": "サイドバー",
@@ -161,7 +164,30 @@
       "ospf": "OSPF",
       "security": "セキュリティ",
       "allPrefixes": "全プレフィックス",
-      "hsrpGroups": "HSRPグループ"
+      "hsrpGroups": "HSRPグループ",
+      "fields": {
+        "mtu": "MTU",
+        "speed": "速度",
+        "bandwidth": "帯域幅",
+        "ip": "IP",
+        "network": "ネットワーク",
+        "proxyArp": "プロキシARP",
+        "switchportMode": "モード",
+        "accessVlan": "アクセスVLAN",
+        "nativeVlan": "ネイティブVLAN",
+        "allowedVlans": "許可VLAN",
+        "ospfArea": "エリア",
+        "ospfCost": "コスト",
+        "ospfNetworkType": "ネットワークタイプ",
+        "ospfPassive": "パッシブ",
+        "inboundAcl": "受信ACL",
+        "outboundAcl": "送信ACL",
+        "zone": "ゾーン",
+        "active": "有効",
+        "adminStatus": "管理状態",
+        "switchport": "スイッチポート",
+        "channelGroup": "チャネルグループ"
+      }
     },
     "services": {
       "dnsServers": "DNSサーバー:",
@@ -174,7 +200,82 @@
       "noNtp": "NTPサーバーが設定されていません",
       "noLogging": "ロギングサーバーが設定されていません",
       "noSnmp": "SNMPトラップサーバーが設定されていません",
-      "noTacacs": "TACACS+サーバーが設定されていません"
+      "noTacacs": "TACACS+サーバーが設定されていません",
+      "list": "リスト",
+      "methods": "メソッド"
+    },
+    "ospf": {
+      "fields": {
+        "processId": "プロセスID",
+        "routerId": "ルーターID",
+        "referenceBandwidth": "参照帯域幅",
+        "abr": "ABR",
+        "activeInterfaces": "有効インターフェース",
+        "passiveInterfaces": "パッシブインターフェース",
+        "area": "エリア",
+        "cost": "コスト",
+        "networkType": "ネットワークタイプ",
+        "passive": "パッシブ",
+        "local": "ローカル",
+        "remote": "リモート",
+        "remoteInterface": "リモートインターフェース"
+      },
+      "defaults": {
+        "areaType": "Normal"
+      }
+    },
+    "acl": {
+      "fields": {
+        "line": "行",
+        "action": "アクション",
+        "reason": "理由",
+        "blockedByLines": "ブロック行",
+        "sources": "送信元",
+        "destinations": "宛先",
+        "node": "ノード"
+      },
+      "defaults": {
+        "unnamedFilter": "名前なしフィルタ"
+      }
+    },
+    "vlan": {
+      "fields": {
+        "vlanPrefix": "VLAN",
+        "vni": "VNI",
+        "interfaces": "インターフェース",
+        "interfaceVlans": "インターフェースVLAN"
+      }
+    },
+    "config": {
+      "fields": {
+        "type": "タイプ",
+        "name": "名前",
+        "lines": "行",
+        "context": "コンテキスト"
+      }
+    },
+    "eigrp": {
+      "fields": {
+        "interface": "インターフェース",
+        "remote": "リモート",
+        "ip": "IP",
+        "remoteIp": "リモートIP"
+      }
+    },
+    "isis": {
+      "fields": {
+        "interface": "インターフェース",
+        "remote": "リモート",
+        "level": "レベル"
+      }
+    },
+    "vxlan": {
+      "fields": {
+        "vni": "VNI",
+        "localVtep": "ローカルVTEP",
+        "remoteVtep": "リモートVTEP",
+        "multicastGroup": "マルチキャストグループ"
+      }
     },
     "routing": {
       "direct": "直接"
@@ -200,7 +301,38 @@
       "nodeId": "ノードID",
       "format": "フォーマット",
       "domain": "ドメイン",
-      "interfaces": "インターフェース"
+      "interfaces": "インターフェース",
+      "localAs": "ローカルAS",
+      "remoteAs": "リモートAS",
+      "localIp": "ローカルIP",
+      "remoteIp": "リモートIP",
+      "peerAddress": "ピアアドレス",
+      "routerId": "ルーターID",
+      "confederationId": "コンフェデレーションID",
+      "peerGroup": "ピアグループ",
+      "remoteNode": "リモートノード",
+      "localInterface": "ローカルインターフェース",
+      "remoteInterface": "リモートインターフェース",
+      "neighbors": "ネイバー",
+      "origin": "オリジン",
+      "best": "ベスト",
+      "description": "説明",
+      "importPolicy": "インポートポリシー",
+      "exportPolicy": "エクスポートポリシー",
+      "issues": "問題",
+      "sessionType": "セッションタイプ",
+      "addressFamilies": "アドレスファミリー",
+      "asPath": "ASパス",
+      "localPreference": "ローカルプリファレンス",
+      "med": "MED",
+      "weight": "ウェイト",
+      "communities": "コミュニティ"
+    },
+    "bgp": {
+      "status": {
+        "compatible": "互換",
+        "checkConfig": "設定確認"
+      }
     }
   },
   "nodeSelector": {
@@ -492,6 +624,13 @@
       "exportFailed": "PNGのエクスポートに失敗しました",
       "loadFailed": "ネットワークデータの読み込みに失敗しました",
       "connectionIssue": "接続を確認してもう一度お試しください"
+    },
+    "retry": "ネットワークデータの再読み込み",
+    "exportFailed": "エクスポート失敗",
+    "search": {
+      "placeholder": "ノードを検索...",
+      "label": "トポロジー内のノードを検索",
+      "results": "検索結果"
     }
   },
   "common": {
@@ -521,6 +660,7 @@
     "selectAll": "すべて選択",
     "deselectAll": "すべて解除",
     "noResults": "結果が見つかりません",
+    "clear": "クリア",
     "itemsPerPage": "ページあたりの項目数",
     "page": "ページ",
     "of": "/",
@@ -531,12 +671,22 @@
     "interfaces": "インターフェース",
     "routes": "ルート",
     "backToDashboard": "ダッシュボードに戻る",
+    "default": "デフォルト",
+    "none": "なし",
+    "previousPage": "前のページ",
+    "nextPage": "次のページ",
+    "or": "または",
+    "create": "作成",
+    "closeDialog": "ダイアログを閉じる",
     "status": {
       "up": "UP",
       "down": "DOWN",
       "established": "ESTABLISHED",
       "active": "ACTIVE",
       "inactive": "INACTIVE"
+    },
+    "protocol": {
+      "bgp": "BGP"
     }
   },
   "errors": {
@@ -657,6 +807,160 @@
     "invalidTokenMessage": "パスワードリセットリンクが無効または不足しています。新しいリンクを要求してください。",
     "requestNewLink": "新しいリンクを要求",
     "resetSuccess": "パスワードが正常にリセットされました。新しいパスワードでログインできます。"
+  },
+  "traceroute": {
+    "title": "ネットワークトレースルート",
+    "description": "ネットワーク内のパケットフローをシミュレートし、到達性、ルーティングパス、潜在的な問題を分析します。",
+    "sections": {
+      "configuration": "設定",
+      "pathConstraints": "パス制約",
+      "results": "トレースルート結果",
+      "flowDetails": "フロー詳細",
+      "advanced": "詳細オプション"
+    },
+    "fields": {
+      "traceMode": "トレースモード",
+      "sourceIp": "送信元IP",
+      "destinationIp": "宛先IP",
+      "startLocation": "開始位置",
+      "maxTraces": "最大トレース数",
+      "ipProtocols": "IPプロトコル",
+      "applications": "アプリケーション",
+      "sourcePorts": "送信元ポート",
+      "destinationPorts": "宛先ポート",
+      "icmpTypes": "ICMPタイプ",
+      "icmpCodes": "ICMPコード",
+      "dscpValues": "DSCP値",
+      "ecnValues": "ECN値",
+      "packetLength": "パケット長",
+      "endLocation": "終了位置",
+      "transitLocations": "通過位置（必須経由）",
+      "forbiddenLocations": "禁止位置（経由不可）"
+    },
+    "placeholders": {
+      "sourceIp": "例: 192.168.1.1",
+      "destinationIp": "例: 10.0.0.1",
+      "ipProtocols": "例: TCP, UDP, ICMP",
+      "applications": "例: HTTP, SSH, DNS",
+      "sourcePorts": "例: 1024-65535",
+      "destinationPorts": "例: 80, 443",
+      "icmpTypes": "例: 8 (Echo Request)",
+      "icmpCodes": "例: 0",
+      "dscpValues": "例: 0-63",
+      "ecnValues": "例: 0-3",
+      "packetLength": "例: 64-1500"
+    },
+    "modes": {
+      "unidirectional": "片方向",
+      "bidirectional": "双方向"
+    },
+    "options": {
+      "ignoreAcls": "ACL/フィルタを無視"
+    },
+    "buttons": {
+      "run": "トレースルート実行",
+      "running": "実行中...",
+      "reset": "リセット"
+    },
+    "labels": {
+      "flow": "フロー",
+      "trace": "トレース",
+      "hop": "ホップ",
+      "hopsCount": "{{count}} ホップ",
+      "flowPair": "フローペア",
+      "stepsCount": "{{count}} ステップ"
+    },
+    "directions": {
+      "forward": "順方向",
+      "reverse": "逆方向"
+    },
+    "messages": {
+      "noTraces": "このフローで利用可能なトレースはありません",
+      "noHops": "このトレースにホップはありません"
+    },
+    "error": "エラー"
+  },
+  "securityLogs": {
+    "title": "セキュリティログ",
+    "description": "ログイン試行とセキュリティイベントを監視",
+    "accessDenied": "アクセス拒否",
+    "adminRequired": "このページにアクセスするには管理者権限が必要です。",
+    "stats": {
+      "totalAttempts": "総試行回数",
+      "allTime": "全期間",
+      "successRate": "成功率",
+      "failedCount": "{{count}} 失敗",
+      "uniqueIps": "ユニークIP",
+      "blockedCount": "{{count}} ブロック",
+      "last24h": "過去24時間"
+    },
+    "mostTargetedAccounts": "最も狙われたアカウント",
+    "filters": {
+      "title": "フィルター",
+      "ipAddress": "IPアドレス",
+      "ipPlaceholder": "192.168.1.1 または 2001:db8::1",
+      "username": "ユーザー名",
+      "usernamePlaceholder": "admin",
+      "status": "ステータス",
+      "statusAll": "すべて",
+      "statusSuccess": "成功",
+      "statusFailed": "失敗",
+      "clear": "フィルターをクリア"
+    },
+    "loginAttempts": "ログイン試行",
+    "errors": {
+      "loadFailed": "ログの読み込みエラー",
+      "accessDenied": "アクセス拒否。管理者権限が必要です。",
+      "tryAgain": "セキュリティログの読み込みに失敗しました。後でもう一度お試しください。"
+    },
+    "pagination": {
+      "showing": "{{totalPages}}ページ中{{page}}ページ目を表示（合計{{total}}件）"
+    },
+    "table": {
+      "noLogs": "セキュリティログが見つかりません",
+      "status": "ステータス",
+      "time": "時刻",
+      "ipAddress": "IPアドレス",
+      "username": "ユーザー名",
+      "userAgent": "ユーザーエージェント",
+      "success": "成功",
+      "failed": "失敗"
+    }
+  },
+  "snapshots": {
+    "title": "スナップショット管理",
+    "backToTopology": "トポロジーに戻る",
+    "compareSnapshots": "スナップショット比較",
+    "newSnapshot": "新規スナップショット",
+    "listTitle": "スナップショット",
+    "loading": "スナップショットを読み込み中...",
+    "noSnapshots": "スナップショットがまだありません",
+    "createToStart": "開始するには作成してください",
+    "fileCount": "{{count}} ファイル",
+    "filesIn": "{{name}} のファイル",
+    "editLayer1": "レイヤー1トポロジーを編集",
+    "dropFiles": "設定ファイルをここにドロップ",
+    "chooseFiles": "ファイルを選択",
+    "chooseFilesAria": "アップロードする設定ファイルを選択",
+    "supportedFormats": "対応形式: .cfg, .conf, .txt (最大10MB)",
+    "uploading": "ファイルをアップロード中...",
+    "table": {
+      "filename": "ファイル名",
+      "size": "サイズ",
+      "modified": "更新日時"
+    },
+    "noFiles": "まだファイルがアップロードされていません",
+    "uploadToStart": "開始するには設定ファイルをアップロードしてください",
+    "selectSnapshot": "ファイルを管理するにはスナップショットを選択",
+    "createDialog": {
+      "title": "新規スナップショット作成",
+      "nameLabel": "スナップショット名",
+      "creating": "作成中..."
+    },
+    "deleteConfirm": {
+      "title": "スナップショットを削除",
+      "message": "「{{name}}」を削除してもよろしいですか？この操作は取り消せません。"
+    }
   },
   "layer1Editor": {
     "title": "レイヤー1トポロジーエディタ",

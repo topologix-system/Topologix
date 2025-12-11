@@ -8,6 +8,7 @@
  */
 import { useState, useCallback } from 'react'
 import { Link } from 'react-router-dom'
+import { useTranslation } from 'react-i18next'
 import {
   Plus,
   Upload,
@@ -30,14 +31,18 @@ import {
   useActivateSnapshot,
 } from '../hooks'
 import { useSnapshotStore } from '../store'
+import { ConfirmDialog } from '../components/ConfirmDialog'
 import type { Snapshot } from '../types'
 
 export function SnapshotManagement() {
+  const { t } = useTranslation()
   const [selectedSnapshot, setSelectedSnapshot] = useState<string | null>(null)
   const [showCreateDialog, setShowCreateDialog] = useState(false)
   const [newSnapshotName, setNewSnapshotName] = useState('')
   const [dragOver, setDragOver] = useState(false)
   const [validationError, setValidationError] = useState('')
+  const [deleteConfirmOpen, setDeleteConfirmOpen] = useState(false)
+  const [snapshotToDelete, setSnapshotToDelete] = useState<string | null>(null)
 
   /**
    * Global Zustand state for active snapshot tracking
@@ -107,26 +112,46 @@ export function SnapshotManagement() {
   }, [newSnapshotName, createMutation])
 
   /**
-   * Handle snapshot deletion with confirmation
+   * Handle snapshot deletion with confirmation dialog
+   * Opens ConfirmDialog instead of native window.confirm
+   */
+  const handleDelete = useCallback((name: string) => {
+    setSnapshotToDelete(name)
+    setDeleteConfirmOpen(true)
+  }, [])
+
+  /**
+   * Confirm and execute snapshot deletion
    * Updates selected snapshot and current snapshot state if deleted snapshot was active
    */
-  const handleDelete = useCallback(
-    (name: string) => {
-      if (!confirm(`Delete snapshot "${name}"?`)) return
+  const confirmDelete = useCallback(() => {
+    if (!snapshotToDelete) return
 
-      deleteMutation.mutate(name, {
-        onSuccess: () => {
-          if (selectedSnapshot === name) {
-            setSelectedSnapshot(null)
-          }
-          if (currentSnapshotName === name) {
-            setCurrentSnapshotName(null)
-          }
-        },
-      })
-    },
-    [deleteMutation, selectedSnapshot, currentSnapshotName, setCurrentSnapshotName]
-  )
+    deleteMutation.mutate(snapshotToDelete, {
+      onSuccess: () => {
+        if (selectedSnapshot === snapshotToDelete) {
+          setSelectedSnapshot(null)
+        }
+        if (currentSnapshotName === snapshotToDelete) {
+          setCurrentSnapshotName(null)
+        }
+        setDeleteConfirmOpen(false)
+        setSnapshotToDelete(null)
+      },
+      onError: () => {
+        setDeleteConfirmOpen(false)
+        setSnapshotToDelete(null)
+      },
+    })
+  }, [deleteMutation, snapshotToDelete, selectedSnapshot, currentSnapshotName, setCurrentSnapshotName])
+
+  /**
+   * Cancel snapshot deletion
+   */
+  const cancelDelete = useCallback(() => {
+    setDeleteConfirmOpen(false)
+    setSnapshotToDelete(null)
+  }, [])
 
   /**
    * Handle file upload to selected snapshot
@@ -209,29 +234,29 @@ export function SnapshotManagement() {
             <Link
               to="/"
               className="p-2 hover:bg-gray-100 rounded-lg transition-colors focus:outline-none focus:ring-2 focus:ring-primary-600 focus:ring-offset-2"
-              aria-label="Back to topology view"
+              aria-label={t('snapshots.backToTopology')}
             >
               <ArrowLeft className="w-5 h-5" aria-hidden="true" />
-              <span className="sr-only">Back to Topology</span>
+              <span className="sr-only">{t('snapshots.backToTopology')}</span>
             </Link>
-            <h1 className="text-2xl font-bold text-gray-900">Snapshot Management</h1>
+            <h1 className="text-2xl font-bold text-gray-900">{t('snapshots.title')}</h1>
           </div>
           <div className="flex items-center gap-3">
             <Link
               to="/snapshots/compare"
               className="flex items-center gap-2 px-4 py-2 bg-gray-100 text-gray-700 rounded-lg hover:bg-gray-200 transition-colors font-medium shadow-sm hover:shadow-md focus:outline-none focus:ring-2 focus:ring-primary-600 focus:ring-offset-2"
-              aria-label="Compare snapshots"
+              aria-label={t('snapshots.compareSnapshots')}
             >
               <GitCompare className="w-4 h-4" aria-hidden="true" />
-              Compare Snapshots
+              {t('snapshots.compareSnapshots')}
             </Link>
             <button
               onClick={() => setShowCreateDialog(true)}
               className="flex items-center gap-2 px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors font-medium shadow-sm hover:shadow-md focus:outline-none focus:ring-2 focus:ring-primary-600 focus:ring-offset-2"
-              aria-label="Create new snapshot"
+              aria-label={t('snapshots.newSnapshot')}
             >
               <Plus className="w-4 h-4" aria-hidden="true" />
-              New Snapshot
+              {t('snapshots.newSnapshot')}
             </button>
           </div>
         </div>
@@ -240,20 +265,20 @@ export function SnapshotManagement() {
       {/* Main content */}
       <div className="flex-1 flex overflow-hidden">
         {/* Snapshots list */}
-        <nav className="w-96 bg-white border-r border-gray-200 overflow-y-auto" aria-label="Snapshots list">
+        <nav className="w-96 bg-white border-r border-gray-200 overflow-y-auto" aria-label={t('snapshots.listTitle')}>
           <div className="p-4">
-            <h2 className="text-lg font-semibold text-gray-900 mb-4">Snapshots</h2>
+            <h2 className="text-lg font-semibold text-gray-900 mb-4">{t('snapshots.listTitle')}</h2>
 
             {loadingSnapshots ? (
               <div className="text-center py-8 text-gray-700 font-medium" role="status" aria-live="polite">
-                <span className="sr-only">Loading snapshots...</span>
-                Loading...
+                <span className="sr-only">{t('snapshots.loading')}</span>
+                {t('common.loading')}
               </div>
             ) : !snapshots || snapshots.length === 0 ? (
               <div className="text-center py-8 text-gray-700">
                 <FolderOpen className="w-12 h-12 mx-auto mb-3 text-gray-500" aria-hidden="true" />
-                <p className="font-semibold text-base">No snapshots yet</p>
-                <p className="text-sm mt-2 text-gray-700">Create one to get started</p>
+                <p className="font-semibold text-base">{t('snapshots.noSnapshots')}</p>
+                <p className="text-sm mt-2 text-gray-700">{t('snapshots.createToStart')}</p>
               </div>
             ) : (
               <div className="space-y-2" role="list" aria-label="Available snapshots">
@@ -304,7 +329,7 @@ export function SnapshotManagement() {
                       ) : null}
                     </div>
                     <div className="text-sm text-gray-800 space-y-1 font-medium">
-                      <p>{snapshot.file_count} files</p>
+                      <p>{t('snapshots.fileCount', { count: snapshot.file_count })}</p>
                       <p>{formatBytes(snapshot.size_bytes)}</p>
                       <p className="text-xs text-gray-700 font-normal">
                         {new Date(snapshot.created_at).toLocaleString()}
@@ -338,14 +363,14 @@ export function SnapshotManagement() {
             <>
               <div className="flex items-center justify-between mb-4">
                 <h2 className="text-xl font-semibold text-gray-900">
-                  Files in {selectedSnapshot}
+                  {t('snapshots.filesIn', { name: selectedSnapshot })}
                 </h2>
                 <Link
                   to={`/snapshots/${selectedSnapshot}/layer1-topology`}
                   className="inline-flex items-center gap-2 px-4 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 transition-colors"
                 >
                   <Cable className="w-4 h-4" />
-                  Edit Layer 1 Topology
+                  {t('snapshots.editLayer1')}
                 </Link>
               </div>
 
@@ -365,28 +390,28 @@ export function SnapshotManagement() {
               >
                 <Upload className="w-12 h-12 mx-auto mb-4 text-gray-500" aria-hidden="true" />
                 <p className="text-lg font-semibold text-gray-900 mb-2">
-                  Drop configuration files here
+                  {t('snapshots.dropFiles')}
                 </p>
-                <p className="text-sm text-gray-700 mb-4 font-medium">or</p>
+                <p className="text-sm text-gray-700 mb-4 font-medium">{t('common.or')}</p>
                 <label className="inline-flex items-center gap-2 px-4 py-2 bg-white border border-gray-300 rounded-lg cursor-pointer hover:bg-gray-50 hover:border-gray-400 transition-colors font-medium text-gray-800 focus-within:ring-2 focus-within:ring-primary-600">
                   <Upload className="w-4 h-4" aria-hidden="true" />
-                  Choose Files
+                  {t('snapshots.chooseFiles')}
                   <input
                     type="file"
                     multiple
                     accept=".cfg,.conf,.txt"
                     className="hidden"
                     onChange={(e) => handleFileUpload(e.target.files)}
-                    aria-label="Choose configuration files to upload"
+                    aria-label={t('snapshots.chooseFilesAria')}
                     aria-describedby="upload-instructions"
                   />
                 </label>
                 <p id="upload-instructions" className="text-xs text-gray-700 mt-3 font-medium">
-                  Supported: .cfg, .conf, .txt (max 10MB)
+                  {t('snapshots.supportedFormats')}
                 </p>
                 {uploadMutation.isPending && (
                   <div role="status" aria-live="polite" className="mt-4">
-                    <span className="text-sm text-blue-600">Uploading files...</span>
+                    <span className="text-sm text-blue-600">{t('snapshots.uploading')}</span>
                   </div>
                 )}
               </div>
@@ -398,13 +423,13 @@ export function SnapshotManagement() {
                     <thead className="bg-gray-50">
                       <tr>
                         <th className="px-6 py-3 text-left text-xs font-semibold text-gray-700 uppercase tracking-wider">
-                          Filename
+                          {t('snapshots.table.filename')}
                         </th>
                         <th className="px-6 py-3 text-left text-xs font-semibold text-gray-700 uppercase tracking-wider">
-                          Size
+                          {t('snapshots.table.size')}
                         </th>
                         <th className="px-6 py-3 text-left text-xs font-semibold text-gray-700 uppercase tracking-wider">
-                          Modified
+                          {t('snapshots.table.modified')}
                         </th>
                       </tr>
                     </thead>
@@ -427,8 +452,8 @@ export function SnapshotManagement() {
                 </div>
               ) : (
                 <div className="text-center py-12 text-gray-700">
-                  <p className="font-semibold text-base">No files uploaded yet</p>
-                  <p className="text-sm mt-2 text-gray-700">Upload configuration files to get started</p>
+                  <p className="font-semibold text-base">{t('snapshots.noFiles')}</p>
+                  <p className="text-sm mt-2 text-gray-700">{t('snapshots.uploadToStart')}</p>
                 </div>
               )}
             </>
@@ -436,7 +461,7 @@ export function SnapshotManagement() {
             <div className="flex items-center justify-center h-full text-gray-700">
               <div className="text-center">
                 <FolderOpen className="w-16 h-16 mx-auto mb-4 text-gray-500" />
-                <p className="text-lg font-semibold">Select a snapshot to manage files</p>
+                <p className="text-lg font-semibold">{t('snapshots.selectSnapshot')}</p>
               </div>
             </div>
           )}
@@ -458,12 +483,12 @@ export function SnapshotManagement() {
           >
             <div className="flex items-center justify-between mb-4">
               <h3 id="create-dialog-title" className="text-lg font-semibold text-gray-900">
-                Create New Snapshot
+                {t('snapshots.createDialog.title')}
               </h3>
               <button
                 onClick={() => setShowCreateDialog(false)}
                 className="p-1 hover:bg-gray-100 rounded focus:outline-none focus:ring-2 focus:ring-primary-600"
-                aria-label="Close dialog"
+                aria-label={t('common.closeDialog')}
               >
                 <X className="w-5 h-5" aria-hidden="true" />
               </button>
@@ -472,7 +497,7 @@ export function SnapshotManagement() {
             <div className="space-y-4">
               <div>
                 <label htmlFor="snapshot-name-input" className="block text-sm font-medium text-gray-800 mb-1">
-                  Snapshot Name
+                  {t('snapshots.createDialog.nameLabel')}
                 </label>
                 <input
                   id="snapshot-name-input"
@@ -512,7 +537,7 @@ export function SnapshotManagement() {
                   }}
                   className="px-4 py-2 text-gray-800 hover:bg-gray-100 rounded-lg transition-colors font-medium focus:outline-none focus:ring-2 focus:ring-primary-600 focus:ring-offset-1"
                 >
-                  Cancel
+                  {t('common.cancel')}
                 </button>
                 <button
                   onClick={handleCreate}
@@ -520,13 +545,26 @@ export function SnapshotManagement() {
                   className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed transition-colors font-medium focus:outline-none focus:ring-2 focus:ring-primary-600 focus:ring-offset-1"
                   aria-busy={createMutation.isPending}
                 >
-                  {createMutation.isPending ? 'Creating...' : 'Create'}
+                  {createMutation.isPending ? t('snapshots.createDialog.creating') : t('common.create')}
                 </button>
               </div>
             </div>
           </div>
         </div>
       )}
+
+      {/* Delete confirmation dialog */}
+      <ConfirmDialog
+        isOpen={deleteConfirmOpen}
+        title={t('snapshots.deleteConfirm.title', 'Delete Snapshot')}
+        message={t('snapshots.deleteConfirm.message', { name: snapshotToDelete }) || `Are you sure you want to delete "${snapshotToDelete}"? This action cannot be undone.`}
+        confirmText={t('common.delete', 'Delete')}
+        cancelText={t('common.cancel', 'Cancel')}
+        onConfirm={confirmDelete}
+        onCancel={cancelDelete}
+        variant="danger"
+        isLoading={deleteMutation.isPending}
+      />
     </div>
   )
 }

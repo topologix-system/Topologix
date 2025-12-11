@@ -1,4 +1,4 @@
-import { useEffect } from 'react'
+import { useEffect, useRef } from 'react'
 import { Navigate, useLocation } from 'react-router-dom'
 import { authAPI } from '../services/api'
 import { useAuthStore } from '../store/useAuthStore'
@@ -25,16 +25,21 @@ export function ProtectedRoute({ children }: ProtectedRouteProps) {
   const location = useLocation()
   const checkAuth = useAuthStore((state) => state.checkAuth)
 
+  // Use ref to access latest checkAuth without causing effect re-runs
+  const checkAuthRef = useRef(checkAuth)
+  checkAuthRef.current = checkAuth
+
   // Periodically check authentication status (every 30 seconds)
+  // Empty dependency array ensures interval is created only once
   useEffect(() => {
     if (!authAPI.isAuthEnabled()) return
 
     // Initial check
-    checkAuth()
+    checkAuthRef.current()
 
     // Set up interval to check every 30 seconds
     const interval = setInterval(() => {
-      checkAuth()
+      checkAuthRef.current()
 
       // If not authenticated, the component will re-render and redirect
       if (!authAPI.isAuthenticated()) {
@@ -43,7 +48,7 @@ export function ProtectedRoute({ children }: ProtectedRouteProps) {
     }, 30 * 1000)
 
     return () => clearInterval(interval)
-  }, [checkAuth])
+  }, [])
 
   // Skip authentication check if auth is disabled (development mode)
   if (!authAPI.isAuthEnabled()) {

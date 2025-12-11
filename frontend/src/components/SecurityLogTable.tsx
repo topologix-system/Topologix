@@ -7,6 +7,7 @@
  * - Used in SecurityLogsPage for admin security audit tracking
  */
 import { CheckCircle, XCircle, Monitor, User, Calendar } from 'lucide-react'
+import { useTranslation } from 'react-i18next'
 import type { SecurityLog } from '../types'
 import { TIMEZONE } from '../constants'
 import { logger } from '../utils/logger'
@@ -72,6 +73,8 @@ interface SecurityLogTableProps {
 }
 
 export function SecurityLogTable({ logs, isLoading }: SecurityLogTableProps) {
+  const { t } = useTranslation()
+
   if (isLoading) {
     return (
       <div className="flex items-center justify-center py-12">
@@ -83,7 +86,7 @@ export function SecurityLogTable({ logs, isLoading }: SecurityLogTableProps) {
   if (!logs || logs.length === 0) {
     return (
       <div className="text-center py-12 text-gray-500">
-        <p>No security logs found</p>
+        <p>{t('securityLogs.table.noLogs')}</p>
       </div>
     )
   }
@@ -96,31 +99,31 @@ export function SecurityLogTable({ logs, isLoading }: SecurityLogTableProps) {
             scope="col"
             className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider"
           >
-            Status
+            {t('securityLogs.table.status')}
           </th>
           <th
             scope="col"
             className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider"
           >
-            Time
+            {t('securityLogs.table.time')}
           </th>
           <th
             scope="col"
             className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider"
           >
-            IP Address
+            {t('securityLogs.table.ipAddress')}
           </th>
           <th
             scope="col"
             className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider"
           >
-            Username
+            {t('securityLogs.table.username')}
           </th>
           <th
             scope="col"
             className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider"
           >
-            User Agent
+            {t('securityLogs.table.userAgent')}
           </th>
         </tr>
       </thead>
@@ -131,12 +134,12 @@ export function SecurityLogTable({ logs, isLoading }: SecurityLogTableProps) {
               {log.success ? (
                 <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-green-100 text-green-800">
                   <CheckCircle className="w-4 h-4 mr-1" />
-                  Success
+                  {t('securityLogs.table.success')}
                 </span>
               ) : (
                 <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-red-100 text-red-800">
                   <XCircle className="w-4 h-4 mr-1" />
-                  Failed
+                  {t('securityLogs.table.failed')}
                 </span>
               )}
             </td>
