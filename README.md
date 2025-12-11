@@ -77,6 +77,17 @@ Configure Topologix by editing `.env`. See [.env.example](.env.example) for comp
 | `AUTH_DEFAULT_ADMIN_PASS` | Default admin password | _(empty)_ |
 | `JWT_SECRET_KEY` | JWT secret (auto-generated if empty) | _(empty)_ |
 | `CSRF_SECRET_KEY` | CSRF secret (auto-generated if empty) | _(empty)_ |
+| `ALLOW_REGISTRATION` | Allow user self-registration | `true` |
+| `ACCOUNT_LOCKOUT_THRESHOLD` | Failed login attempts before lockout | `5` |
+
+### Reverse Proxy
+
+| Variable | Description | Default |
+|----------|-------------|---------|
+| `BEHIND_REVERSE_PROXY` | Enable reverse proxy mode (nginx, Caddy, etc.) | `false` |
+| `TRUSTED_PROXY_COUNT` | Number of trusted proxy layers | `1` |
+
+**⚠️ Security Warning**: `BEHIND_REVERSE_PROXY` must match your infrastructure. Setting `true` without actual proxy allows IP spoofing. See `.env.example` for details.
 
 ### Database (when AUTH_ENABLED=true)
 

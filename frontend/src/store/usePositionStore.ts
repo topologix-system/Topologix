@@ -4,9 +4,14 @@
  * - Implements debounced saves (300ms) to prevent excessive localStorage writes during dragging
  * - Maintains position history for all loaded snapshots during browser session
  * - Automatically restores saved positions when switching between snapshots
+ * - Limits stored snapshots to prevent unbounded localStorage growth
  */
 import { create } from 'zustand'
 import { persist } from 'zustand/middleware'
+import { logger } from '../utils/logger'
+
+// Maximum number of snapshot positions to keep in storage to prevent memory bloat
+const MAX_SNAPSHOTS = 50
 
 /**
  * Node position coordinates for graph layout
@@ -50,27 +55,40 @@ export const usePositionStore = create<PositionState>()(
       positions: {},
 
       savePositions: (snapshotName, positions) => {
-        console.log(`[PositionStore] Saving positions for snapshot: ${snapshotName}, nodes: ${Object.keys(positions).length}`)
-        set((state) => ({
-          positions: {
+        logger.log(`[PositionStore] Saving positions for snapshot: ${snapshotName}, nodes: ${Object.keys(positions).length}`)
+        set((state) => {
+          const newPositions = {
             ...state.positions,
             [snapshotName]: positions,
-          },
-        }))
+          }
+
+          // Enforce MAX_SNAPSHOTS limit to prevent unbounded localStorage growth
+          const snapshotKeys = Object.keys(newPositions)
+          if (snapshotKeys.length > MAX_SNAPSHOTS) {
+            // Remove oldest entries (first keys in object) to stay within limit
+            const keysToRemove = snapshotKeys.slice(0, snapshotKeys.length - MAX_SNAPSHOTS)
+            for (const key of keysToRemove) {
+              delete newPositions[key]
+            }
+            logger.log(`[PositionStore] Removed ${keysToRemove.length} old snapshot positions to stay within limit`)
+          }
+
+          return { positions: newPositions }
+        })
       },
 
       getPositions: (snapshotName) => {
         const positions = get().positions[snapshotName]
         if (positions) {
-          console.log(`[PositionStore] Retrieved ${Object.keys(positions).length} positions for snapshot: ${snapshotName}`)
+          logger.log(`[PositionStore] Retrieved ${Object.keys(positions).length} positions for snapshot: ${snapshotName}`)
         } else {
-          console.log(`[PositionStore] No saved positions found for snapshot: ${snapshotName}`)
+          logger.log(`[PositionStore] No saved positions found for snapshot: ${snapshotName}`)
         }
         return positions
       },
 
       clearPositions: (snapshotName) => {
-        console.log(`[PositionStore] Clearing positions for snapshot: ${snapshotName}`)
+        logger.log(`[PositionStore] Clearing positions for snapshot: ${snapshotName}`)
         set((state) => {
           const newPositions = { ...state.positions }
           delete newPositions[snapshotName]
@@ -79,7 +97,7 @@ export const usePositionStore = create<PositionState>()(
       },
 
       clearAllPositions: () => {
-        console.log('[PositionStore] Clearing all saved positions')
+        logger.log('[PositionStore] Clearing all saved positions')
         set({ positions: {} })
       },
     }),

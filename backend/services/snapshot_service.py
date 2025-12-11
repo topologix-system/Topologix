@@ -50,10 +50,10 @@ class SnapshotService:
             if not configs_dir.exists():
                 continue
 
-            # Count config files
-            file_count = len(list(configs_dir.glob('*.cfg'))) + \
-                        len(list(configs_dir.glob('*.conf'))) + \
-                        len(list(configs_dir.glob('*.txt')))
+            # Count config files using generators to avoid loading full lists into memory
+            file_count = sum(1 for _ in configs_dir.glob('*.cfg')) + \
+                        sum(1 for _ in configs_dir.glob('*.conf')) + \
+                        sum(1 for _ in configs_dir.glob('*.txt'))
 
             # Get creation time
             stat = snapshot_path.stat()

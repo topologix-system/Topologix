@@ -51,6 +51,7 @@ interface SectionProps {
  * - Displays JSON data or "No issues found" message
  */
 function Section({ title, icon, isLoading, data, defaultOpen = false, severity = 'info' }: SectionProps) {
+  const { t } = useTranslation()
   const [isOpen, setIsOpen] = useState(defaultOpen)
   const sectionId = `validation-section-${title.toLowerCase().replace(/\s+/g, '-')}`
 
@@ -125,12 +126,12 @@ function Section({ title, icon, isLoading, data, defaultOpen = false, severity =
           {isLoading ? (
             <div className="flex items-center gap-2 text-sm text-gray-700 py-3" role="status" aria-live="polite">
               <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-primary-600" aria-hidden="true"></div>
-              <span>Loading {title.toLowerCase()}...</span>
+              <span>{t('validation.loading', { section: title.toLowerCase() })}</span>
             </div>
           ) : !hasData ? (
             <div className="flex items-center gap-2 text-sm text-gray-700 py-3">
               <CheckCircle className="w-4 h-4 text-green-600" aria-hidden="true" />
-              <span>No issues found</span>
+              <span>{t('validation.noIssues')}</span>
             </div>
           ) : (
             <div className="max-h-96 overflow-y-auto mt-3">

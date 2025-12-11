@@ -41,7 +41,7 @@ export function ProtectedRoute({ children }: ProtectedRouteProps) {
     refetchInterval: 5 * 1000, // Check every 5 seconds for faster timeout detection
     enabled: authAPI.isAuthEnabled(),
     staleTime: 0, // Always consider data stale to ensure fresh checks
-    cacheTime: 0, // Don't cache authentication status
+    gcTime: 0, // Don't cache authentication status
   })
 
   // Skip authentication check if auth is disabled (development mode)

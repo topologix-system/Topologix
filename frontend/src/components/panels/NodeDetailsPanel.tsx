@@ -6,8 +6,9 @@
  * - Largest component in codebase (1830 lines) - handles complex nested data structures from network devices
  * - Interactive search and filtering within each tab for efficient navigation
  */
-import { useState, memo, useMemo, useCallback } from 'react'
+import { useState, memo, useMemo, useCallback, useRef } from 'react'
 import { useTranslation } from 'react-i18next'
+import { useVirtualizer } from '@tanstack/react-virtual'
 import { useUIStore } from '../../store'
 import { useAllNetworkData } from '../../hooks'
 import {
@@ -482,10 +483,10 @@ function InterfacesTab({ node, interfaces }: { node: any; interfaces: any[] }) {
                           <p className="font-medium text-gray-900 mb-1">{t('nodeDetails.interface.physical')}</p>
                           <div className="space-y-1 text-gray-700">
                             <div>{t('nodeDetails.fields.type')}: {iface.interface_type || t('common.notAvailable')}</div>
-                            <div>MTU: {iface.mtu || t('common.notAvailable')}</div>
-                            <div>Speed: {iface.speed || t('common.notAvailable')}</div>
-                            <div>Bandwidth: {iface.bandwidth || t('common.notAvailable')}</div>
-                            <div>Description: {iface.description || t('common.notAvailable')}</div>
+                            <div>{t('nodeDetails.interface.fields.mtu')}: {iface.mtu || t('common.notAvailable')}</div>
+                            <div>{t('nodeDetails.interface.fields.speed')}: {iface.speed || t('common.notAvailable')}</div>
+                            <div>{t('nodeDetails.interface.fields.bandwidth')}: {iface.bandwidth || t('common.notAvailable')}</div>
+                            <div>{t('nodeDetails.fields.description')}: {iface.description || t('common.notAvailable')}</div>
                           </div>
                         </div>
 
@@ -493,10 +494,10 @@ function InterfacesTab({ node, interfaces }: { node: any; interfaces: any[] }) {
                         <div>
                           <p className="font-medium text-gray-900 mb-1">{t('nodeDetails.interface.layer3')}</p>
                           <div className="space-y-1 text-gray-700">
-                            <div>IP: {iface.primary_address || t('common.notAvailable')}</div>
-                            <div>Network: {iface.primary_network || t('common.notAvailable')}</div>
-                            <div>VRF: {iface.vrf || 'default'}</div>
-                            <div>Proxy ARP: {iface.proxy_arp ? t('common.yes') : t('common.no')}</div>
+                            <div>{t('nodeDetails.interface.fields.ip')}: {iface.primary_address || t('common.notAvailable')}</div>
+                            <div>{t('nodeDetails.interface.fields.network')}: {iface.primary_network || t('common.notAvailable')}</div>
+                            <div>{t('nodeDetails.fields.vrf')}: {iface.vrf || t('common.default')}</div>
+                            <div>{t('nodeDetails.interface.fields.proxyArp')}: {iface.proxy_arp ? t('common.yes') : t('common.no')}</div>
                           </div>
                         </div>
 
@@ -505,10 +506,10 @@ function InterfacesTab({ node, interfaces }: { node: any; interfaces: any[] }) {
                           <div>
                             <p className="font-medium text-gray-900 mb-1">{t('nodeDetails.interface.vlan')}</p>
                             <div className="space-y-1 text-gray-700">
-                              <div>Mode: {iface.switchport_mode || t('common.notAvailable')}</div>
-                              <div>Access VLAN: {iface.access_vlan || t('common.notAvailable')}</div>
-                              <div>Native VLAN: {iface.native_vlan || t('common.notAvailable')}</div>
-                              <div>Allowed VLANs: {iface.allowed_vlans || t('common.notAvailable')}</div>
+                              <div>{t('nodeDetails.interface.fields.switchportMode')}: {iface.switchport_mode || t('common.notAvailable')}</div>
+                              <div>{t('nodeDetails.interface.fields.accessVlan')}: {iface.access_vlan || t('common.notAvailable')}</div>
+                              <div>{t('nodeDetails.interface.fields.nativeVlan')}: {iface.native_vlan || t('common.notAvailable')}</div>
+                              <div>{t('nodeDetails.interface.fields.allowedVlans')}: {iface.allowed_vlans || t('common.notAvailable')}</div>
                             </div>
                           </div>
                         )}
@@ -518,10 +519,10 @@ function InterfacesTab({ node, interfaces }: { node: any; interfaces: any[] }) {
                           <div>
                             <p className="font-medium text-gray-900 mb-1">{t('nodeDetails.interface.ospf')}</p>
                             <div className="space-y-1 text-gray-700">
-                              <div>Area: {iface.ospf_area_name || t('common.notAvailable')}</div>
-                              <div>Cost: {iface.ospf_cost || t('common.notAvailable')}</div>
-                              <div>Network Type: {iface.ospf_network_type || t('common.notAvailable')}</div>
-                              <div>Passive: {iface.ospf_passive ? t('common.yes') : t('common.no')}</div>
+                              <div>{t('nodeDetails.interface.fields.ospfArea')}: {iface.ospf_area_name || t('common.notAvailable')}</div>
+                              <div>{t('nodeDetails.interface.fields.ospfCost')}: {iface.ospf_cost || t('common.notAvailable')}</div>
+                              <div>{t('nodeDetails.interface.fields.ospfNetworkType')}: {iface.ospf_network_type || t('common.notAvailable')}</div>
+                              <div>{t('nodeDetails.interface.fields.ospfPassive')}: {iface.ospf_passive ? t('common.yes') : t('common.no')}</div>
                             </div>
                           </div>
                         )}
@@ -531,9 +532,9 @@ function InterfacesTab({ node, interfaces }: { node: any; interfaces: any[] }) {
                           <div>
                             <p className="font-medium text-gray-900 mb-1">{t('nodeDetails.interface.security')}</p>
                             <div className="space-y-1 text-gray-700">
-                              <div>Inbound ACL: {iface.incoming_filter_name || t('common.notAvailable')}</div>
-                              <div>Outbound ACL: {iface.outgoing_filter_name || t('common.notAvailable')}</div>
-                              <div>Zone: {iface.zone || t('common.notAvailable')}</div>
+                              <div>{t('nodeDetails.interface.fields.inboundAcl')}: {iface.incoming_filter_name || t('common.notAvailable')}</div>
+                              <div>{t('nodeDetails.interface.fields.outboundAcl')}: {iface.outgoing_filter_name || t('common.notAvailable')}</div>
+                              <div>{t('nodeDetails.interface.fields.zone')}: {iface.zone || t('common.notAvailable')}</div>
                             </div>
                           </div>
                         )}
@@ -542,10 +543,10 @@ function InterfacesTab({ node, interfaces }: { node: any; interfaces: any[] }) {
                         <div>
                           <p className="font-medium text-gray-900 mb-1">{t('nodeDetails.fields.status')}</p>
                           <div className="space-y-1 text-gray-700">
-                            <div>Active: {iface.active ? t('common.yes') : t('common.no')}</div>
-                            <div>Admin Status: {iface.admin_up ? t('common.status.up') : t('common.status.down')}</div>
-                            <div>Switchport: {iface.switchport ? t('common.yes') : t('common.no')}</div>
-                            <div>Channel Group: {iface.channel_group || t('common.notAvailable')}</div>
+                            <div>{t('nodeDetails.interface.fields.active')}: {iface.active ? t('common.yes') : t('common.no')}</div>
+                            <div>{t('nodeDetails.interface.fields.adminStatus')}: {iface.admin_up ? t('common.status.up') : t('common.status.down')}</div>
+                            <div>{t('nodeDetails.interface.fields.switchport')}: {iface.switchport ? t('common.yes') : t('common.no')}</div>
+                            <div>{t('nodeDetails.interface.fields.channelGroup')}: {iface.channel_group || t('common.notAvailable')}</div>
                           </div>
                         </div>
                       </div>
@@ -599,44 +600,117 @@ function InterfacesTab({ node, interfaces }: { node: any; interfaces: any[] }) {
   )
 }
 
-// Routing Tab
+// Routing Tab with virtual scrolling for 10K+ routes
 function RoutingTab({ routes }: { routes: any[] }) {
   const { t } = useTranslation()
+  const [searchQuery, setSearchQuery] = useState('')
+  const parentRef = useRef<HTMLDivElement>(null)
+
+  const filteredRoutes = useMemo(() => {
+    if (!searchQuery.trim()) return routes
+    const query = searchQuery.toLowerCase()
+    return routes.filter((route) =>
+      route.network?.toLowerCase().includes(query) ||
+      route.next_hop_ip?.toLowerCase().includes(query) ||
+      route.next_hop?.toLowerCase().includes(query) ||
+      route.next_hop_interface?.toLowerCase().includes(query) ||
+      route.protocol?.toLowerCase().includes(query)
+    )
+  }, [routes, searchQuery])
+
+  const rowVirtualizer = useVirtualizer({
+    count: filteredRoutes.length,
+    getScrollElement: () => parentRef.current,
+    estimateSize: () => 28,
+    overscan: 15,
+  })
+
   return (
     <div className="space-y-4">
       <div className="bg-gray-50 rounded-lg p-4">
-        <h3 className="font-medium text-gray-900 mb-3">
-          {t('nodeDetails.sections.routingTable')} ({t('nodeDetails.routeCount', { count: routes.length })})
-        </h3>
+        <div className="flex items-center justify-between mb-3">
+          <h3 className="font-medium text-gray-900">
+            {t('nodeDetails.sections.routingTable')} ({t('nodeDetails.routeCount', { count: filteredRoutes.length })}
+            {searchQuery && ` / ${routes.length}`})
+          </h3>
+        </div>
 
-        {routes.length === 0 ? (
-          <p className="text-sm text-gray-700">{t('nodeDetails.noRoutingInfo')}</p>
+        {routes.length > 0 && (
+          <div className="mb-3">
+            <input
+              type="text"
+              value={searchQuery}
+              onChange={(e) => setSearchQuery(e.target.value)}
+              placeholder={t('common.search') + '...'}
+              className="w-full px-3 py-1.5 text-sm border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-primary-600 focus:border-transparent"
+              aria-label={t('common.search')}
+            />
+          </div>
+        )}
+
+        {filteredRoutes.length === 0 ? (
+          <p className="text-sm text-gray-700">
+            {routes.length === 0 ? t('nodeDetails.noRoutingInfo') : t('common.noResults')}
+          </p>
         ) : (
           <div className="overflow-x-auto">
-            <table className="min-w-full text-xs">
-              <thead>
-                <tr className="border-b">
-                  <th className="text-left py-1 px-2 text-gray-700">{t('nodeDetails.fields.prefix')}</th>
-                  <th className="text-left py-1 px-2 text-gray-700">{t('nodeDetails.fields.nextHop')}</th>
-                  <th className="text-left py-1 px-2 text-gray-700">{t('common.interfaces')}</th>
-                  <th className="text-left py-1 px-2 text-gray-700">{t('nodeDetails.fields.protocol')}</th>
-                  <th className="text-left py-1 px-2 text-gray-700">{t('nodeDetails.fields.metric')}</th>
-                  <th className="text-left py-1 px-2 text-gray-700">{t('nodeDetails.fields.adminDistance')}</th>
-                </tr>
-              </thead>
-              <tbody>
-                {routes.map((route, index) => (
-                  <tr key={index} className="border-b hover:bg-gray-100">
-                    <td className="py-1 px-2 text-gray-900">{route.network}</td>
-                    <td className="py-1 px-2 text-gray-700">{route.next_hop_ip || route.next_hop || t('nodeDetails.routing.direct')}</td>
-                    <td className="py-1 px-2 text-gray-700">{route.next_hop_interface || t('common.notAvailable')}</td>
-                    <td className="py-1 px-2 text-gray-700">{route.protocol}</td>
-                    <td className="py-1 px-2 text-gray-700">{route.metric ?? t('common.notAvailable')}</td>
-                    <td className="py-1 px-2 text-gray-700">{route.admin_distance ?? t('common.notAvailable')}</td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
+            <div
+              className="grid text-xs font-medium text-gray-700 border-b py-1.5 px-2 bg-gray-100 rounded-t-lg"
+              style={{ gridTemplateColumns: 'minmax(120px, 1.5fr) minmax(100px, 1fr) minmax(100px, 1fr) minmax(80px, 0.8fr) minmax(60px, 0.6fr) minmax(60px, 0.6fr)' }}
+              role="row"
+              aria-label="Table header"
+            >
+              <div role="columnheader">{t('nodeDetails.fields.prefix')}</div>
+              <div role="columnheader">{t('nodeDetails.fields.nextHop')}</div>
+              <div role="columnheader">{t('common.interfaces')}</div>
+              <div role="columnheader">{t('nodeDetails.fields.protocol')}</div>
+              <div role="columnheader">{t('nodeDetails.fields.metric')}</div>
+              <div role="columnheader">{t('nodeDetails.fields.adminDistance')}</div>
+            </div>
+
+            <div
+              ref={parentRef}
+              className="h-[400px] overflow-auto"
+              role="grid"
+              aria-label={t('nodeDetails.sections.routingTable')}
+              aria-rowcount={filteredRoutes.length}
+            >
+              <div
+                style={{
+                  height: `${rowVirtualizer.getTotalSize()}px`,
+                  width: '100%',
+                  position: 'relative',
+                }}
+              >
+                {rowVirtualizer.getVirtualItems().map((virtualRow) => {
+                  const route = filteredRoutes[virtualRow.index]
+                  return (
+                    <div
+                      key={virtualRow.index}
+                      className="grid text-xs border-b border-gray-200 hover:bg-gray-100 py-1.5 px-2 absolute top-0 left-0 w-full items-center"
+                      style={{
+                        gridTemplateColumns: 'minmax(120px, 1.5fr) minmax(100px, 1fr) minmax(100px, 1fr) minmax(80px, 0.8fr) minmax(60px, 0.6fr) minmax(60px, 0.6fr)',
+                        height: `${virtualRow.size}px`,
+                        transform: `translateY(${virtualRow.start}px)`,
+                      }}
+                      role="row"
+                      aria-rowindex={virtualRow.index + 1}
+                    >
+                      <div className="text-gray-900 truncate" title={route.network}>{route.network}</div>
+                      <div className="text-gray-700 truncate" title={route.next_hop_ip || route.next_hop || ''}>
+                        {route.next_hop_ip || route.next_hop || t('nodeDetails.routing.direct')}
+                      </div>
+                      <div className="text-gray-700 truncate" title={route.next_hop_interface || ''}>
+                        {route.next_hop_interface || t('common.notAvailable')}
+                      </div>
+                      <div className="text-gray-700 truncate">{route.protocol}</div>
+                      <div className="text-gray-700 truncate">{route.metric ?? t('common.notAvailable')}</div>
+                      <div className="text-gray-700 truncate">{route.admin_distance ?? t('common.notAvailable')}</div>
+                    </div>
+                  )
+                })}
+              </div>
+            </div>
           </div>
         )}
       </div>
@@ -660,19 +734,19 @@ function OspfTab({ process, areas, interfaces, sessions }: {
           <h3 className="font-medium text-gray-900 mb-2">{t('nodeDetails.sections.ospfProcess')}</h3>
           <div className="grid grid-cols-2 gap-2 text-sm">
             <div>
-              <span className="text-gray-700">Process ID:</span>
+              <span className="text-gray-700">{t('nodeDetails.ospf.fields.processId')}:</span>
               <p className="font-medium">{process.process_id}</p>
             </div>
             <div>
-              <span className="text-gray-700">Router ID:</span>
+              <span className="text-gray-700">{t('nodeDetails.fields.routerId')}:</span>
               <p className="font-medium">{process.router_id || t('common.notAvailable')}</p>
             </div>
             <div>
-              <span className="text-gray-700">Reference Bandwidth:</span>
+              <span className="text-gray-700">{t('nodeDetails.ospf.fields.referenceBandwidth')}:</span>
               <p className="font-medium">{process.reference_bandwidth || t('common.notAvailable')}</p>
             </div>
             <div>
-              <span className="text-gray-700">ABR:</span>
+              <span className="text-gray-700">{t('nodeDetails.ospf.fields.abr')}:</span>
               <p className="font-medium">{process.area_border_router ? t('common.yes') : t('common.no')}</p>
             </div>
           </div>
@@ -686,13 +760,13 @@ function OspfTab({ process, areas, interfaces, sessions }: {
           <div className="space-y-2">
             {areas.map((area, index) => (
               <div key={index} className="bg-white p-2 rounded text-sm">
-                <div className="font-medium text-gray-900">Area {area.area}</div>
-                <div className="text-gray-700">{t('nodeDetails.fields.type')}: {area.area_type || 'Normal'}</div>
+                <div className="font-medium text-gray-900">{t('nodeDetails.ospf.fields.area')} {area.area}</div>
+                <div className="text-gray-700">{t('nodeDetails.fields.type')}: {area.area_type || t('nodeDetails.ospf.defaults.areaType')}</div>
                 <div className="text-gray-700">
-                  Active Interfaces: {area.active_interfaces?.join(', ') || 'None'}
+                  {t('nodeDetails.ospf.fields.activeInterfaces')}: {area.active_interfaces?.join(', ') || t('common.none')}
                 </div>
                 <div className="text-gray-700">
-                  Passive Interfaces: {area.passive_interfaces?.join(', ') || 'None'}
+                  {t('nodeDetails.ospf.fields.passiveInterfaces')}: {area.passive_interfaces?.join(', ') || t('common.none')}
                 </div>
               </div>
             ))}
@@ -709,10 +783,10 @@ function OspfTab({ process, areas, interfaces, sessions }: {
               <div key={index} className="text-sm bg-white p-2 rounded">
                 <div className="font-medium text-gray-900">{iface.interface}</div>
                 <div className="grid grid-cols-2 gap-2 text-xs text-gray-700">
-                  <div>Area: {iface.ospf_area_name || t('common.notAvailable')}</div>
-                  <div>Cost: {iface.ospf_cost || t('common.notAvailable')}</div>
-                  <div>Network Type: {iface.ospf_network_type || t('common.notAvailable')}</div>
-                  <div>Passive: {iface.ospf_passive ? t('common.yes') : t('common.no')}</div>
+                  <div>{t('nodeDetails.ospf.fields.area')}: {iface.ospf_area_name || t('common.notAvailable')}</div>
+                  <div>{t('nodeDetails.ospf.fields.cost')}: {iface.ospf_cost || t('common.notAvailable')}</div>
+                  <div>{t('nodeDetails.ospf.fields.networkType')}: {iface.ospf_network_type || t('common.notAvailable')}</div>
+                  <div>{t('nodeDetails.ospf.fields.passive')}: {iface.ospf_passive ? t('common.yes') : t('common.no')}</div>
                 </div>
               </div>
             ))}
@@ -729,16 +803,16 @@ function OspfTab({ process, areas, interfaces, sessions }: {
               <div key={index} className="text-sm bg-white p-2 rounded">
                 <div className="grid grid-cols-2 gap-2 text-xs">
                   <div>
-                    <span className="text-gray-700">Local:</span> {session.ip} (Area {session.area})
+                    <span className="text-gray-700">{t('nodeDetails.ospf.fields.local')}:</span> {session.ip} ({t('nodeDetails.ospf.fields.area')} {session.area})
                   </div>
                   <div>
-                    <span className="text-gray-700">Remote:</span> {session.remote_ip} (Area {session.remote_area})
+                    <span className="text-gray-700">{t('nodeDetails.ospf.fields.remote')}:</span> {session.remote_ip} ({t('nodeDetails.ospf.fields.area')} {session.remote_area})
                   </div>
                   <div>
                     <span className="text-gray-700">{t('nodeDetails.fields.status')}:</span> {session.session_status}
                   </div>
                   <div>
-                    <span className="text-gray-700">Remote Interface:</span> {session.remote_interface}
+                    <span className="text-gray-700">{t('nodeDetails.fields.remoteInterface')}:</span> {session.remote_interface}
                   </div>
                 </div>
               </div>
@@ -901,8 +975,8 @@ function ServicesTab({ node, aaa }: { node: any; aaa: any[] }) {
           <div className="space-y-2">
             {aaa.map((auth, index) => (
               <div key={index} className="text-sm">
-                <div className="text-gray-700">List: {auth.list_name || 'default'}</div>
-                <div className="text-gray-700">Methods: {auth.methods?.join(', ') || t('common.notAvailable')}</div>
+                <div className="text-gray-700">{t('nodeDetails.services.list')}: {auth.list_name || t('common.default')}</div>
+                <div className="text-gray-700">{t('nodeDetails.services.methods')}: {auth.methods?.join(', ') || t('common.notAvailable')}</div>
               </div>
             ))}
           </div>
@@ -1112,7 +1186,7 @@ function BgpTab({ node, edges, peerConfig, processConfig, sessionStatus, session
                   <div className="grid grid-cols-2 gap-2">
                     <div>
                       <span className="text-gray-700">{t('nodeDetails.fields.vrf')}:</span>
-                      <p className="font-medium">{proc.vrf || 'default'}</p>
+                      <p className="font-medium">{proc.vrf || t('common.default')}</p>
                     </div>
                     <div>
                       <span className="text-gray-700">{t('nodeDetails.fields.routerId')}:</span>
@@ -1186,7 +1260,7 @@ function BgpTab({ node, edges, peerConfig, processConfig, sessionStatus, session
                     </div>
                     <div>
                       <span className="text-gray-700">{t('nodeDetails.fields.vrf')}:</span>
-                      <p className="font-medium">{edge.vrf || 'default'}</p>
+                      <p className="font-medium">{edge.vrf || t('common.default')}</p>
                     </div>
                   </div>
                 </div>
@@ -1228,7 +1302,7 @@ function BgpTab({ node, edges, peerConfig, processConfig, sessionStatus, session
                     </div>
                     <div>
                       <span className="text-gray-700">{t('nodeDetails.fields.vrf')}:</span>
-                      <p className="font-medium">{peer.vrf || 'default'}</p>
+                      <p className="font-medium">{peer.vrf || t('common.default')}</p>
                     </div>
                     {peer.peer_group && (
                       <div>
@@ -1238,20 +1312,20 @@ function BgpTab({ node, edges, peerConfig, processConfig, sessionStatus, session
                     )}
                     {peer.description && (
                       <div className="col-span-2">
-                        <span className="text-gray-700">Description:</span>
+                        <span className="text-gray-700">{t('nodeDetails.fields.description')}:</span>
                         <p className="font-medium">{peer.description}</p>
                       </div>
                     )}
                   </div>
                   {peer.import_policy && (
                     <div className="mt-2">
-                      <span className="text-gray-700">Import Policy:</span>
+                      <span className="text-gray-700">{t('nodeDetails.fields.importPolicy')}:</span>
                       <p className="text-xs text-gray-600">{peer.import_policy}</p>
                     </div>
                   )}
                   {peer.export_policy && (
                     <div className="mt-1">
-                      <span className="text-gray-700">Export Policy:</span>
+                      <span className="text-gray-700">{t('nodeDetails.fields.exportPolicy')}:</span>
                       <p className="text-xs text-gray-600">{peer.export_policy}</p>
                     </div>
                   )}
@@ -1296,7 +1370,7 @@ function BgpTab({ node, edges, peerConfig, processConfig, sessionStatus, session
                     <div className="text-gray-700">{t('nodeDetails.fields.remoteIp')}: {session.remote_ip || t('common.notAvailable')}</div>
                     <div className="text-gray-700">{t('nodeDetails.fields.localAs')}: {session.local_as || t('common.notAvailable')}</div>
                     <div className="text-gray-700">{t('nodeDetails.fields.remoteAs')}: {session.remote_as || t('common.notAvailable')}</div>
-                    <div className="text-gray-700">{t('nodeDetails.fields.vrf')}: {session.vrf || 'default'}</div>
+                    <div className="text-gray-700">{t('nodeDetails.fields.vrf')}: {session.vrf || t('common.default')}</div>
                   </div>
                 </div>
               ))}
@@ -1331,20 +1405,20 @@ function BgpTab({ node, edges, peerConfig, processConfig, sessionStatus, session
                         ? 'bg-green-100 text-green-800'
                         : 'bg-yellow-100 text-yellow-800'
                     }`}>
-                      {compat.configured_status || (compat.compatible ? 'Compatible' : 'Check Config')}
+                      {compat.configured_status || (compat.compatible ? t('nodeDetails.bgp.status.compatible') : t('nodeDetails.bgp.status.checkConfig'))}
                     </span>
                   </div>
                   <div className="grid grid-cols-2 gap-2 text-xs text-gray-700">
                     <div>{t('nodeDetails.fields.localIp')}: {compat.local_ip || t('common.notAvailable')}</div>
                     <div>{t('nodeDetails.fields.remoteIp')}: {compat.remote_ip || t('common.notAvailable')}</div>
-                    <div>{t('nodeDetails.fields.vrf')}: {compat.vrf || 'default'}</div>
+                    <div>{t('nodeDetails.fields.vrf')}: {compat.vrf || t('common.default')}</div>
                     {compat.remote_interface && (
-                      <div>Remote Interface: {compat.remote_interface}</div>
+                      <div>{t('nodeDetails.fields.remoteInterface')}: {compat.remote_interface}</div>
                     )}
                   </div>
                   {compat.issues && compat.issues.length > 0 && (
                     <div className="mt-2 text-xs">
-                      <span className="text-red-600 font-medium">Issues:</span>
+                      <span className="text-red-600 font-medium">{t('nodeDetails.fields.issues')}:</span>
                       <ul className="ml-4 list-disc text-red-600">
                         {compat.issues.map((issue: string, i: number) => (
                           <li key={i}>{issue}</li>
@@ -1389,7 +1463,7 @@ function BgpTab({ node, edges, peerConfig, processConfig, sessionStatus, session
                     <tr key={index} className="border-b hover:bg-gray-100">
                       <td className="py-1 px-2 text-gray-900">{route.network || t('common.notAvailable')}</td>
                       <td className="py-1 px-2 text-gray-700">{route.next_hop_ip || t('common.notAvailable')}</td>
-                      <td className="py-1 px-2 text-gray-700">{route.protocol || 'BGP'}</td>
+                      <td className="py-1 px-2 text-gray-700">{route.protocol || t('common.protocol.bgp')}</td>
                       <td className="py-1 px-2 text-gray-700">{route.origin_type || t('common.notAvailable')}</td>
                       <td className="py-1 px-2">
                         {route.best_path && (
@@ -1435,7 +1509,7 @@ function AclTab({ node, filterReachability }: {
               <div key={index} className="bg-white p-3 rounded text-sm border-l-4 border-red-400">
                 <div className="flex items-start justify-between mb-2">
                   <div className="font-medium text-gray-900">
-                    {filter.filter || 'Unnamed Filter'}
+                    {filter.filter || t('nodeDetails.acl.defaults.unnamedFilter')}
                   </div>
                   <span className="px-2 py-0.5 rounded text-xs font-medium bg-red-100 text-red-800">
                     {t('nodeDetails.acl.unreachable')}
@@ -1443,15 +1517,15 @@ function AclTab({ node, filterReachability }: {
                 </div>
                 <div className="grid grid-cols-2 gap-2 text-xs text-gray-700">
                   <div>
-                    <span className="font-medium">Line:</span> {filter.line || t('common.notAvailable')}
+                    <span className="font-medium">{t('nodeDetails.acl.fields.line')}:</span> {filter.line || t('common.notAvailable')}
                   </div>
                   <div>
-                    <span className="font-medium">Action:</span> {filter.action || t('common.notAvailable')}
+                    <span className="font-medium">{t('nodeDetails.acl.fields.action')}:</span> {filter.action || t('common.notAvailable')}
                   </div>
                 </div>
                 {filter.reason && (
                   <div className="mt-2 text-xs text-gray-600">
-                    <span className="font-medium">Reason:</span> {filter.reason}
+                    <span className="font-medium">{t('nodeDetails.acl.fields.reason')}:</span> {filter.reason}
                   </div>
                 )}
                 {filter.unreachable_line && (
@@ -1461,7 +1535,7 @@ function AclTab({ node, filterReachability }: {
                 )}
                 {filter.blocking_lines && filter.blocking_lines.length > 0 && (
                   <div className="mt-2">
-                    <span className="text-xs font-medium text-gray-700">Blocked by lines:</span>
+                    <span className="text-xs font-medium text-gray-700">{t('nodeDetails.acl.fields.blockedByLines')}:</span>
                     <div className="ml-2 text-xs text-gray-600">
                       {filter.blocking_lines.join(', ')}
                     </div>
@@ -1469,13 +1543,13 @@ function AclTab({ node, filterReachability }: {
                 )}
                 {filter.sources && (
                   <div className="mt-2">
-                    <span className="text-xs font-medium text-gray-700">Sources:</span>
+                    <span className="text-xs font-medium text-gray-700">{t('nodeDetails.acl.fields.sources')}:</span>
                     <div className="ml-2 text-xs text-gray-600">{filter.sources}</div>
                   </div>
                 )}
                 {filter.destinations && (
                   <div className="mt-1">
-                    <span className="text-xs font-medium text-gray-700">Destinations:</span>
+                    <span className="text-xs font-medium text-gray-700">{t('nodeDetails.acl.fields.destinations')}:</span>
                     <div className="ml-2 text-xs text-gray-600">{filter.destinations}</div>
                   </div>
                 )}
@@ -1497,9 +1571,9 @@ function AclTab({ node, filterReachability }: {
                 <div className="flex items-start justify-between mb-2">
                   <div>
                     <div className="font-medium text-gray-900">
-                      {filter.filter || 'Unnamed Filter'}
+                      {filter.filter || t('nodeDetails.acl.defaults.unnamedFilter')}
                     </div>
-                    <div className="text-xs text-gray-600">Node: {filter.node}</div>
+                    <div className="text-xs text-gray-600">{t('nodeDetails.acl.fields.node')}: {filter.node}</div>
                   </div>
                   <span className="px-2 py-0.5 rounded text-xs font-medium bg-yellow-100 text-yellow-800">
                     {t('nodeDetails.acl.unreachable')}
@@ -1507,15 +1581,15 @@ function AclTab({ node, filterReachability }: {
                 </div>
                 <div className="grid grid-cols-2 gap-2 text-xs text-gray-700">
                   <div>
-                    <span className="font-medium">Line:</span> {filter.line || t('common.notAvailable')}
+                    <span className="font-medium">{t('nodeDetails.acl.fields.line')}:</span> {filter.line || t('common.notAvailable')}
                   </div>
                   <div>
-                    <span className="font-medium">Action:</span> {filter.action || t('common.notAvailable')}
+                    <span className="font-medium">{t('nodeDetails.acl.fields.action')}:</span> {filter.action || t('common.notAvailable')}
                   </div>
                 </div>
                 {filter.reason && (
                   <div className="mt-2 text-xs text-gray-600">
-                    <span className="font-medium">Reason:</span> {filter.reason}
+                    <span className="font-medium">{t('nodeDetails.acl.fields.reason')}:</span> {filter.reason}
                   </div>
                 )}
                 {filter.unreachable_line && (
@@ -1547,20 +1621,20 @@ function VlanTab({ node, vlans }: { node: any; vlans: any[] }) {
             {vlans.map((vlan, index) => (
               <div key={index} className="bg-white p-3 rounded text-sm border border-gray-200">
                 <div className="flex items-center justify-between mb-2">
-                  <span className="font-medium text-gray-900">VLAN {vlan.vlan_id}</span>
+                  <span className="font-medium text-gray-900">{t('nodeDetails.vlan.fields.vlanPrefix')} {vlan.vlan_id}</span>
                   {vlan.vxlan_vni && (
                     <span className="px-2 py-0.5 rounded text-xs font-medium bg-blue-100 text-blue-800">
-                      VNI: {vlan.vxlan_vni}
+                      {t('nodeDetails.vlan.fields.vni')}: {vlan.vxlan_vni}
                     </span>
                   )}
                 </div>
                 <div className="grid grid-cols-1 gap-2 text-xs">
                   <div className="text-gray-700">
-                    Interfaces: {vlan.interfaces?.join(', ') || t('common.none')}
+                    {t('nodeDetails.vlan.fields.interfaces')}: {vlan.interfaces?.join(', ') || t('common.none')}
                   </div>
                   {vlan.interface_vlans && vlan.interface_vlans.length > 0 && (
                     <div className="text-gray-700">
-                      Interface VLANs: {vlan.interface_vlans.join(', ')}
+                      {t('nodeDetails.vlan.fields.interfaceVlans')}: {vlan.interface_vlans.join(', ')}
                     </div>
                   )}
                 </div>
@@ -1612,7 +1686,7 @@ function ConfigurationTab({ node, definedStructures, referencedStructures, named
               {namedStructures.map((struct, index) => (
                 <div key={index} className="bg-white p-3 rounded text-sm border border-gray-200">
                   <div className="font-medium text-gray-900">{struct.structure_name}</div>
-                  <div className="text-xs text-gray-700">Type: {struct.structure_type}</div>
+                  <div className="text-xs text-gray-700">{t('nodeDetails.fields.type')}: {struct.structure_type}</div>
                   {struct.structure_definition && (
                     <div className="mt-2 p-2 bg-gray-100 rounded text-xs font-mono overflow-auto max-h-40">
                       {JSON.stringify(struct.structure_definition, null, 2)}
@@ -1644,12 +1718,12 @@ function ConfigurationTab({ node, definedStructures, referencedStructures, named
               {definedStructures.map((struct, index) => (
                 <div key={index} className="bg-white p-2 rounded text-xs border border-gray-200">
                   <div className="grid grid-cols-2 gap-2">
-                    <div className="text-gray-700">Name: {struct.structure_name}</div>
-                    <div className="text-gray-700">Type: {struct.structure_type}</div>
+                    <div className="text-gray-700">{t('nodeDetails.fields.name')}: {struct.structure_name}</div>
+                    <div className="text-gray-700">{t('nodeDetails.fields.type')}: {struct.structure_type}</div>
                   </div>
                   {struct.source_lines && struct.source_lines.length > 0 && (
                     <div className="text-gray-600 text-xs mt-1">
-                      Lines: {struct.source_lines.join(', ')}
+                      {t('nodeDetails.config.fields.lines')}: {struct.source_lines.join(', ')}
                     </div>
                   )}
                 </div>
@@ -1678,13 +1752,13 @@ function ConfigurationTab({ node, definedStructures, referencedStructures, named
               {referencedStructures.map((struct, index) => (
                 <div key={index} className="bg-white p-2 rounded text-xs border border-gray-200">
                   <div className="grid grid-cols-2 gap-2">
-                    <div className="text-gray-700">Name: {struct.structure_name}</div>
-                    <div className="text-gray-700">Type: {struct.structure_type}</div>
+                    <div className="text-gray-700">{t('nodeDetails.fields.name')}: {struct.structure_name}</div>
+                    <div className="text-gray-700">{t('nodeDetails.fields.type')}: {struct.structure_type}</div>
                   </div>
-                  <div className="text-gray-600 text-xs mt-1">Context: {struct.context}</div>
+                  <div className="text-gray-600 text-xs mt-1">{t('nodeDetails.config.fields.context')}: {struct.context}</div>
                   {struct.source_lines && struct.source_lines.length > 0 && (
                     <div className="text-gray-600 text-xs">
-                      Lines: {struct.source_lines.join(', ')}
+                      {t('nodeDetails.config.fields.lines')}: {struct.source_lines.join(', ')}
                     </div>
                   )}
                 </div>
@@ -1716,10 +1790,10 @@ function EigrpTab({ node, edges }: { node: any; edges: any[] }) {
             {edges.map((edge, index) => (
               <div key={index} className="bg-white p-3 rounded text-sm border border-gray-200">
                 <div className="grid grid-cols-2 gap-2 text-xs">
-                  <div className="text-gray-700">Interface: {edge.interface}</div>
-                  <div className="text-gray-700">Remote: {edge.remote_interface}</div>
-                  <div className="text-gray-700">IP: {edge.ip}</div>
-                  <div className="text-gray-700">Remote IP: {edge.remote_ip}</div>
+                  <div className="text-gray-700">{t('nodeDetails.eigrp.fields.interface')}: {edge.interface}</div>
+                  <div className="text-gray-700">{t('nodeDetails.eigrp.fields.remote')}: {edge.remote_interface}</div>
+                  <div className="text-gray-700">{t('nodeDetails.eigrp.fields.ip')}: {edge.ip}</div>
+                  <div className="text-gray-700">{t('nodeDetails.eigrp.fields.remoteIp')}: {edge.remote_ip}</div>
                 </div>
               </div>
             ))}
@@ -1749,9 +1823,9 @@ function IsisTab({ node, edges }: { node: any; edges: any[] }) {
             {edges.map((edge, index) => (
               <div key={index} className="bg-white p-3 rounded text-sm border border-gray-200">
                 <div className="grid grid-cols-2 gap-2 text-xs">
-                  <div className="text-gray-700">Interface: {edge.interface}</div>
-                  <div className="text-gray-700">Remote: {edge.remote_interface}</div>
-                  <div className="text-gray-700">Level: {edge.level}</div>
+                  <div className="text-gray-700">{t('nodeDetails.isis.fields.interface')}: {edge.interface}</div>
+                  <div className="text-gray-700">{t('nodeDetails.isis.fields.remote')}: {edge.remote_interface}</div>
+                  <div className="text-gray-700">{t('nodeDetails.isis.fields.level')}: {edge.level}</div>
                 </div>
               </div>
             ))}
@@ -1781,15 +1855,15 @@ function VxlanTab({ node, edges }: { node: any; edges: any[] }) {
             {edges.map((edge, index) => (
               <div key={index} className="bg-white p-3 rounded text-sm border border-gray-200">
                 <div className="flex items-center justify-between mb-2">
-                  <span className="font-medium text-gray-900">VNI: {edge.vni}</span>
+                  <span className="font-medium text-gray-900">{t('nodeDetails.vxlan.fields.vni')}: {edge.vni}</span>
                   <span className="text-xs text-gray-700">{edge.remote_node}</span>
                 </div>
                 <div className="grid grid-cols-2 gap-2 text-xs">
-                  <div className="text-gray-700">Local VTEP: {edge.vtep_address}</div>
-                  <div className="text-gray-700">Remote VTEP: {edge.remote_vtep_address}</div>
+                  <div className="text-gray-700">{t('nodeDetails.vxlan.fields.localVtep')}: {edge.vtep_address}</div>
+                  <div className="text-gray-700">{t('nodeDetails.vxlan.fields.remoteVtep')}: {edge.remote_vtep_address}</div>
                   {edge.multicast_group && (
                     <div className="col-span-2 text-gray-700">
-                      Multicast Group: {edge.multicast_group}
+                      {t('nodeDetails.vxlan.fields.multicastGroup')}: {edge.multicast_group}
                     </div>
                   )}
                 </div>

@@ -9,6 +9,7 @@
  * - Largest panel component (675 lines) with extensive form handling
  */
 import { useState } from 'react'
+import { useTranslation } from 'react-i18next'
 import { useTraceroute, useBidirectionalTraceroute } from '../../hooks/useAnalysis'
 import type {
   TracerouteRequest,
@@ -31,6 +32,7 @@ import {
 } from 'lucide-react'
 
 export function TraceroutePanel() {
+  const { t } = useTranslation()
   const [tracerouteMode, setTracerouteMode] = useState<'unidirectional' | 'bidirectional'>(
     'unidirectional'
   )
@@ -106,20 +108,20 @@ export function TraceroutePanel() {
       <div className="bg-white rounded-lg shadow-sm border border-gray-200 p-6">
         <div className="flex items-center gap-3 mb-4">
           <Network className="w-6 h-6 text-primary-600" aria-hidden="true" />
-          <h2 className="text-xl font-semibold text-gray-900">Network Traceroute</h2>
+          <h2 className="text-xl font-semibold text-gray-900">{t('traceroute.title')}</h2>
         </div>
         <p className="text-sm text-gray-600">
-          Analyze network paths with detailed packet specifications and path constraints
+          {t('traceroute.description')}
         </p>
       </div>
 
       {/* Configuration Form */}
       <form onSubmit={handleSubmit} className="bg-white rounded-lg shadow-sm border border-gray-200 p-6">
-        <h3 className="text-lg font-semibold text-gray-900 mb-4">Configuration</h3>
+        <h3 className="text-lg font-semibold text-gray-900 mb-4">{t('traceroute.sections.configuration')}</h3>
 
         {/* Mode Selection */}
         <div className="mb-6">
-          <label className="block text-sm font-medium text-gray-700 mb-2">Trace Mode</label>
+          <label className="block text-sm font-medium text-gray-700 mb-2">{t('traceroute.fields.traceMode')}</label>
           <div className="flex gap-4">
             <button
               type="button"
@@ -131,7 +133,7 @@ export function TraceroutePanel() {
               }`}
             >
               <ArrowRight className="w-4 h-4" aria-hidden="true" />
-              Unidirectional
+              {t('traceroute.modes.unidirectional')}
             </button>
             <button
               type="button"
@@ -143,7 +145,7 @@ export function TraceroutePanel() {
               }`}
             >
               <ArrowLeftRight className="w-4 h-4" aria-hidden="true" />
-              Bidirectional
+              {t('traceroute.modes.bidirectional')}
             </button>
           </div>
         </div>
@@ -152,28 +154,28 @@ export function TraceroutePanel() {
         <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-6">
           <div>
             <label htmlFor="srcIps" className="block text-sm font-medium text-gray-700 mb-1">
-              Source IP/Range
+              {t('traceroute.fields.sourceIp')}
             </label>
             <input
               type="text"
               id="srcIps"
               value={formData.headers?.srcIps || ''}
               onChange={(e) => updateHeaders('srcIps', e.target.value)}
-              placeholder="e.g., 192.0.2.1 or 192.0.2.0/24"
+              placeholder={t('traceroute.placeholders.sourceIp')}
               className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-primary-600 focus:border-transparent"
             />
           </div>
 
           <div>
             <label htmlFor="dstIps" className="block text-sm font-medium text-gray-700 mb-1">
-              Destination IP/Range *
+              {t('traceroute.fields.destinationIp')} *
             </label>
             <input
               type="text"
               id="dstIps"
               value={formData.headers?.dstIps || ''}
               onChange={(e) => updateHeaders('dstIps', e.target.value)}
-              placeholder="e.g., 198.51.100.1"
+              placeholder={t('traceroute.placeholders.destinationIp')}
               className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-primary-600 focus:border-transparent"
               required
             />
@@ -181,28 +183,28 @@ export function TraceroutePanel() {
 
           <div>
             <label htmlFor="startLocation" className="block text-sm font-medium text-gray-700 mb-1">
-              Start Location
+              {t('traceroute.fields.startLocation')}
             </label>
             <input
               type="text"
               id="startLocation"
               value={formData.startLocation || ''}
               onChange={(e) => setFormData({ ...formData, startLocation: e.target.value || undefined })}
-              placeholder="e.g., router1 or router1[GigabitEthernet0/1]"
+              placeholder={t('traceroute.placeholders.startLocation')}
               className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-primary-600 focus:border-transparent"
             />
           </div>
 
           <div>
             <label htmlFor="maxTraces" className="block text-sm font-medium text-gray-700 mb-1">
-              Max Traces
+              {t('traceroute.fields.maxTraces')}
             </label>
             <input
               type="number"
               id="maxTraces"
               value={formData.maxTraces || ''}
               onChange={(e) => setFormData({ ...formData, maxTraces: e.target.value ? Number(e.target.value) : undefined })}
-              placeholder="e.g., 10"
+              placeholder={t('traceroute.placeholders.maxTraces')}
               min="1"
               className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-primary-600 focus:border-transparent"
             />
@@ -221,7 +223,7 @@ export function TraceroutePanel() {
             ) : (
               <ChevronRight className="w-4 h-4" aria-hidden="true" />
             )}
-            Advanced Options
+            {t('traceroute.sections.advanced')}
           </button>
 
           {showAdvanced && (
@@ -230,28 +232,28 @@ export function TraceroutePanel() {
                 {/* Protocol Options */}
                 <div>
                   <label htmlFor="ipProtocols" className="block text-sm font-medium text-gray-700 mb-1">
-                    IP Protocols
+                    {t('traceroute.fields.ipProtocols')}
                   </label>
                   <input
                     type="text"
                     id="ipProtocols"
                     value={formData.headers?.ipProtocols?.join(',') || ''}
                     onChange={(e) => updateHeaders('ipProtocols', e.target.value ? e.target.value.split(',').map(p => p.trim()).filter(p => p) : undefined)}
-                    placeholder="e.g., TCP,UDP,ICMP"
+                    placeholder={t('traceroute.placeholders.ipProtocols')}
                     className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-primary-600 focus:border-transparent"
                   />
                 </div>
 
                 <div>
                   <label htmlFor="applications" className="block text-sm font-medium text-gray-700 mb-1">
-                    Applications
+                    {t('traceroute.fields.applications')}
                   </label>
                   <input
                     type="text"
                     id="applications"
                     value={formData.headers?.applications?.join(',') || ''}
                     onChange={(e) => updateHeaders('applications', e.target.value ? e.target.value.split(',').map(a => a.trim()).filter(a => a) : undefined)}
-                    placeholder="e.g., DNS,SSH,HTTP"
+                    placeholder={t('traceroute.placeholders.applications')}
                     className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-primary-600 focus:border-transparent"
                   />
                 </div>
@@ -259,28 +261,28 @@ export function TraceroutePanel() {
                 {/* Port Options */}
                 <div>
                   <label htmlFor="srcPorts" className="block text-sm font-medium text-gray-700 mb-1">
-                    Source Ports
+                    {t('traceroute.fields.sourcePorts')}
                   </label>
                   <input
                     type="text"
                     id="srcPorts"
                     value={formData.headers?.srcPorts || ''}
                     onChange={(e) => updateHeaders('srcPorts', e.target.value)}
-                    placeholder="e.g., 80 or 1000-2000"
+                    placeholder={t('traceroute.placeholders.sourcePorts')}
                     className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-primary-600 focus:border-transparent"
                   />
                 </div>
 
                 <div>
                   <label htmlFor="dstPorts" className="block text-sm font-medium text-gray-700 mb-1">
-                    Destination Ports
+                    {t('traceroute.fields.destinationPorts')}
                   </label>
                   <input
                     type="text"
                     id="dstPorts"
                     value={formData.headers?.dstPorts || ''}
                     onChange={(e) => updateHeaders('dstPorts', e.target.value)}
-                    placeholder="e.g., 443"
+                    placeholder={t('traceroute.placeholders.destinationPorts')}
                     className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-primary-600 focus:border-transparent"
                   />
                 </div>
@@ -288,28 +290,28 @@ export function TraceroutePanel() {
                 {/* ICMP Options */}
                 <div>
                   <label htmlFor="icmpTypes" className="block text-sm font-medium text-gray-700 mb-1">
-                    ICMP Types
+                    {t('traceroute.fields.icmpTypes')}
                   </label>
                   <input
                     type="text"
                     id="icmpTypes"
                     value={formData.headers?.icmpTypes?.join(',') || ''}
                     onChange={(e) => updateHeaders('icmpTypes', e.target.value ? e.target.value.split(',').map(t => Number(t.trim())).filter(t => !isNaN(t)) : undefined)}
-                    placeholder="e.g., 8,0"
+                    placeholder={t('traceroute.placeholders.icmpTypes')}
                     className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-primary-600 focus:border-transparent"
                   />
                 </div>
 
                 <div>
                   <label htmlFor="icmpCodes" className="block text-sm font-medium text-gray-700 mb-1">
-                    ICMP Codes
+                    {t('traceroute.fields.icmpCodes')}
                   </label>
                   <input
                     type="text"
                     id="icmpCodes"
                     value={formData.headers?.icmpCodes?.join(',') || ''}
                     onChange={(e) => updateHeaders('icmpCodes', e.target.value ? e.target.value.split(',').map(c => Number(c.trim())).filter(c => !isNaN(c)) : undefined)}
-                    placeholder="e.g., 0"
+                    placeholder={t('traceroute.placeholders.icmpCodes')}
                     className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-primary-600 focus:border-transparent"
                   />
                 </div>
@@ -317,42 +319,42 @@ export function TraceroutePanel() {
                 {/* QoS Options */}
                 <div>
                   <label htmlFor="dscps" className="block text-sm font-medium text-gray-700 mb-1">
-                    DSCP Values
+                    {t('traceroute.fields.dscpValues')}
                   </label>
                   <input
                     type="text"
                     id="dscps"
                     value={formData.headers?.dscps?.join(',') || ''}
                     onChange={(e) => updateHeaders('dscps', e.target.value ? e.target.value.split(',').map(d => Number(d.trim())).filter(d => !isNaN(d)) : undefined)}
-                    placeholder="e.g., 46"
+                    placeholder={t('traceroute.placeholders.dscpValues')}
                     className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-primary-600 focus:border-transparent"
                   />
                 </div>
 
                 <div>
                   <label htmlFor="ecns" className="block text-sm font-medium text-gray-700 mb-1">
-                    ECN Values
+                    {t('traceroute.fields.ecnValues')}
                   </label>
                   <input
                     type="text"
                     id="ecns"
                     value={formData.headers?.ecns?.join(',') || ''}
                     onChange={(e) => updateHeaders('ecns', e.target.value ? e.target.value.split(',').map(n => Number(n.trim())).filter(n => !isNaN(n)) : undefined)}
-                    placeholder="e.g., 0,1,2,3"
+                    placeholder={t('traceroute.placeholders.ecnValues')}
                     className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-primary-600 focus:border-transparent"
                   />
                 </div>
 
                 <div>
                   <label htmlFor="packetLengths" className="block text-sm font-medium text-gray-700 mb-1">
-                    Packet Length
+                    {t('traceroute.fields.packetLength')}
                   </label>
                   <input
                     type="text"
                     id="packetLengths"
                     value={formData.headers?.packetLengths || ''}
                     onChange={(e) => updateHeaders('packetLengths', e.target.value)}
-                    placeholder="e.g., 64-1500"
+                    placeholder={t('traceroute.placeholders.packetLength')}
                     className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-primary-600 focus:border-transparent"
                   />
                 </div>
@@ -360,46 +362,46 @@ export function TraceroutePanel() {
 
               {/* Path Constraints */}
               <div className="pt-4 border-t border-gray-200">
-                <h4 className="text-sm font-semibold text-gray-900 mb-3">Path Constraints</h4>
+                <h4 className="text-sm font-semibold text-gray-900 mb-3">{t('traceroute.sections.pathConstraints')}</h4>
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                   <div>
                     <label htmlFor="endLocation" className="block text-sm font-medium text-gray-700 mb-1">
-                      End Location
+                      {t('traceroute.fields.endLocation')}
                     </label>
                     <input
                       type="text"
                       id="endLocation"
                       value={formData.pathConstraints?.endLocation || ''}
                       onChange={(e) => updatePathConstraints('endLocation', e.target.value)}
-                      placeholder="e.g., router2"
+                      placeholder={t('traceroute.placeholders.endLocation')}
                       className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-primary-600 focus:border-transparent"
                     />
                   </div>
 
                   <div>
                     <label htmlFor="transitLocations" className="block text-sm font-medium text-gray-700 mb-1">
-                      Transit Locations (required)
+                      {t('traceroute.fields.transitLocations')}
                     </label>
                     <input
                       type="text"
                       id="transitLocations"
                       value={formData.pathConstraints?.transitLocations || ''}
                       onChange={(e) => updatePathConstraints('transitLocations', e.target.value)}
-                      placeholder="e.g., core-switch"
+                      placeholder={t('traceroute.placeholders.transitLocations')}
                       className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-primary-600 focus:border-transparent"
                     />
                   </div>
 
                   <div>
                     <label htmlFor="forbiddenLocations" className="block text-sm font-medium text-gray-700 mb-1">
-                      Forbidden Locations
+                      {t('traceroute.fields.forbiddenLocations')}
                     </label>
                     <input
                       type="text"
                       id="forbiddenLocations"
                       value={formData.pathConstraints?.forbiddenLocations || ''}
                       onChange={(e) => updatePathConstraints('forbiddenLocations', e.target.value)}
-                      placeholder="e.g., firewall1"
+                      placeholder={t('traceroute.placeholders.forbiddenLocations')}
                       className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-primary-600 focus:border-transparent"
                     />
                   </div>
@@ -415,7 +417,7 @@ export function TraceroutePanel() {
                     onChange={(e) => setFormData({ ...formData, ignoreFilters: e.target.checked })}
                     className="rounded border-gray-300 text-primary-600 focus:ring-primary-600"
                   />
-                  <span className="text-sm font-medium text-gray-700">Ignore ACLs/Filters</span>
+                  <span className="text-sm font-medium text-gray-700">{t('traceroute.options.ignoreAcls')}</span>
                 </label>
               </div>
             </div>
@@ -429,7 +431,7 @@ export function TraceroutePanel() {
             disabled={isLoading}
             className="px-4 py-2 bg-primary-600 text-white rounded-lg hover:bg-primary-700 disabled:bg-gray-400 disabled:cursor-not-allowed transition-colors"
           >
-            {isLoading ? 'Running...' : 'Run Traceroute'}
+            {isLoading ? t('traceroute.buttons.running') : t('traceroute.buttons.run')}
           </button>
           <button
             type="button"
@@ -437,7 +439,7 @@ export function TraceroutePanel() {
             disabled={isLoading}
             className="px-4 py-2 bg-gray-200 text-gray-700 rounded-lg hover:bg-gray-300 disabled:bg-gray-100 disabled:cursor-not-allowed transition-colors"
           >
-            Reset
+            {t('common.reset')}
           </button>
         </div>
       </form>
@@ -448,8 +450,8 @@ export function TraceroutePanel() {
           <div className="flex items-start gap-3">
             <XCircle className="w-5 h-5 text-red-600 flex-shrink-0 mt-0.5" aria-hidden="true" />
             <div>
-              <h4 className="text-sm font-semibold text-red-900">Error</h4>
-              <p className="text-sm text-red-700 mt-1">{error.message || 'Failed to run traceroute'}</p>
+              <h4 className="text-sm font-semibold text-red-900">{t('common.error')}</h4>
+              <p className="text-sm text-red-700 mt-1">{error.message || t('traceroute.messages.failed')}</p>
             </div>
           </div>
         </div>
@@ -458,7 +460,7 @@ export function TraceroutePanel() {
       {/* Results Display */}
       {hasResults && (
         <div className="bg-white rounded-lg shadow-sm border border-gray-200 p-6">
-          <h3 className="text-lg font-semibold text-gray-900 mb-4">Results</h3>
+          <h3 className="text-lg font-semibold text-gray-900 mb-4">{t('traceroute.sections.results')}</h3>
 
           {tracerouteMode === 'bidirectional' && bidirectionalTraceroute.data ? (
             <BidirectionalResults data={bidirectionalTraceroute.data} />
@@ -476,15 +478,16 @@ export function TraceroutePanel() {
  * Shows flow details and traces for each result with hop-by-hop visualization
  */
 function UnidirectionalResults({ data }: { data: TracerouteResponse[] }) {
+  const { t } = useTranslation()
   return (
     <div className="space-y-6">
       {data.map((result, idx) => (
         <div key={idx} className="border border-gray-200 rounded-lg p-4">
-          <h4 className="text-sm font-semibold text-gray-900 mb-3">Flow {idx + 1}</h4>
+          <h4 className="text-sm font-semibold text-gray-900 mb-3">{t('traceroute.labels.flow')} {idx + 1}</h4>
 
           {/* Flow Information */}
           <div className="mb-4 p-3 bg-gray-50 rounded-lg">
-            <h5 className="text-xs font-semibold text-gray-700 mb-2">Flow Details</h5>
+            <h5 className="text-xs font-semibold text-gray-700 mb-2">{t('traceroute.labels.flowDetails')}</h5>
             <pre className="text-xs text-gray-600 whitespace-pre-wrap font-mono">
               {typeof result.flow === 'string' ? result.flow : JSON.stringify(result.flow, null, 2)}
             </pre>
@@ -498,7 +501,7 @@ function UnidirectionalResults({ data }: { data: TracerouteResponse[] }) {
               ))}
             </div>
           ) : (
-            <p className="text-sm text-gray-500">No traces available</p>
+            <p className="text-sm text-gray-500">{t('traceroute.messages.noTraces')}</p>
           )}
         </div>
       ))}
@@ -511,21 +514,22 @@ function UnidirectionalResults({ data }: { data: TracerouteResponse[] }) {
  * Shows both forward and reverse direction flows with separate trace displays
  */
 function BidirectionalResults({ data }: { data: BidirectionalTracerouteResponse[] }) {
+  const { t } = useTranslation()
   return (
     <div className="space-y-6">
       {data.map((result, idx) => (
         <div key={idx} className="border border-gray-200 rounded-lg p-4">
-          <h4 className="text-sm font-semibold text-gray-900 mb-3">Flow Pair {idx + 1}</h4>
+          <h4 className="text-sm font-semibold text-gray-900 mb-3">{t('traceroute.labels.flowPair')} {idx + 1}</h4>
 
           {/* Forward Direction */}
           <div className="mb-6">
             <div className="flex items-center gap-2 mb-3">
               <ArrowRight className="w-4 h-4 text-primary-600" aria-hidden="true" />
-              <h5 className="text-sm font-semibold text-gray-900">Forward Direction</h5>
+              <h5 className="text-sm font-semibold text-gray-900">{t('traceroute.directions.forward')}</h5>
             </div>
 
             <div className="mb-4 p-3 bg-gray-50 rounded-lg">
-              <h6 className="text-xs font-semibold text-gray-700 mb-2">Flow Details</h6>
+              <h6 className="text-xs font-semibold text-gray-700 mb-2">{t('traceroute.labels.flowDetails')}</h6>
               <pre className="text-xs text-gray-600 whitespace-pre-wrap font-mono">
                 {typeof result.flow === 'string' ? result.flow : JSON.stringify(result.flow, null, 2)}
               </pre>
@@ -538,7 +542,7 @@ function BidirectionalResults({ data }: { data: BidirectionalTracerouteResponse[
                 ))}
               </div>
             ) : (
-              <p className="text-sm text-gray-500">No forward traces available</p>
+              <p className="text-sm text-gray-500">{t('traceroute.messages.noForwardTraces')}</p>
             )}
           </div>
 
@@ -546,11 +550,11 @@ function BidirectionalResults({ data }: { data: BidirectionalTracerouteResponse[
           <div>
             <div className="flex items-center gap-2 mb-3">
               <ArrowLeftRight className="w-4 h-4 text-secondary-600" aria-hidden="true" />
-              <h5 className="text-sm font-semibold text-gray-900">Reverse Direction</h5>
+              <h5 className="text-sm font-semibold text-gray-900">{t('traceroute.directions.reverse')}</h5>
             </div>
 
             <div className="mb-4 p-3 bg-gray-50 rounded-lg">
-              <h6 className="text-xs font-semibold text-gray-700 mb-2">Reverse Flow Details</h6>
+              <h6 className="text-xs font-semibold text-gray-700 mb-2">{t('traceroute.labels.reverseFlowDetails')}</h6>
               <pre className="text-xs text-gray-600 whitespace-pre-wrap font-mono">
                 {typeof result.reverse_flow === 'string'
                   ? result.reverse_flow
@@ -565,7 +569,7 @@ function BidirectionalResults({ data }: { data: BidirectionalTracerouteResponse[
                 ))}
               </div>
             ) : (
-              <p className="text-sm text-gray-500">No reverse traces available</p>
+              <p className="text-sm text-gray-500">{t('traceroute.messages.noReverseTraces')}</p>
             )}
           </div>
         </div>
@@ -580,6 +584,7 @@ function BidirectionalResults({ data }: { data: BidirectionalTracerouteResponse[
  * Handles both structured Trace objects and string traces
  */
 function TraceDisplay({ trace, index }: { trace: Trace | string; index: number }) {
+  const { t } = useTranslation()
   const [isExpanded, setIsExpanded] = useState(true)
 
   if (typeof trace === 'string') {
@@ -601,13 +606,13 @@ function TraceDisplay({ trace, index }: { trace: Trace | string; index: number }
       >
         <div className="flex items-center gap-3">
           <span aria-hidden="true">{isExpanded ? <ChevronDown className="w-4 h-4" /> : <ChevronRight className="w-4 h-4" />}</span>
-          <span className="text-sm font-medium text-gray-900">Trace {index + 1}</span>
+          <span className="text-sm font-medium text-gray-900">{t('traceroute.labels.trace')} {index + 1}</span>
           <span className={`flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-medium ${dispositionColor}`}>
             {dispositionIcon}
             {trace.disposition}
           </span>
           {trace.hops && (
-            <span className="text-xs text-gray-500">{trace.hops.length} hops</span>
+            <span className="text-xs text-gray-500">{t('traceroute.labels.hopsCount', { count: trace.hops.length })}</span>
           )}
         </div>
       </button>
@@ -621,7 +626,7 @@ function TraceDisplay({ trace, index }: { trace: Trace | string; index: number }
               ))}
             </div>
           ) : (
-            <p className="text-sm text-gray-500 mt-3">No hops available</p>
+            <p className="text-sm text-gray-500 mt-3">{t('traceroute.messages.noHops')}</p>
           )}
         </div>
       )}
@@ -635,6 +640,7 @@ function TraceDisplay({ trace, index }: { trace: Trace | string; index: number }
  * Handles both structured TraceHop objects and string hops
  */
 function HopDisplay({ hop, index }: { hop: TraceHop | string; index: number }) {
+  const { t } = useTranslation()
   const [isExpanded, setIsExpanded] = useState(false)
 
   if (typeof hop === 'string') {
@@ -653,9 +659,9 @@ function HopDisplay({ hop, index }: { hop: TraceHop | string; index: number }) {
       >
         <div className="flex items-center gap-2">
           <Activity className="w-3 h-3 text-gray-400" aria-hidden="true" />
-          <span className="text-xs font-medium text-gray-900">Hop {index + 1}: {hop.node}</span>
+          <span className="text-xs font-medium text-gray-900">{t('traceroute.labels.hop')} {index + 1}: {hop.node}</span>
           {hop.steps && (
-            <span className="text-xs text-gray-500">({hop.steps.length} steps)</span>
+            <span className="text-xs text-gray-500">({t('traceroute.labels.stepsCount', { count: hop.steps.length })})</span>
           )}
         </div>
         <span aria-hidden="true">{isExpanded ? <ChevronDown className="w-3 h-3" /> : <ChevronRight className="w-3 h-3" />}</span>

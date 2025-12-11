@@ -573,19 +573,19 @@ def get_reachability():
                 from security.validation import validate_ip_address, validate_cidr
                 try:
                     validate_ip_address(headers['srcIps'])
-                except:
+                except ValueError:
                     try:
                         validate_cidr(headers['srcIps'])
-                    except:
+                    except ValueError:
                         return error_response("Invalid source IP address", 400)
 
             if 'dstIps' in headers:
                 try:
                     validate_ip_address(headers['dstIps'])
-                except:
+                except ValueError:
                     try:
                         validate_cidr(headers['dstIps'])
-                    except:
+                    except ValueError:
                         return error_response("Invalid destination IP address", 400)
         else:
             headers = None

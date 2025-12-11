@@ -1,6 +1,6 @@
-import { useCallback, useState, useRef } from 'react'
+import { useCallback, useState, useRef, useEffect, KeyboardEvent } from 'react'
 import { Link, useLocation, useNavigate } from 'react-router-dom'
-import { Network, Menu, X, Settings, RefreshCw, LogOut, User, Users, ChevronDown, FolderOpen, Shield } from 'lucide-react'
+import { Network, Menu, X, RefreshCw, LogOut, User, Users, ChevronDown, FolderOpen, Shield } from 'lucide-react'
 import { APP_VERSION, IS_PRODUCTION } from '../constants'
 import { useTranslation } from 'react-i18next'
 import { useUIStore, useSnapshotStore, useAuthStore } from '../store'
@@ -31,9 +31,128 @@ export function Header() {
   const { data: snapshots } = useSnapshots()
 
   const [dropdownOpen, setDropdownOpen] = useState(false)
+  const [focusedIndex, setFocusedIndex] = useState(-1)
   const dropdownRef = useRef<HTMLDivElement>(null)
+  const menuRef = useRef<HTMLDivElement>(null)
+  const buttonRef = useRef<HTMLButtonElement>(null)
   // Check if current user has admin role for conditional menu rendering
   const isAdmin = authAPI.hasRole('admin')
+
+  // Build menu items array for keyboard navigation
+  const menuItems = [
+    { type: 'link', path: '/profile', label: t('header.myProfile') },
+    ...(isAdmin ? [
+      { type: 'link', path: '/admin/users', label: t('header.userManagement') },
+      { type: 'link', path: '/admin/security-logs', label: t('header.securityLogs') },
+    ] : []),
+    { type: 'button', action: 'logout', label: t('auth.logout') },
+  ]
+
+  // Click-outside handler - must be defined before useEffect that uses it
+  const handleClickOutside = useCallback((e: MouseEvent) => {
+    if (dropdownRef.current && !dropdownRef.current.contains(e.target as Node)) {
+      setDropdownOpen(false)
+    }
+  }, [])
+
+  const handleDocumentClick = useCallback((e: MouseEvent) => {
+    handleClickOutside(e)
+  }, [handleClickOutside])
+
+  // Focus management when dropdown opens/closes
+  useEffect(() => {
+    if (dropdownOpen) {
+      setFocusedIndex(0)
+      // Focus first menu item when dropdown opens
+      const timer = setTimeout(() => {
+        const items = menuRef.current?.querySelectorAll('[role="menuitem"]')
+        if (items && items.length > 0) {
+          (items[0] as HTMLElement).focus()
+        }
+      }, 0)
+      return () => clearTimeout(timer)
+    } else {
+      setFocusedIndex(-1)
+    }
+  }, [dropdownOpen])
+
+  // Click-outside detection for dropdown menu - properly managed in useEffect
+  useEffect(() => {
+    if (!dropdownOpen || typeof document === 'undefined') return
+
+    const timer = setTimeout(() => {
+      document.addEventListener('click', handleDocumentClick)
+    }, 0)
+
+    return () => {
+      clearTimeout(timer)
+      document.removeEventListener('click', handleDocumentClick)
+    }
+  }, [dropdownOpen, handleDocumentClick])
+
+  // Keyboard navigation handler
+  const handleDropdownKeyDown = useCallback((e: KeyboardEvent) => {
+    const items = menuRef.current?.querySelectorAll('[role="menuitem"]')
+    if (!items || items.length === 0) return
+
+    switch (e.key) {
+      case 'ArrowDown':
+        e.preventDefault()
+        setFocusedIndex((prev) => {
+          const next = prev < items.length - 1 ? prev + 1 : 0
+          ;(items[next] as HTMLElement).focus()
+          return next
+        })
+        break
+      case 'ArrowUp':
+        e.preventDefault()
+        setFocusedIndex((prev) => {
+          const next = prev > 0 ? prev - 1 : items.length - 1
+          ;(items[next] as HTMLElement).focus()
+          return next
+        })
+        break
+      case 'Escape':
+        e.preventDefault()
+        setDropdownOpen(false)
+        buttonRef.current?.focus()
+        break
+      case 'Tab':
+        // Allow tab to close dropdown and move focus
+        setDropdownOpen(false)
+        break
+      case 'Home':
+        e.preventDefault()
+        setFocusedIndex(0)
+        ;(items[0] as HTMLElement).focus()
+        break
+      case 'End':
+        e.preventDefault()
+        setFocusedIndex(items.length - 1)
+        ;(items[items.length - 1] as HTMLElement).focus()
+        break
+    }
+  }, [])
+
+  // Handle button keyboard events
+  const handleButtonKeyDown = useCallback((e: KeyboardEvent) => {
+    switch (e.key) {
+      case 'ArrowDown':
+      case 'Enter':
+      case ' ':
+        if (!dropdownOpen) {
+          e.preventDefault()
+          setDropdownOpen(true)
+        }
+        break
+      case 'Escape':
+        if (dropdownOpen) {
+          e.preventDefault()
+          setDropdownOpen(false)
+        }
+        break
+    }
+  }, [dropdownOpen])
 
   /**
    * Handle snapshot selection change from dropdown
@@ -89,29 +208,6 @@ export function Header() {
   const handleToggleDropdown = useCallback(() => {
     setDropdownOpen((prev) => !prev)
   }, [])
-
-  const handleClickOutside = useCallback((e: MouseEvent) => {
-    if (dropdownRef.current && !dropdownRef.current.contains(e.target as Node)) {
-      setDropdownOpen(false)
-    }
-  }, [])
-
-  const handleDocumentClick = useCallback((e: MouseEvent) => {
-    handleClickOutside(e)
-  }, [handleClickOutside])
-
-  /**
-   * Click-outside detection for dropdown menu
-   * Uses setTimeout to avoid immediate closure on button click
-   * IMPORTANT: Manual event listener management (not useEffect) for SSR compatibility
-   */
-  if (dropdownOpen && typeof document !== 'undefined') {
-    setTimeout(() => {
-      document.addEventListener('click', handleDocumentClick)
-    }, 0)
-  } else if (typeof document !== 'undefined') {
-    document.removeEventListener('click', handleDocumentClick)
-  }
 
   return (
     <header className="bg-white border-b border-gray-200 px-4 py-3 flex items-center justify-between" role="banner">
@@ -185,11 +281,14 @@ export function Header() {
         {authAPI.isAuthEnabled() && user && (
           <div className="relative border-l border-gray-300 pl-4 ml-4" ref={dropdownRef}>
             <button
+              ref={buttonRef}
               onClick={handleToggleDropdown}
+              onKeyDown={handleButtonKeyDown}
               className="flex items-center gap-2 px-3 py-1.5 text-sm text-gray-700 hover:text-gray-900 hover:bg-gray-100 rounded-lg transition-colors focus:outline-none focus:ring-2 focus:ring-primary-600 focus:ring-offset-1"
               aria-label="User menu"
               aria-expanded={dropdownOpen}
-              aria-haspopup="true"
+              aria-haspopup="menu"
+              aria-controls="user-menu"
             >
               <User className="w-4 h-4" aria-hidden="true" />
               <span className="font-medium">{user.username}</span>
@@ -197,45 +296,60 @@ export function Header() {
             </button>
 
             {dropdownOpen && (
-              <div className="absolute right-0 mt-2 w-56 bg-white rounded-lg shadow-lg border border-gray-200 py-1 z-50">
+              <div
+                id="user-menu"
+                ref={menuRef}
+                role="menu"
+                aria-label="User menu"
+                onKeyDown={handleDropdownKeyDown}
+                className="absolute right-0 mt-2 w-56 bg-white rounded-lg shadow-lg border border-gray-200 py-1 z-50"
+              >
                 <Link
                   to="/profile"
+                  role="menuitem"
+                  tabIndex={focusedIndex === 0 ? 0 : -1}
                   onClick={() => setDropdownOpen(false)}
-                  className="flex items-center gap-3 px-4 py-2 text-sm text-gray-700 hover:bg-gray-100 transition-colors"
+                  className="flex items-center gap-3 px-4 py-2 text-sm text-gray-700 hover:bg-gray-100 focus:bg-gray-100 focus:outline-none transition-colors"
                 >
                   <User className="w-4 h-4" aria-hidden="true" />
-                  My Profile
+                  {t('header.myProfile')}
                 </Link>
 
                 {isAdmin && (
                   <>
                     <Link
                       to="/admin/users"
+                      role="menuitem"
+                      tabIndex={focusedIndex === 1 ? 0 : -1}
                       onClick={() => setDropdownOpen(false)}
-                      className="flex items-center gap-3 px-4 py-2 text-sm text-gray-700 hover:bg-gray-100 transition-colors"
+                      className="flex items-center gap-3 px-4 py-2 text-sm text-gray-700 hover:bg-gray-100 focus:bg-gray-100 focus:outline-none transition-colors"
                     >
                       <Users className="w-4 h-4" aria-hidden="true" />
-                      User Management
+                      {t('header.userManagement')}
                     </Link>
                     <Link
                       to="/admin/security-logs"
+                      role="menuitem"
+                      tabIndex={focusedIndex === 2 ? 0 : -1}
                       onClick={() => setDropdownOpen(false)}
-                      className="flex items-center gap-3 px-4 py-2 text-sm text-gray-700 hover:bg-gray-100 transition-colors"
+                      className="flex items-center gap-3 px-4 py-2 text-sm text-gray-700 hover:bg-gray-100 focus:bg-gray-100 focus:outline-none transition-colors"
                     >
                       <Shield className="w-4 h-4" aria-hidden="true" />
-                      Security Logs
+                      {t('header.securityLogs')}
                     </Link>
                   </>
                 )}
 
-                <hr className="my-1 border-gray-200" />
+                <hr className="my-1 border-gray-200" role="separator" />
 
                 <button
+                  role="menuitem"
+                  tabIndex={focusedIndex === menuItems.length - 1 ? 0 : -1}
                   onClick={() => {
                     setDropdownOpen(false)
                     handleLogout()
                   }}
-                  className="w-full flex items-center gap-3 px-4 py-2 text-sm text-gray-700 hover:bg-gray-100 transition-colors text-left"
+                  className="w-full flex items-center gap-3 px-4 py-2 text-sm text-gray-700 hover:bg-gray-100 focus:bg-gray-100 focus:outline-none transition-colors text-left"
                 >
                   <LogOut className="w-4 h-4" aria-hidden="true" />
                   {t('auth.logout')}
