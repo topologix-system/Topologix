@@ -10,6 +10,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { GripVertical } from 'lucide-react'
 import { useUIStore } from '../store'
+import { logger } from '../utils/logger'
 
 /**
  * Sidebar width constraints (pixels)
@@ -31,7 +32,7 @@ export function SidebarResizeHandle() {
    * Captures initial mouse position and sidebar width for delta calculation
    */
   const handleMouseDown = useCallback((e: React.MouseEvent) => {
-    console.log('[SidebarResizeHandle] Mouse down, starting resize')
+    logger.log('[SidebarResizeHandle] Mouse down, starting resize')
     setIsResizing(true)
     startXRef.current = e.clientX
     startWidthRef.current = currentWidth
@@ -53,12 +54,12 @@ export function SidebarResizeHandle() {
       const deltaX = startXRef.current - e.clientX
       const newWidth = Math.max(MIN_WIDTH, Math.min(MAX_WIDTH, startWidthRef.current + deltaX))
 
-      console.log('[SidebarResizeHandle] deltaX:', deltaX, 'newWidth:', newWidth)
+      logger.log('[SidebarResizeHandle] deltaX:', deltaX, 'newWidth:', newWidth)
       setSidebarWidth(newWidth)
     }
 
     const handleMouseUp = () => {
-      console.log('[SidebarResizeHandle] Mouse up, resize complete')
+      logger.log('[SidebarResizeHandle] Mouse up, resize complete')
       setIsResizing(false)
     }
 

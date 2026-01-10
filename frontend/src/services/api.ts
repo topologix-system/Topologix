@@ -41,6 +41,7 @@ import type {
   FlowTrace,
   RoutePolicy,
   AAAAuthenticationLogin,
+  SNMPCommunityConfig,
   ReachabilityRequest,
   Snapshot,
   SnapshotFile,
@@ -573,6 +574,17 @@ export const configAPI = {
 
   async getAAAAuthentication() {
     const response = await apiClient.get<APIResponse<AAAAuthenticationLogin[]>>('/config/aaa-authentication')
+    return response.data.data
+  },
+}
+
+/**
+ * Security analysis API methods
+ * Provides SNMP community configuration for security validation
+ */
+export const securityAPI = {
+  async getSNMPCommunities(): Promise<SNMPCommunityConfig[]> {
+    const response = await apiClient.get<APIResponse<SNMPCommunityConfig[]>>('/security/snmp-communities')
     return response.data.data
   },
 }

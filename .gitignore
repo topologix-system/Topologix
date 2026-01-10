@@ -163,6 +163,7 @@ logs/
 *.orig
 test/
 backend/alembic/*
+frontend/src/__tests__/*
 
 # ===== Docker =====
 # 不完全なDocker Compose設定（batfishサービス欠如）

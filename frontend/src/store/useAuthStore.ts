@@ -9,6 +9,7 @@
 import { create } from 'zustand'
 import { authAPI } from '../services/api'
 import { logger } from '../utils/logger'
+import { extractErrorMessage } from '../types/errors'
 
 /**
  * User data structure for authenticated users
@@ -83,9 +84,8 @@ export const useAuthStore = create<AuthStore>((set, get) => ({
         isLoading: false,
         error: null,
       })
-    } catch (error: any) {
-      const errorMessage =
-        error.response?.data?.message || 'Login failed. Please check your credentials.'
+    } catch (error: unknown) {
+      const errorMessage = extractErrorMessage(error, 'Login failed. Please check your credentials.')
       set({
         isLoading: false,
         error: errorMessage,
@@ -104,7 +104,7 @@ export const useAuthStore = create<AuthStore>((set, get) => ({
         isLoading: false,
         error: null,
       })
-    } catch (error: any) {
+    } catch (_error: unknown) {
       set({
         user: null,
         isAuthenticated: false,

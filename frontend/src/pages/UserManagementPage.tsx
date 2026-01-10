@@ -13,6 +13,7 @@ import { useUsers, useCurrentUser, useDeleteUser } from '../hooks/useUsers'
 import { UserTable } from '../components/UserTable'
 import { authAPI } from '../services/api'
 import { logger } from '../utils/logger'
+import { extractErrorMessage } from '../types/errors'
 
 export function UserManagementPage() {
   const { t } = useTranslation()
@@ -34,7 +35,7 @@ export function UserManagementPage() {
   const handleDelete = async (userId: number) => {
     try {
       await deleteUserMutation.mutateAsync(userId)
-    } catch (err: any) {
+    } catch (err: unknown) {
       logger.error('User deletion failed:', err)
     }
   }
@@ -76,12 +77,10 @@ export function UserManagementPage() {
 
   /**
    * Extract error message from delete mutation error
-   * Priority: API response message > error.message > translation fallback
+   * Uses type-safe helper to avoid unsafe type casts
    */
   const errorMessage = deleteUserMutation.error
-    ? (deleteUserMutation.error as any)?.response?.data?.message ||
-      (deleteUserMutation.error as any)?.message ||
-      t('users.deleteFailed')
+    ? extractErrorMessage(deleteUserMutation.error, t('users.deleteFailed'))
     : null
 
   return (

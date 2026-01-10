@@ -33,7 +33,7 @@ class Config:
     TESTING: bool = os.getenv('FLASK_TESTING', 'False') == 'True'
 
     # Flask
-    HOST: str = '127.0.0.1' if ENV == 'production' else '0.0.0.0'
+    HOST: str = os.getenv('HOST', '0.0.0.0')
     PORT: int = int(os.getenv('PORT', '5000'))
 
     # Authentication - Optional (enabled by default for security)
@@ -126,7 +126,7 @@ class Config:
     # Security - File Upload
     MAX_CONTENT_LENGTH: int = 10 * 1024 * 1024  # 10MB
     ALLOWED_EXTENSIONS: set = {'.cfg', '.conf', '.txt'}
-    UPLOAD_FOLDER: str = os.getenv('UPLOAD_FOLDER', '/tmp/topologix_uploads')
+    UPLOAD_FOLDER: str = os.getenv('UPLOAD_FOLDER', './uploads')
 
     # Security - Rate Limiting
     RATELIMIT_ENABLED: bool = True
@@ -171,7 +171,7 @@ class Config:
     ALLOWED_SNAPSHOT_PATH: Path = Path(SNAPSHOTS_DIR).resolve()
 
     # Logging
-    LOG_DIR: Path = Path('/app/logs')  # Centralized log directory
+    LOG_DIR: Path = Path(os.getenv('LOG_DIR', './logs'))
     LOG_LEVEL: str = os.getenv('LOG_LEVEL', 'INFO' if ENV == 'production' else 'DEBUG')
     LOG_FORMAT: str = '%(asctime)s - %(name)s - %(levelname)s - %(message)s'
     LOG_FILE: str = os.getenv('LOG_FILE', str(LOG_DIR / 'topologix.log'))

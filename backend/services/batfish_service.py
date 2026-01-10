@@ -894,6 +894,31 @@ class BatfishService:
         del df  # Free DataFrame memory
         return aaa_configs
 
+    # ========== Query 22b: SNMP Community Clients ==========
+    def get_snmp_community_clients(self) -> list[dict[str, Any]]:
+        """Get SNMP community configuration for security validation."""
+        self._ensure_initialized()
+
+        try:
+            df = self._execute_query(self.session.q.snmpCommunityClients(), "snmpCommunityClients")
+            if df is None:
+                return []
+
+            snmp_configs = []
+            for _, row in df.iterrows():
+                snmp_data = {
+                    "node": row.get("Node", ""),
+                    "community": row.get("Community", ""),
+                    "client_ips": row.get("Client_IPs", []),
+                }
+                snmp_configs.append(snmp_data)
+
+            del df  # Free DataFrame memory
+            return snmp_configs
+        except AttributeError:
+            logger.warning("snmpCommunityClients() method not available in this pybatfish version")
+            return []
+
     # ========== Query 23-27: BGP Analysis ==========
     def get_bgp_edges(self) -> list[dict[str, Any]]:
         """Get BGP adjacencies/neighbors topology"""
@@ -2601,6 +2626,8 @@ class BatfishService:
             data["search_route_policies"] = self.get_search_route_policies()
             logger.debug("Fetching aaa_authentication_login...")
             data["aaa_authentication_login"] = self.get_aaa_authentication_login()
+            logger.debug("Fetching snmp_community_clients...")
+            data["snmp_community_clients"] = self.get_snmp_community_clients()
 
             # BGP Protocol Analysis
             logger.debug("Fetching bgp_edges...")

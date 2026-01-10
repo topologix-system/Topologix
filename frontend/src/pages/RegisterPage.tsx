@@ -14,6 +14,7 @@ import { useRegister } from '../hooks/useUsers'
 import { APP_VERSION, IS_PRODUCTION } from '../constants'
 import { PasswordPolicyHelper } from '../components/PasswordPolicyHelper'
 import { logger } from '../utils/logger'
+import { extractErrorMessage } from '../types/errors'
 
 export function RegisterPage() {
   const { t } = useTranslation()
@@ -50,7 +51,7 @@ export function RegisterPage() {
       setTimeout(() => {
         navigate('/login')
       }, 2000)
-    } catch (err: any) {
+    } catch (err: unknown) {
       // Error is stored in mutation.error
       logger.error('Registration failed:', err)
     }
@@ -58,12 +59,10 @@ export function RegisterPage() {
 
   /**
    * Extract error message from registration mutation error
-   * Priority: API response message > error.message > translation fallback
+   * Uses type-safe helper to avoid unsafe type casts
    */
   const errorMessage = registerMutation.error
-    ? (registerMutation.error as any)?.response?.data?.message ||
-      (registerMutation.error as any)?.message ||
-      t('register.failed')
+    ? extractErrorMessage(registerMutation.error, t('register.failed'))
     : null
 
   return (

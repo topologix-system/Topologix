@@ -3,6 +3,7 @@ import { Info, Router, Link, AlertCircle, Search, Network, ExternalLink } from '
 import { useTranslation } from 'react-i18next'
 import { useUIStore, type SidebarTab } from '../store'
 import { SidebarResizeHandle } from './SidebarResizeHandle'
+import { logger } from '../utils/logger'
 
 // Lazy-loaded panels to improve initial page load performance
 const OverviewPanel = lazy(() => import('./panels/OverviewPanel'))
@@ -27,7 +28,7 @@ export function Sidebar() {
    * Useful for multi-monitor setups
    */
   const handlePopout = useCallback(() => {
-    console.log('[Sidebar] Opening sidebar in new window')
+    logger.log('[Sidebar] Opening sidebar in new window')
     const width = 800
     const height = 600
     const left = window.screenX + (window.outerWidth - width) / 2

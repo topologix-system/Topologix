@@ -16,3 +16,9 @@ export interface AAAAuthenticationLogin {
   methods: string[]
   list_name: string
 }
+
+export interface SNMPCommunityConfig {
+  node: string
+  community: string
+  client_ips: string[]
+}

@@ -12,7 +12,7 @@ python-magic==0.4.27
 bcrypt==4.1.2
 
 # Batfish client
-pybatfish==2024.7.22.1569
+pybatfish==2025.7.7.2423
 
 # Data handling
 pandas==2.1.4

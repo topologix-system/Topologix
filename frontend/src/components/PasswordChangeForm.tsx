@@ -12,6 +12,7 @@ import { AlertCircle, CheckCircle, Lock } from 'lucide-react'
 import { useChangePassword } from '../hooks/useUsers'
 import { PasswordPolicyHelper } from './PasswordPolicyHelper'
 import { logger } from '../utils/logger'
+import { extractErrorMessage } from '../types/errors'
 
 interface PasswordChangeFormProps {
   userId: number
@@ -61,7 +62,7 @@ export function PasswordChangeForm({ userId }: PasswordChangeFormProps) {
       setCurrentPassword('')
       setNewPassword('')
       setConfirmPassword('')
-    } catch (err: any) {
+    } catch (err: unknown) {
       logger.error('Password change failed:', err)
     }
   }
@@ -73,9 +74,7 @@ export function PasswordChangeForm({ userId }: PasswordChangeFormProps) {
   const errorMessage =
     validationError ||
     (changePasswordMutation.error
-      ? (changePasswordMutation.error as any)?.response?.data?.message ||
-        (changePasswordMutation.error as any)?.message ||
-        'Password change failed'
+      ? extractErrorMessage(changePasswordMutation.error, 'Password change failed')
       : null)
 
   return (

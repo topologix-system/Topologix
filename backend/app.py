@@ -20,6 +20,13 @@ from werkzeug.middleware.proxy_fix import ProxyFix
 from config import config
 from services import BatfishService, SnapshotService
 
+# Configure logging early so it's available during conditional imports
+logging.basicConfig(
+    level=logging.INFO if not config.DEBUG else logging.DEBUG,
+    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
+)
+logger = logging.getLogger(__name__)
+
 # Conditional imports for authentication
 if config.AUTH_ENABLED:
     from flask_session import Session
@@ -32,10 +39,10 @@ if config.AUTH_ENABLED:
     # Import CSRF protection based on mode
     if config.CSRF_MODE == 'double-submit':
         from security.csrf_double_submit import DoubleSubmitCSRFProtect as CSRFProtect
-        print("[INFO] CSRF Mode: Double-Submit Cookie Pattern (stateless)")
+        logger.info("CSRF Mode: Double-Submit Cookie Pattern (stateless)")
     else:
         from security.csrf import CSRFProtect
-        print("[INFO] CSRF Mode: Session-Based Synchronized Token Pattern")
+        logger.info("CSRF Mode: Session-Based Synchronized Token Pattern")
     # Import database modules (only when AUTH_ENABLED=true)
     from database import init_db
     from database.seed import initialize_database
@@ -48,13 +55,6 @@ else:
         def decorator(f):
             return f
         return decorator
-
-# Configure logging
-logging.basicConfig(
-    level=logging.INFO if not config.DEBUG else logging.DEBUG,
-    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
-)
-logger = logging.getLogger(__name__)
 
 # Initialize Flask app
 app = Flask(__name__)
@@ -1638,6 +1638,19 @@ def get_aaa_authentication():
         return error_response(str(e), 400)
     except Exception as e:
         logger.error(f"Failed to get AAA authentication: {e}")
+        return error_response(str(e), 500)
+
+
+@app.route('/api/security/snmp-communities', methods=['GET'])
+def get_snmp_communities():
+    """Get SNMP community configurations for security validation."""
+    try:
+        snmp_configs = batfish_service.get_snmp_community_clients()
+        return success_response(snmp_configs)
+    except RuntimeError as e:
+        return error_response(str(e), 400)
+    except Exception as e:
+        logger.error(f"Failed to get SNMP community clients: {e}")
         return error_response(str(e), 500)
 
 

@@ -14,6 +14,8 @@ import {
 } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
 
+import type { EventObject } from 'cytoscape'
+
 import { logger } from '../utils/logger'
 import { useCytoscapeLazy } from '../hooks/useCytoscapeLazy'
 import { useAllNetworkData } from '../hooks'
@@ -68,6 +70,23 @@ export const TopologyViewer = memo(function TopologyViewer() {
       )
       .slice(0, 10) // Limit to 10 results for performance
   }, [searchQuery, networkData?.node_properties])
+
+  // Memoized graph elements built from network data and visible layers
+  // Eliminates duplicate buildGraphElements calls across handlers
+  const graphElements = useMemo(() => {
+    if (!networkData) return null
+    return buildGraphElements(networkData.node_properties, {
+      physical: networkData.edges,
+      layer1: networkData.layer1_edges,
+      layer3: networkData.layer3_edges,
+      ospf: networkData.ospf_edges,
+      bgp: networkData.bgp_edges,
+      vxlan: networkData.vxlan_edges,
+      eigrp: networkData.eigrp_edges,
+      isis: networkData.isis_edges,
+      ipsec: networkData.ipsec_edges,
+    }, visibleLayers)
+  }, [networkData, visibleLayers])
 
   /**
    * Selects a node and centers/zooms the graph view on it
@@ -135,27 +154,16 @@ export const TopologyViewer = memo(function TopologyViewer() {
         logger.log('[TopologyViewer] Cytoscape initialized successfully')
         cytoscapeInitializedRef.current = true
 
-        if (networkData) {
+        if (graphElements) {
           logger.log('[TopologyViewer] Network data available, adding elements')
-          const elements = buildGraphElements(networkData.node_properties, {
-            physical: networkData.edges,
-            layer1: networkData.layer1_edges,
-            layer3: networkData.layer3_edges,
-            ospf: networkData.ospf_edges,
-            bgp: networkData.bgp_edges,
-            vxlan: networkData.vxlan_edges,
-            eigrp: networkData.eigrp_edges,
-            isis: networkData.isis_edges,
-            ipsec: networkData.ipsec_edges,
-          }, visibleLayers)
-          logger.log('[TopologyViewer] Built', elements.nodes.length, 'nodes and', elements.edges.length, 'edges')
-          cy.updateElements([...elements.nodes, ...elements.edges])
+          logger.log('[TopologyViewer] Built', graphElements.nodes.length, 'nodes and', graphElements.edges.length, 'edges')
+          cy.updateElements([...graphElements.nodes, ...graphElements.edges])
         }
       } finally {
         isUpdatingRef.current = false
       }
     },
-    [networkData, setSelectedNode, setSelectedEdge, visibleLayers]
+    [graphElements, cy]
   )
 
   /**
@@ -166,26 +174,14 @@ export const TopologyViewer = memo(function TopologyViewer() {
     logger.log('[TopologyViewer] Refresh button clicked')
     refetch()
 
-    if (networkData) {
+    if (graphElements) {
       logger.log('[TopologyViewer] Refreshing with existing network data')
-      const elements = buildGraphElements(networkData.node_properties, {
-        physical: networkData.edges,
-        layer1: networkData.layer1_edges,
-        layer3: networkData.layer3_edges,
-        ospf: networkData.ospf_edges,
-        bgp: networkData.bgp_edges,
-        vxlan: networkData.vxlan_edges,
-        eigrp: networkData.eigrp_edges,
-        isis: networkData.isis_edges,
-        ipsec: networkData.ipsec_edges,
-      }, visibleLayers)
-
-      logger.log('[TopologyViewer] Refresh: updating with', elements.nodes.length, 'nodes and', elements.edges.length, 'edges')
-      cy.updateElements([...elements.nodes, ...elements.edges])
+      logger.log('[TopologyViewer] Refresh: updating with', graphElements.nodes.length, 'nodes and', graphElements.edges.length, 'edges')
+      cy.updateElements([...graphElements.nodes, ...graphElements.edges])
     } else {
       logger.log('[TopologyViewer] No network data to refresh')
     }
-  }, [networkData, cy, refetch, visibleLayers])
+  }, [graphElements, cy, refetch])
 
   /**
    * Main effect: Updates graph when network data or layers change
@@ -218,19 +214,12 @@ export const TopologyViewer = memo(function TopologyViewer() {
       return
     }
 
-    // Build graph elements from all network data layers
-    logger.log('[TopologyViewer] Building graph elements from network data')
-    const elements = buildGraphElements(networkData.node_properties, {
-      physical: networkData.edges,
-      layer1: networkData.layer1_edges,
-      layer3: networkData.layer3_edges,
-      ospf: networkData.ospf_edges,
-      bgp: networkData.bgp_edges,
-      vxlan: networkData.vxlan_edges,
-      eigrp: networkData.eigrp_edges,
-      isis: networkData.isis_edges,
-      ipsec: networkData.ipsec_edges,
-    }, visibleLayers)
+    // Use memoized graph elements
+    if (!graphElements) {
+      logger.log('[TopologyViewer] Graph elements not available')
+      return
+    }
+    logger.log('[TopologyViewer] Using memoized graph elements')
 
     // Check for saved node positions from previous snapshot view
     const savedPositions = currentSnapshotName ? getPositions(currentSnapshotName) : null
@@ -240,7 +229,7 @@ export const TopologyViewer = memo(function TopologyViewer() {
     if (hasSavedPositions) {
       logger.log(`[TopologyViewer] Found ${Object.keys(savedPositions).length} saved positions for snapshot: ${currentSnapshotName}`)
       logger.log('[TopologyViewer] Updating graph WITHOUT layout (will restore saved positions)')
-      cy.updateElements([...elements.nodes, ...elements.edges], false)
+      cy.updateElements([...graphElements.nodes, ...graphElements.edges], false)
 
       logger.log('[TopologyViewer] Restoring node positions immediately')
       cy.restoreNodePositions(savedPositions)
@@ -254,7 +243,7 @@ export const TopologyViewer = memo(function TopologyViewer() {
       }, 50)
     } else {
       logger.log(`[TopologyViewer] No saved positions for snapshot: ${currentSnapshotName}, applying layout`)
-      cy.updateElements([...elements.nodes, ...elements.edges], true)
+      cy.updateElements([...graphElements.nodes, ...graphElements.edges], true)
     }
 
     // Cleanup fit timeout on effect re-run or unmount
@@ -264,7 +253,7 @@ export const TopologyViewer = memo(function TopologyViewer() {
         fitTimeoutRef.current = null
       }
     }
-  }, [networkData, cy, handleContainerRef, visibleLayers, currentSnapshotName, getPositions])
+  }, [networkData, cy, handleContainerRef, graphElements, currentSnapshotName, getPositions])
 
   /**
    * Cleanup effect: Destroys Cytoscape instance on component unmount
@@ -300,7 +289,7 @@ export const TopologyViewer = memo(function TopologyViewer() {
      * Handle node selection with error handling and data validation
      * Updates selected node in global store when user taps/clicks a node
      */
-    const handleNodeTap = (event: any) => {
+    const handleNodeTap = (event: EventObject) => {
       try {
         const nodeId = event.target?.data?.('id')
 
@@ -311,7 +300,7 @@ export const TopologyViewer = memo(function TopologyViewer() {
 
         logger.log('[TopologyViewer] Node tapped:', nodeId)
         setSelectedNode(nodeId)
-      } catch (error) {
+      } catch (error: unknown) {
         logger.error('[TopologyViewer] Error handling node tap:', error, {
           target: event.target,
           hasData: typeof event.target?.data === 'function'
@@ -323,7 +312,7 @@ export const TopologyViewer = memo(function TopologyViewer() {
      * Handle edge selection with error handling and data validation
      * Updates selected edge in global store when user taps/clicks an edge
      */
-    const handleEdgeTap = (event: any) => {
+    const handleEdgeTap = (event: EventObject) => {
       try {
         const edgeId = event.target?.data?.('id')
 
@@ -334,7 +323,7 @@ export const TopologyViewer = memo(function TopologyViewer() {
 
         logger.log('[TopologyViewer] Edge tapped:', edgeId)
         setSelectedEdge(edgeId)
-      } catch (error) {
+      } catch (error: unknown) {
         logger.error('[TopologyViewer] Error handling edge tap:', error, {
           target: event.target,
           hasData: typeof event.target?.data === 'function'
@@ -346,14 +335,14 @@ export const TopologyViewer = memo(function TopologyViewer() {
      * Clear selection when clicking graph background
      * Deselects both nodes and edges when user clicks empty canvas area
      */
-    const handleBackgroundTap = (event: any) => {
+    const handleBackgroundTap = (event: EventObject) => {
       try {
         if (event.target === instance) {
           logger.log('[TopologyViewer] Background tapped, clearing selection')
           setSelectedNode(null)
           setSelectedEdge(null)
         }
-      } catch (error) {
+      } catch (error: unknown) {
         logger.error('[TopologyViewer] Error handling background tap:', error)
       }
     }

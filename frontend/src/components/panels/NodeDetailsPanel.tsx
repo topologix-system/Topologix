@@ -11,6 +11,32 @@ import { useTranslation } from 'react-i18next'
 import { useVirtualizer } from '@tanstack/react-virtual'
 import { useUIStore } from '../../store'
 import { useAllNetworkData } from '../../hooks'
+import type {
+  NodeProperties,
+  InterfaceProperties,
+  Route,
+} from '../../types/network'
+import type {
+  OSPFProcessConfig,
+  OSPFAreaConfig,
+  OSPFInterfaceConfig,
+  OSPFSessionCompat,
+} from '../../types/ospf'
+import type {
+  BGPPeerConfiguration,
+  BGPProcessConfiguration,
+  BGPSessionStatus,
+  BGPSessionCompatibility,
+  BGPRib,
+} from '../../types/bgp'
+import type { SwitchedVlanProperties } from '../../types/vlan'
+import type { IPOwner } from '../../types/ip'
+import type { DefinedStructure, ReferencedStructure, NamedStructure } from '../../types/structures'
+import type { FileParseStatus, InitIssue, ParseWarning } from '../../types/validation'
+import type { FlowTrace } from '../../types/reachability'
+import type { AAAAuthenticationLogin } from '../../types/policy'
+import type { BGPEdge, EIGRPEdge, ISISEdge, VXLANEdge } from '../../types/edges'
+import type { AllNetworkData } from '../../types/api'
 import {
   Server,
   Network,
@@ -32,6 +58,19 @@ import {
 } from 'lucide-react'
 
 type TabType = 'basic' | 'interfaces' | 'routing' | 'ospf' | 'services' | 'security' | 'validation' | 'bgp' | 'acl' | 'vlan' | 'config' | 'eigrp' | 'isis' | 'vxlan'
+
+// Extended interface type with hostname from backend response
+type InterfaceWithHostname = InterfaceProperties & { hostname?: string }
+
+// HSRP group type for interface details
+interface HSRPGroup {
+  group: number
+  ip?: string
+  priority?: number
+  preempt?: boolean
+  track_interface?: string
+  track_decrement?: number
+}
 
 export const NodeDetailsPanel = memo(function NodeDetailsPanel() {
   const { t } = useTranslation()
@@ -346,7 +385,7 @@ export const NodeDetailsPanel = memo(function NodeDetailsPanel() {
 })
 
 // Basic Information Tab
-function BasicTab({ node }: { node: any }) {
+function BasicTab({ node }: { node: NodeProperties }) {
   const { t } = useTranslation()
   return (
     <div className="space-y-4">
@@ -426,7 +465,7 @@ function BasicTab({ node }: { node: any }) {
 }
 
 // Interfaces Tab
-function InterfacesTab({ node, interfaces }: { node: any; interfaces: any[] }) {
+function InterfacesTab({ node, interfaces }: { node: NodeProperties; interfaces: InterfaceWithHostname[] }) {
   const { t } = useTranslation()
   const [expandedInterface, setExpandedInterface] = useState<string | null>(null)
 
@@ -568,7 +607,7 @@ function InterfacesTab({ node, interfaces }: { node: any; interfaces: any[] }) {
                         <div className="mt-2">
                           <p className="font-medium text-gray-900 mb-1">{t('nodeDetails.interface.hsrpGroups')}</p>
                           <div className="space-y-0.5 text-gray-700">
-                            {iface.hsrp_groups.map((group: any, idx: number) => (
+                            {iface.hsrp_groups.map((group: HSRPGroup, idx: number) => (
                               <div key={idx}>{JSON.stringify(group)}</div>
                             ))}
                           </div>
@@ -601,7 +640,7 @@ function InterfacesTab({ node, interfaces }: { node: any; interfaces: any[] }) {
 }
 
 // Routing Tab with virtual scrolling for 10K+ routes
-function RoutingTab({ routes }: { routes: any[] }) {
+function RoutingTab({ routes }: { routes: Route[] }) {
   const { t } = useTranslation()
   const [searchQuery, setSearchQuery] = useState('')
   const parentRef = useRef<HTMLDivElement>(null)
@@ -720,10 +759,10 @@ function RoutingTab({ routes }: { routes: any[] }) {
 
 // OSPF Tab
 function OspfTab({ process, areas, interfaces, sessions }: {
-  process?: any
-  areas: any[]
-  interfaces: any[]
-  sessions: any[]
+  process?: OSPFProcessConfig
+  areas: OSPFAreaConfig[]
+  interfaces: OSPFInterfaceConfig[]
+  sessions: OSPFSessionCompat[]
 }) {
   const { t } = useTranslation()
   return (
@@ -829,7 +868,7 @@ function OspfTab({ process, areas, interfaces, sessions }: {
 }
 
 // Services Tab
-function ServicesTab({ node, aaa }: { node: any; aaa: any[] }) {
+function ServicesTab({ node, aaa }: { node: NodeProperties; aaa: AAAAuthenticationLogin[] }) {
   const { t } = useTranslation()
   return (
     <div className="space-y-4">
@@ -987,7 +1026,7 @@ function ServicesTab({ node, aaa }: { node: any; aaa: any[] }) {
 }
 
 // Security Tab
-function SecurityTab({ node, ipOwners }: { node: any; ipOwners: any[] }) {
+function SecurityTab({ node, ipOwners }: { node: NodeProperties; ipOwners: IPOwner[] }) {
   const { t } = useTranslation()
   return (
     <div className="space-y-4">
@@ -1046,18 +1085,18 @@ function SecurityTab({ node, ipOwners }: { node: any; ipOwners: any[] }) {
 }
 
 // Validation Tab
-function ValidationTab({ node, data }: { node: any; data: any }) {
+function ValidationTab({ node, data }: { node: NodeProperties; data: AllNetworkData | undefined }) {
   const { t } = useTranslation()
   // Find validation issues related to this node
-  const nodeFileStatus = data?.file_parse_status?.find((f: any) =>
+  const nodeFileStatus = data?.file_parse_status?.find((f: FileParseStatus) =>
     f.nodes?.includes(node.node)
   )
 
-  const nodeIssues = data?.init_issues?.filter((issue: any) =>
+  const nodeIssues = data?.init_issues?.filter((issue: InitIssue) =>
     issue.nodes?.includes(node.node)
   ) || []
 
-  const nodeWarnings = data?.parse_warnings?.filter((warning: any) =>
+  const nodeWarnings = data?.parse_warnings?.filter((warning: ParseWarning) =>
     warning.filename?.includes(node.node)
   ) || []
 
@@ -1093,7 +1132,7 @@ function ValidationTab({ node, data }: { node: any; data: any }) {
             {t('validation.sections.initIssues')} ({nodeIssues.length})
           </h3>
           <div className="space-y-2">
-            {nodeIssues.map((issue: any, index: number) => (
+            {nodeIssues.map((issue: InitIssue, index: number) => (
               <div key={index} className="text-sm bg-white p-2 rounded border-l-4 border-yellow-400">
                 <div className="text-gray-900 font-medium">{issue.type}</div>
                 <div className="text-gray-700">{issue.details}</div>
@@ -1118,7 +1157,7 @@ function ValidationTab({ node, data }: { node: any; data: any }) {
             {t('validation.sections.parseWarnings')} ({nodeWarnings.length})
           </h3>
           <div className="space-y-2">
-            {nodeWarnings.map((warning: any, index: number) => (
+            {nodeWarnings.map((warning: ParseWarning, index: number) => (
               <div key={index} className="text-sm bg-white p-2 rounded border-l-4 border-orange-400">
                 <div className="text-gray-700">{warning.comment}</div>
                 <div className="text-xs text-gray-600 mt-1">Line {warning.line}: {warning.text}</div>
@@ -1140,13 +1179,13 @@ function ValidationTab({ node, data }: { node: any; data: any }) {
 
 // BGP Tab
 function BgpTab({ node, edges, peerConfig, processConfig, sessionStatus, sessionCompat, rib }: {
-  node: any
-  edges: any[]
-  peerConfig: any[]
-  processConfig: any[]
-  sessionStatus: any[]
-  sessionCompat: any[]
-  rib: any[]
+  node: NodeProperties
+  edges: BGPEdge[]
+  peerConfig: BGPPeerConfiguration[]
+  processConfig: BGPProcessConfiguration[]
+  sessionStatus: BGPSessionStatus[]
+  sessionCompat: BGPSessionCompatibility[]
+  rib: BGPRib[]
 }) {
   const { t } = useTranslation()
   const [expandedSection, setExpandedSection] = useState<string | null>(null)
@@ -1484,8 +1523,8 @@ function BgpTab({ node, edges, peerConfig, processConfig, sessionStatus, session
 
 // ACL/Filters Tab
 function AclTab({ node, filterReachability }: {
-  node: any
-  filterReachability: any[]
+  node: NodeProperties
+  filterReachability: FlowTrace[]
 }) {
   const { t } = useTranslation()
   // Separate filters by whether they belong to current node
@@ -1607,7 +1646,7 @@ function AclTab({ node, filterReachability }: {
 }
 
 // VLAN Tab
-function VlanTab({ node, vlans }: { node: any; vlans: any[] }) {
+function VlanTab({ node, vlans }: { node: NodeProperties; vlans: SwitchedVlanProperties[] }) {
   const { t } = useTranslation()
   return (
     <div className="space-y-4">
@@ -1653,10 +1692,10 @@ function VlanTab({ node, vlans }: { node: any; vlans: any[] }) {
 
 // Configuration Structures Tab
 function ConfigurationTab({ node, definedStructures, referencedStructures, namedStructures }: {
-  node: any
-  definedStructures: any[]
-  referencedStructures: any[]
-  namedStructures: any[]
+  node: NodeProperties
+  definedStructures: DefinedStructure[]
+  referencedStructures: ReferencedStructure[]
+  namedStructures: NamedStructure[]
 }) {
   const { t } = useTranslation()
   const [expandedSection, setExpandedSection] = useState<string | null>(null)
@@ -1776,7 +1815,7 @@ function ConfigurationTab({ node, definedStructures, referencedStructures, named
 }
 
 // EIGRP Tab
-function EigrpTab({ node, edges }: { node: any; edges: any[] }) {
+function EigrpTab({ node, edges }: { node: NodeProperties; edges: EIGRPEdge[] }) {
   const { t } = useTranslation()
   return (
     <div className="space-y-4">
@@ -1809,7 +1848,7 @@ function EigrpTab({ node, edges }: { node: any; edges: any[] }) {
 }
 
 // IS-IS Tab
-function IsisTab({ node, edges }: { node: any; edges: any[] }) {
+function IsisTab({ node, edges }: { node: NodeProperties; edges: ISISEdge[] }) {
   const { t } = useTranslation()
   return (
     <div className="space-y-4">
@@ -1841,7 +1880,7 @@ function IsisTab({ node, edges }: { node: any; edges: any[] }) {
 }
 
 // VXLAN Tab
-function VxlanTab({ node, edges }: { node: any; edges: any[] }) {
+function VxlanTab({ node, edges }: { node: NodeProperties; edges: VXLANEdge[] }) {
   const { t } = useTranslation()
   return (
     <div className="space-y-4">
