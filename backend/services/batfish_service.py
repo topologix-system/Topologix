@@ -115,13 +115,14 @@ class BatfishService:
         if not self._initialized:
             raise RuntimeError("Batfish session not initialized. Call initialize_network() first.")
 
-    def _execute_query(self, query: Any, query_name: str) -> pd.DataFrame | None:
+    def _execute_query(self, query: Any, query_name: str, raise_on_error: bool = False) -> pd.DataFrame | None:
         """
         Execute a Batfish query with error handling
 
         Args:
             query: Batfish question to execute
             query_name: Name of query for logging
+            raise_on_error: If True, re-raise exceptions instead of returning None
 
         Returns:
             DataFrame with results or None if error/empty
@@ -134,6 +135,8 @@ class BatfishService:
             return result
         except Exception as e:
             logger.warning(f"Query '{query_name}' failed: {e}")
+            if raise_on_error:
+                raise
             return None
 
     # ========== Helper Functions for Safe Serialization ==========
@@ -161,9 +164,16 @@ class BatfishService:
             return obj
         if isinstance(obj, list):
             return [self._safe_serialize(item) for item in obj]
+        if isinstance(obj, (set, frozenset)):
+            return [self._safe_serialize(item) for item in obj]
+        if isinstance(obj, tuple):
+            return [self._safe_serialize(item) for item in obj]
         if isinstance(obj, dict):
             return {k: self._safe_serialize(v) for k, v in obj.items()}
-        # For any Batfish object type, convert to string
+        # For Batfish dataclass/object types, extract dict representation
+        if hasattr(obj, '__dict__'):
+            return {k: self._safe_serialize(v) for k, v in vars(obj).items() if not k.startswith('_')}
+        # Fallback to string for types without __dict__
         return str(obj)
 
     # ========== Query 1: Node Properties ==========
@@ -1134,14 +1144,55 @@ class BatfishService:
 
         results = []
         for _, row in df.iterrows():
+            # Parse Sources to extract node and filter name
+            sources_raw = row.get("Sources", [])
+            node_name = ""
+            filter_name = ""
+            if sources_raw is not None:
+                source_list = list(sources_raw) if not isinstance(sources_raw, (list, str)) else (
+                    [sources_raw] if isinstance(sources_raw, str) else sources_raw
+                )
+                if source_list:
+                    source_str = str(source_list[0]) if source_list[0] else ""
+                    if ": " in source_str:
+                        parts = source_str.split(": ", 1)
+                        node_name = parts[0]
+                        filter_name = parts[1]
+
+            unreachable_line_obj = row.get("Unreachable_Line", "")
+            unreachable_line_str = self._safe_serialize(unreachable_line_obj)
+            if not isinstance(unreachable_line_str, str):
+                unreachable_line_str = str(unreachable_line_str) if unreachable_line_str is not None else ""
+
+            # Normalize blocking_lines to list before serialization
+            blocking_raw = row.get("Blocking_Lines", [])
+            if blocking_raw is not None and not isinstance(blocking_raw, list):
+                blocking_list = list(blocking_raw) if hasattr(blocking_raw, '__iter__') and not isinstance(blocking_raw, str) else [blocking_raw]
+            else:
+                blocking_list = blocking_raw if blocking_raw else []
+
+            line_number = None
+            for bl in blocking_list:
+                bl_str = str(bl)
+                if bl_str.startswith("Line "):
+                    try:
+                        line_number = int(bl_str.split(":")[0].replace("Line ", ""))
+                        break
+                    except (ValueError, IndexError):
+                        pass
+
             result_data = {
-                "sources": self._safe_serialize(row.get("Sources", [])),
-                "unreachable_line": row.get("Unreachable_Line", ""),
-                "unreachable_line_action": row.get("Unreachable_Line_Action", ""),
-                "blocking_lines": row.get("Blocking_Lines", []),
+                "node": node_name,
+                "filter": filter_name,
+                "sources": self._safe_serialize(sources_raw),
+                "unreachable_line": unreachable_line_str,
+                "unreachable_line_action": row.get("Unreachable_Line_Action", "") or "",
+                "action": row.get("Unreachable_Line_Action", "") or "",
+                "blocking_lines": [str(self._safe_serialize(bl)) for bl in blocking_list],
                 "different_action": row.get("Different_Action", False),
-                "reason": row.get("Reason", ""),
-                "additional_info": row.get("Additional_Info", "")
+                "reason": row.get("Reason", "") or "",
+                "additional_info": row.get("Additional_Info", "") or "",
+                "line": line_number
             }
             results.append(result_data)
 
@@ -1217,21 +1268,20 @@ class BatfishService:
         """
         self._ensure_initialized()
 
-        # Build query parameters
-        query_params = {
+        # Build query parameters — startLocation is mandatory for Batfish
+        query_params: dict[str, Any] = {
             "headers": headers,
-            "startLocation": startLocation,
+            "startLocation": startLocation if startLocation else "/.*/",
             "ignoreFilters": ignoreFilters
         }
 
         if maxTraces is not None:
             query_params["maxTraces"] = maxTraces
-
         if pathConstraints is not None:
             query_params["pathConstraints"] = pathConstraints
 
         query = self.session.q.traceroute(**query_params)
-        df = self._execute_query(query, "traceroute")
+        df = self._execute_query(query, "traceroute", raise_on_error=True)
         if df is None:
             return []
 
@@ -1266,28 +1316,27 @@ class BatfishService:
         """
         self._ensure_initialized()
 
-        # Build query parameters
-        query_params = {
+        # Build query parameters — startLocation is mandatory for Batfish
+        query_params: dict[str, Any] = {
             "headers": headers,
-            "startLocation": startLocation,
+            "startLocation": startLocation if startLocation else "/.*/",
             "ignoreFilters": ignoreFilters
         }
 
         if maxTraces is not None:
             query_params["maxTraces"] = maxTraces
-
         if pathConstraints is not None:
             query_params["pathConstraints"] = pathConstraints
 
         query = self.session.q.bidirectionalTraceroute(**query_params)
-        df = self._execute_query(query, "bidirectionalTraceroute")
+        df = self._execute_query(query, "bidirectionalTraceroute", raise_on_error=True)
         if df is None:
             return []
 
         results = []
         for _, row in df.iterrows():
             result_data = {
-                "flow": self._safe_serialize(row.get("Flow")),
+                "flow": self._safe_serialize(row.get("Forward_Flow")),
                 "forward_traces": self._safe_serialize(row.get("Forward_Traces", [])),
                 "reverse_flow": self._safe_serialize(row.get("Reverse_Flow")),
                 "reverse_traces": self._safe_serialize(row.get("Reverse_Traces", [])),
@@ -1479,6 +1528,8 @@ class BatfishService:
         self._ensure_initialized()
 
         results = []
+        ospf_proc_df = None
+        bgp_proc_df = None
 
         # 1. Check OSPF sessions for duplicate router IDs
         ospf_df = self._execute_query(
@@ -1780,7 +1831,7 @@ class BatfishService:
         # Method eigrpInterfaces() does not exist in pybatfish API
         # Only eigrpEdges() is available for EIGRP topology
         logger.warning("eigrpInterfaces() method does not exist in pybatfish - returning empty list")
-        return []
+        return {"data": [], "stub": True, "message": "EIGRP interface configuration query is not yet implemented"}
 
     def get_isis_edges(self) -> list[dict[str, Any]]:
         """IS-IS adjacencies"""
@@ -1817,7 +1868,7 @@ class BatfishService:
         # Method isisInterfaces() does not exist in pybatfish API
         # Only isisEdges() is available for IS-IS topology
         logger.warning("isisInterfaces() method does not exist in pybatfish - returning empty list")
-        return []
+        return {"data": [], "stub": True, "message": "IS-IS interface configuration query is not yet implemented"}
 
     def get_layer1_edges(self) -> list[dict[str, Any]]:
         """Physical connectivity"""
@@ -1920,7 +1971,7 @@ class BatfishService:
 
         # Method ipsecPeerConfiguration() does not exist in pybatfish API
         logger.warning("ipsecPeerConfiguration() method does not exist in pybatfish - returning empty list")
-        return []
+        return {"data": [], "stub": True, "message": "IPsec peer configuration query is not yet implemented"}
 
     def get_bfd_session_status(self) -> list[dict[str, Any]]:
         """
@@ -1933,7 +1984,7 @@ class BatfishService:
 
         # Method bfdSessionStatus() does not exist in pybatfish API
         logger.warning("bfdSessionStatus() method does not exist in pybatfish - returning empty list")
-        return []
+        return {"data": [], "stub": True, "message": "BFD session status query is not yet implemented"}
 
     def get_layer2_topology(self) -> list[dict[str, Any]]:
         """
@@ -1947,7 +1998,7 @@ class BatfishService:
 
         # Method layer2Topology() does not exist in pybatfish API
         logger.warning("layer2Topology() method does not exist in pybatfish - returning empty list")
-        return []
+        return {"data": [], "stub": True, "message": "Layer 2 topology query is not yet implemented"}
 
     def get_vi_model(self) -> list[dict[str, Any]]:
         """
@@ -1960,7 +2011,7 @@ class BatfishService:
 
         # Method viModel() does not exist in pybatfish API
         logger.warning("viModel() method does not exist in pybatfish - returning empty list")
-        return []
+        return {"data": [], "stub": True, "message": "VI model query is not yet implemented"}
 
     def get_switched_vlan_edges(self) -> list[dict[str, Any]]:
         """
@@ -1974,7 +2025,7 @@ class BatfishService:
 
         # Method switchedVlanEdges() does not exist in pybatfish API
         logger.warning("switchedVlanEdges() method does not exist in pybatfish - returning empty list")
-        return []
+        return {"data": [], "stub": True, "message": "Switched VLAN edges query is not yet implemented"}
 
     def get_interface_mtu(self) -> list[dict[str, Any]]:
         """MTU analysis"""
@@ -2010,7 +2061,7 @@ class BatfishService:
 
         # Method ipSpaceAssignment() does not exist in pybatfish API
         logger.warning("ipSpaceAssignment() method does not exist in pybatfish - returning empty list")
-        return []
+        return {"data": [], "stub": True, "message": "IP space assignment query is not yet implemented"}
 
     def get_lpm_routes(self, ip=None) -> list[dict[str, Any]]:
         """Longest prefix match routing"""
@@ -2200,7 +2251,7 @@ class BatfishService:
         # Method routePolicies() does not exist in pybatfish API
         # Return empty list to avoid causing delays
         logger.warning("routePolicies() method not available - returning empty list")
-        return []
+        return {"data": [], "stub": True, "message": "Route policies query is not yet implemented"}
 
     def test_route_policies(self, direction=None, inputRoute=None, nodes=None, policies=None) -> list[dict[str, Any]]:
         """Test route policies"""
@@ -2283,7 +2334,7 @@ class BatfishService:
 
         # Method nodeRoles() does not exist in pybatfish API version 2025.7.7.2423
         logger.warning("nodeRoles() method does not exist in this pybatfish version - returning empty list")
-        return []
+        return {"data": [], "stub": True, "message": "Node roles query is not yet implemented"}
 
     def get_interface_blacklist(self) -> list[dict[str, Any]]:
         """Blacklisted interfaces"""

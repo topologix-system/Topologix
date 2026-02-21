@@ -101,15 +101,15 @@ def sanitize_input(value: Any, max_length: int = 255,
 
     if not allow_special_chars:
         # Remove potentially dangerous characters for most inputs
-        value = re.sub(r'[<>\"\'`;&|$(){}\\]', '', value)
-
-    # HTML escape
-    value = (value
-            .replace('&', '&amp;')
-            .replace('<', '&lt;')
-            .replace('>', '&gt;')
-            .replace('"', '&quot;')
-            .replace("'", '&#39;'))
+        value = re.sub(r'[<>&\'"`;|$(){}\\]', '', value)
+    else:
+        # Allow special chars but HTML-escape for safe output
+        value = (value
+                .replace('&', '&amp;')
+                .replace('<', '&lt;')
+                .replace('>', '&gt;')
+                .replace('"', '&quot;')
+                .replace("'", '&#39;'))
 
     return value
 

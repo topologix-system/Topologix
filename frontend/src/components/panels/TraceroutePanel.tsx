@@ -3,7 +3,7 @@
  * - Supports unidirectional and bidirectional traceroute modes
  * - Detailed packet specification: src/dst IP, ports, protocols, DSCP, ECN, fragment offset
  * - Path constraints: ingress/egress nodes, transit nodes, forbidden nodes for "what-if" scenarios
- * - Advanced options: maxTraces, ignoreFilters, ignorePBR for analysis control
+ * - Advanced options: maxTraces, ignoreFilters for analysis control
  * - Results visualization: hop-by-hop trace with flow dispositions (accepted/denied/loop/etc)
  * - Collapsible trace sections with success/fail indicators per flow
  * - Largest panel component (675 lines) with extensive form handling
@@ -15,6 +15,7 @@ import type {
   TracerouteRequest,
   TracerouteResponse,
   BidirectionalTracerouteResponse,
+  TracerouteFlow,
   Trace,
   TraceHop,
 } from '../../types'
@@ -30,6 +31,7 @@ import {
   AlertCircle,
   Info,
 } from 'lucide-react'
+import { ProtocolSelector } from '../ProtocolSelector'
 
 export function TraceroutePanel() {
   const { t } = useTranslation()
@@ -66,6 +68,7 @@ export function TraceroutePanel() {
    */
   const handleReset = () => {
     setFormData({ headers: {} })
+    setShowAdvanced(false)
     traceroute.reset()
     bidirectionalTraceroute.reset()
   }
@@ -74,7 +77,7 @@ export function TraceroutePanel() {
    * Update packet header fields in form data
    * Merges new field value into existing headers object
    */
-  const updateHeaders = (field: string, value: any) => {
+  const updateHeaders = (field: string, value: string | string[] | number[] | undefined) => {
     setFormData((prev) => ({
       ...prev,
       headers: {
@@ -88,7 +91,7 @@ export function TraceroutePanel() {
    * Update path constraint fields in form data
    * Used for ingress/egress nodes, transit nodes, forbidden nodes
    */
-  const updatePathConstraints = (field: string, value: any) => {
+  const updatePathConstraints = (field: string, value: string | undefined) => {
     setFormData((prev) => ({
       ...prev,
       pathConstraints: {
@@ -122,10 +125,16 @@ export function TraceroutePanel() {
         {/* Mode Selection */}
         <div className="mb-6">
           <label className="block text-sm font-medium text-gray-700 mb-2">{t('traceroute.fields.traceMode')}</label>
-          <div className="flex gap-4">
+          <div role="radiogroup" aria-label={t('traceroute.fields.traceMode')} className="flex gap-4">
             <button
               type="button"
-              onClick={() => setTracerouteMode('unidirectional')}
+              role="radio"
+              aria-checked={tracerouteMode === 'unidirectional'}
+              tabIndex={tracerouteMode === 'unidirectional' ? 0 : -1}
+              onClick={() => {
+                setTracerouteMode('unidirectional')
+                bidirectionalTraceroute.reset()
+              }}
               className={`flex items-center gap-2 px-4 py-2 rounded-lg border-2 transition-colors ${
                 tracerouteMode === 'unidirectional'
                   ? 'border-primary-600 bg-primary-50 text-primary-700'
@@ -137,7 +146,13 @@ export function TraceroutePanel() {
             </button>
             <button
               type="button"
-              onClick={() => setTracerouteMode('bidirectional')}
+              role="radio"
+              aria-checked={tracerouteMode === 'bidirectional'}
+              tabIndex={tracerouteMode === 'bidirectional' ? 0 : -1}
+              onClick={() => {
+                setTracerouteMode('bidirectional')
+                traceroute.reset()
+              }}
               className={`flex items-center gap-2 px-4 py-2 rounded-lg border-2 transition-colors ${
                 tracerouteMode === 'bidirectional'
                   ? 'border-primary-600 bg-primary-50 text-primary-700'
@@ -216,6 +231,8 @@ export function TraceroutePanel() {
           <button
             type="button"
             onClick={() => setShowAdvanced(!showAdvanced)}
+            aria-expanded={showAdvanced}
+            aria-controls="advanced-options"
             className="flex items-center gap-2 text-sm font-medium text-primary-600 hover:text-primary-700"
           >
             {showAdvanced ? (
@@ -227,20 +244,16 @@ export function TraceroutePanel() {
           </button>
 
           {showAdvanced && (
-            <div className="mt-4 space-y-4 p-4 bg-gray-50 rounded-lg">
+            <div id="advanced-options" className="mt-4 space-y-4 p-4 bg-gray-50 rounded-lg">
               <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                 {/* Protocol Options */}
                 <div>
-                  <label htmlFor="ipProtocols" className="block text-sm font-medium text-gray-700 mb-1">
+                  <label className="block text-sm font-medium text-gray-700 mb-1">
                     {t('traceroute.fields.ipProtocols')}
                   </label>
-                  <input
-                    type="text"
-                    id="ipProtocols"
-                    value={formData.headers?.ipProtocols?.join(',') || ''}
-                    onChange={(e) => updateHeaders('ipProtocols', e.target.value ? e.target.value.split(',').map(p => p.trim()).filter(p => p) : undefined)}
-                    placeholder={t('traceroute.placeholders.ipProtocols')}
-                    className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-primary-600 focus:border-transparent"
+                  <ProtocolSelector
+                    value={formData.headers?.ipProtocols || []}
+                    onChange={(protocols) => updateHeaders('ipProtocols', protocols.length > 0 ? protocols : undefined)}
                   />
                 </div>
 
@@ -446,7 +459,7 @@ export function TraceroutePanel() {
 
       {/* Error Display */}
       {error && (
-        <div className="bg-red-50 border border-red-200 rounded-lg p-4">
+        <div role="alert" className="bg-red-50 border border-red-200 rounded-lg p-4">
           <div className="flex items-start gap-3">
             <XCircle className="w-5 h-5 text-red-600 flex-shrink-0 mt-0.5" aria-hidden="true" />
             <div>
@@ -457,9 +470,19 @@ export function TraceroutePanel() {
         </div>
       )}
 
+      {/* Loading Indicator */}
+      {isLoading && (
+        <div className="bg-white rounded-lg shadow-sm border border-gray-200 p-6" aria-busy="true">
+          <div className="flex items-center gap-3">
+            <div className="w-5 h-5 border-2 border-primary-600 border-t-transparent rounded-full animate-spin" />
+            <span className="text-sm text-gray-600">{t('traceroute.messages.analyzing')}</span>
+          </div>
+        </div>
+      )}
+
       {/* Results Display */}
       {hasResults && (
-        <div className="bg-white rounded-lg shadow-sm border border-gray-200 p-6">
+        <div className="bg-white rounded-lg shadow-sm border border-gray-200 p-6" aria-busy={isLoading}>
           <h3 className="text-lg font-semibold text-gray-900 mb-4">{t('traceroute.sections.results')}</h3>
 
           {tracerouteMode === 'bidirectional' && bidirectionalTraceroute.data ? (
@@ -488,16 +511,14 @@ function UnidirectionalResults({ data }: { data: TracerouteResponse[] }) {
           {/* Flow Information */}
           <div className="mb-4 p-3 bg-gray-50 rounded-lg">
             <h5 className="text-xs font-semibold text-gray-700 mb-2">{t('traceroute.labels.flowDetails')}</h5>
-            <pre className="text-xs text-gray-600 whitespace-pre-wrap font-mono">
-              {typeof result.flow === 'string' ? result.flow : JSON.stringify(result.flow, null, 2)}
-            </pre>
+            <FlowDisplay flow={result.flow} />
           </div>
 
           {/* Traces */}
           {Array.isArray(result.traces) && result.traces.length > 0 ? (
             <div className="space-y-3">
               {result.traces.map((trace, traceIdx) => (
-                <TraceDisplay key={traceIdx} trace={trace} index={traceIdx} />
+                <TraceDisplay key={traceIdx} trace={trace} index={traceIdx} idPrefix={`flow-${idx}`} />
               ))}
             </div>
           ) : (
@@ -530,15 +551,13 @@ function BidirectionalResults({ data }: { data: BidirectionalTracerouteResponse[
 
             <div className="mb-4 p-3 bg-gray-50 rounded-lg">
               <h6 className="text-xs font-semibold text-gray-700 mb-2">{t('traceroute.labels.flowDetails')}</h6>
-              <pre className="text-xs text-gray-600 whitespace-pre-wrap font-mono">
-                {typeof result.flow === 'string' ? result.flow : JSON.stringify(result.flow, null, 2)}
-              </pre>
+              <FlowDisplay flow={result.flow} />
             </div>
 
             {Array.isArray(result.forward_traces) && result.forward_traces.length > 0 ? (
               <div className="space-y-3">
                 {result.forward_traces.map((trace, traceIdx) => (
-                  <TraceDisplay key={traceIdx} trace={trace} index={traceIdx} />
+                  <TraceDisplay key={traceIdx} trace={trace} index={traceIdx} idPrefix={`fwd-${idx}`} />
                 ))}
               </div>
             ) : (
@@ -555,17 +574,13 @@ function BidirectionalResults({ data }: { data: BidirectionalTracerouteResponse[
 
             <div className="mb-4 p-3 bg-gray-50 rounded-lg">
               <h6 className="text-xs font-semibold text-gray-700 mb-2">{t('traceroute.labels.reverseFlowDetails')}</h6>
-              <pre className="text-xs text-gray-600 whitespace-pre-wrap font-mono">
-                {typeof result.reverse_flow === 'string'
-                  ? result.reverse_flow
-                  : JSON.stringify(result.reverse_flow, null, 2)}
-              </pre>
+              <FlowDisplay flow={result.reverse_flow} />
             </div>
 
             {Array.isArray(result.reverse_traces) && result.reverse_traces.length > 0 ? (
               <div className="space-y-3">
                 {result.reverse_traces.map((trace, traceIdx) => (
-                  <TraceDisplay key={traceIdx} trace={trace} index={traceIdx} />
+                  <TraceDisplay key={traceIdx} trace={trace} index={traceIdx} idPrefix={`rev-${idx}`} />
                 ))}
               </div>
             ) : (
@@ -579,13 +594,43 @@ function BidirectionalResults({ data }: { data: BidirectionalTracerouteResponse[
 }
 
 /**
+ * Structured flow information display
+ * Renders flow as key-value pairs when object, falls back to pre-formatted text for strings
+ */
+function FlowDisplay({ flow }: { flow: TracerouteFlow | string | null }) {
+  if (!flow) {
+    return <span className="text-xs text-gray-400">—</span>
+  }
+
+  if (typeof flow === 'string') {
+    return <pre className="text-xs text-gray-600 whitespace-pre-wrap font-mono">{flow}</pre>
+  }
+
+  return (
+    <dl className="grid grid-cols-2 gap-x-4 gap-y-1 text-xs">
+      {flow.srcIp && <><dt className="text-gray-500">Source IP</dt><dd className="font-mono">{flow.srcIp}</dd></>}
+      {flow.dstIp && <><dt className="text-gray-500">Dest IP</dt><dd className="font-mono">{flow.dstIp}</dd></>}
+      {flow.ipProtocol && <><dt className="text-gray-500">Protocol</dt><dd className="font-mono">{flow.ipProtocol}</dd></>}
+      {flow.srcPort != null && <><dt className="text-gray-500">Src Port</dt><dd className="font-mono">{flow.srcPort}</dd></>}
+      {flow.dstPort != null && <><dt className="text-gray-500">Dst Port</dt><dd className="font-mono">{flow.dstPort}</dd></>}
+      {flow.icmpType != null && <><dt className="text-gray-500">ICMP Type</dt><dd className="font-mono">{flow.icmpType}</dd></>}
+      {flow.icmpCode != null && <><dt className="text-gray-500">ICMP Code</dt><dd className="font-mono">{flow.icmpCode}</dd></>}
+      {flow.dscp != null && <><dt className="text-gray-500">DSCP</dt><dd className="font-mono">{flow.dscp}</dd></>}
+      {flow.ecn != null && <><dt className="text-gray-500">ECN</dt><dd className="font-mono">{flow.ecn}</dd></>}
+      {flow.packetLength != null && <><dt className="text-gray-500">Packet Length</dt><dd className="font-mono">{flow.packetLength}</dd></>}
+    </dl>
+  )
+}
+
+/**
  * Collapsible trace display component
  * Shows disposition status with color-coded badge and hop details
  * Handles both structured Trace objects and string traces
  */
-function TraceDisplay({ trace, index }: { trace: Trace | string; index: number }) {
+function TraceDisplay({ trace, index, idPrefix }: { trace: Trace | string; index: number; idPrefix: string }) {
   const { t } = useTranslation()
-  const [isExpanded, setIsExpanded] = useState(true)
+  const [isExpanded, setIsExpanded] = useState(false)
+  const panelId = `${idPrefix}-trace-${index}`
 
   if (typeof trace === 'string') {
     return (
@@ -602,6 +647,8 @@ function TraceDisplay({ trace, index }: { trace: Trace | string; index: number }
     <div className="border border-gray-200 rounded-lg">
       <button
         onClick={() => setIsExpanded(!isExpanded)}
+        aria-expanded={isExpanded}
+        aria-controls={panelId}
         className="w-full px-4 py-3 flex items-center justify-between hover:bg-gray-50 transition-colors"
       >
         <div className="flex items-center gap-3">
@@ -618,11 +665,11 @@ function TraceDisplay({ trace, index }: { trace: Trace | string; index: number }
       </button>
 
       {isExpanded && (
-        <div className="px-4 pb-4 border-t border-gray-100">
+        <div id={panelId} className="px-4 pb-4 border-t border-gray-100">
           {trace.hops && trace.hops.length > 0 ? (
             <div className="space-y-2 mt-3">
               {trace.hops.map((hop, hopIdx) => (
-                <HopDisplay key={hopIdx} hop={hop} index={hopIdx} />
+                <HopDisplay key={hopIdx} hop={hop} index={hopIdx} idPrefix={panelId} />
               ))}
             </div>
           ) : (
@@ -639,9 +686,10 @@ function TraceDisplay({ trace, index }: { trace: Trace | string; index: number }
  * Shows node name and processing steps for each network hop
  * Handles both structured TraceHop objects and string hops
  */
-function HopDisplay({ hop, index }: { hop: TraceHop | string; index: number }) {
+function HopDisplay({ hop, index, idPrefix }: { hop: TraceHop | string; index: number; idPrefix: string }) {
   const { t } = useTranslation()
   const [isExpanded, setIsExpanded] = useState(false)
+  const panelId = `${idPrefix}-hop-${index}`
 
   if (typeof hop === 'string') {
     return (
@@ -655,6 +703,8 @@ function HopDisplay({ hop, index }: { hop: TraceHop | string; index: number }) {
     <div className="border border-gray-100 rounded">
       <button
         onClick={() => setIsExpanded(!isExpanded)}
+        aria-expanded={isExpanded}
+        aria-controls={panelId}
         className="w-full px-3 py-2 flex items-center justify-between hover:bg-gray-50 transition-colors"
       >
         <div className="flex items-center gap-2">
@@ -668,7 +718,7 @@ function HopDisplay({ hop, index }: { hop: TraceHop | string; index: number }) {
       </button>
 
       {isExpanded && hop.steps && hop.steps.length > 0 && (
-        <div className="px-3 pb-2 space-y-1 border-t border-gray-100">
+        <div id={panelId} className="px-3 pb-2 space-y-1 border-t border-gray-100">
           {hop.steps.map((step, stepIdx) => (
             <div key={stepIdx} className="py-1 text-xs">
               <div className="flex items-start gap-2">
@@ -676,7 +726,7 @@ function HopDisplay({ hop, index }: { hop: TraceHop | string; index: number }) {
                 <div className="flex-1">
                   <div className="text-gray-900 font-medium">{step.action}</div>
                   {step.detail && (
-                    <div className="text-gray-600 mt-0.5">{step.detail}</div>
+                    <div className="text-gray-600 mt-0.5 break-all">{formatStepDetail(step.detail)}</div>
                   )}
                 </div>
               </div>
@@ -688,25 +738,35 @@ function HopDisplay({ hop, index }: { hop: TraceHop | string; index: number }) {
   )
 }
 
+function formatStepDetail(detail: unknown): string {
+  if (typeof detail === 'string') return detail
+  if (detail == null) return ''
+  try {
+    return Object.entries(detail as Record<string, unknown>)
+      .filter(([, v]) => v != null)
+      .map(([k, v]) => {
+        const value = typeof v === 'object' ? JSON.stringify(v) : String(v)
+        return `${k}: ${value}`
+      })
+      .join(', ')
+  } catch {
+    return JSON.stringify(detail)
+  }
+}
+
 /**
  * Map flow disposition to appropriate icon
  * Returns icon component for disposition status: ACCEPTED/SUCCESS, DENIED/DROPPED, NO_ROUTE, etc.
  */
 function getDispositionIcon(disposition: string) {
-  switch (disposition?.toUpperCase()) {
-    case 'ACCEPTED':
-    case 'SUCCESS':
-      return <CheckCircle className="w-3 h-3" aria-hidden="true" />
-    case 'DENIED':
-    case 'DROPPED':
-    case 'FAILURE':
-      return <XCircle className="w-3 h-3" aria-hidden="true" />
-    case 'NO_ROUTE':
-    case 'NEIGHBOR_UNREACHABLE':
-      return <AlertCircle className="w-3 h-3" aria-hidden="true" />
-    default:
-      return <Info className="w-3 h-3" aria-hidden="true" />
-  }
+  const d = disposition?.toUpperCase() ?? ''
+  if (d.startsWith('ACCEPTED') || d.startsWith('SUCCESS'))
+    return <CheckCircle className="w-3 h-3" aria-hidden="true" />
+  if (d.startsWith('DENIED') || d.startsWith('DROPPED') || d.startsWith('FAILURE'))
+    return <XCircle className="w-3 h-3" aria-hidden="true" />
+  if (d.startsWith('NO_ROUTE') || d.startsWith('NEIGHBOR_UNREACHABLE'))
+    return <AlertCircle className="w-3 h-3" aria-hidden="true" />
+  return <Info className="w-3 h-3" aria-hidden="true" />
 }
 
 /**
@@ -714,20 +774,11 @@ function getDispositionIcon(disposition: string) {
  * Returns Tailwind CSS classes for disposition colors: green (success), red (failure), yellow (warnings)
  */
 function getDispositionColor(disposition: string): string {
-  switch (disposition?.toUpperCase()) {
-    case 'ACCEPTED':
-    case 'SUCCESS':
-      return 'bg-green-100 text-green-700'
-    case 'DENIED':
-    case 'DROPPED':
-    case 'FAILURE':
-      return 'bg-red-100 text-red-700'
-    case 'NO_ROUTE':
-    case 'NEIGHBOR_UNREACHABLE':
-      return 'bg-yellow-100 text-yellow-700'
-    default:
-      return 'bg-gray-100 text-gray-700'
-  }
+  const d = disposition?.toUpperCase() ?? ''
+  if (d.startsWith('ACCEPTED') || d.startsWith('SUCCESS')) return 'bg-green-100 text-green-700'
+  if (d.startsWith('DENIED') || d.startsWith('DROPPED') || d.startsWith('FAILURE')) return 'bg-red-100 text-red-700'
+  if (d.startsWith('NO_ROUTE') || d.startsWith('NEIGHBOR_UNREACHABLE')) return 'bg-yellow-100 text-yellow-700'
+  return 'bg-gray-100 text-gray-700'
 }
 
 export default TraceroutePanel

@@ -32,6 +32,7 @@ import {
   useForwardingLoops,
   useMultipathConsistency,
   useLoopbackMultipathConsistency,
+  useSubnetMultipathConsistency,
 } from '../../hooks'
 
 interface SectionProps {
@@ -102,7 +103,7 @@ function Section({ title, icon, isLoading, data, defaultOpen = false, severity =
           <span aria-hidden="true">{icon}</span>
           <h3 className="font-semibold text-gray-900">{title}</h3>
           {hasData && (
-            <span className={`px-2 py-0.5 text-xs font-medium rounded-full ${getCountBadgeColor()}`} aria-label={`${count} items`}>
+            <span className={`px-2 py-0.5 text-xs font-medium rounded-full ${getCountBadgeColor()}`} aria-label={t('validation.itemCount', { count })}>
               {count}
             </span>
           )}
@@ -126,7 +127,7 @@ function Section({ title, icon, isLoading, data, defaultOpen = false, severity =
           {isLoading ? (
             <div className="flex items-center gap-2 text-sm text-gray-700 py-3" role="status" aria-live="polite">
               <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-primary-600" aria-hidden="true"></div>
-              <span>{t('validation.loading', { section: title.toLowerCase() })}</span>
+              <span>{t('validation.loading', { section: title })}</span>
             </div>
           ) : !hasData ? (
             <div className="flex items-center gap-2 text-sm text-gray-700 py-3">
@@ -135,10 +136,85 @@ function Section({ title, icon, isLoading, data, defaultOpen = false, severity =
             </div>
           ) : (
             <div className="max-h-96 overflow-y-auto mt-3">
-              <pre className="text-xs bg-gray-50 p-3 rounded overflow-x-auto" aria-label={`${title} data in JSON format`}>
+              <pre className="text-xs bg-gray-50 p-3 rounded overflow-x-auto" aria-label={t('validation.dataJsonFormat', { title })}>
                 {JSON.stringify(data, null, 2)}
               </pre>
             </div>
+          )}
+        </div>
+      )}
+    </div>
+  )
+}
+
+function SubnetMultipathSection() {
+  const { t } = useTranslation()
+  const [isOpen, setIsOpen] = useState(false)
+  const [nodeFilter, setNodeFilter] = useState('')
+  const mutation = useSubnetMultipathConsistency()
+
+  const handleExecute = () => {
+    const request: { node?: string } = {}
+    if (nodeFilter.trim()) request.node = nodeFilter.trim()
+    mutation.mutate(Object.keys(request).length > 0 ? request : undefined)
+  }
+
+  const hasData = mutation.data && (Array.isArray(mutation.data) ? mutation.data.length > 0 : Object.keys(mutation.data).length > 0)
+  const count = mutation.data ? (Array.isArray(mutation.data) ? mutation.data.length : Object.keys(mutation.data).length) : 0
+  const sectionId = 'validation-section-subnet-multipath-consistency'
+
+  return (
+    <div className="rounded-lg shadow-sm border border-red-200 bg-red-50 border-l-4 border-l-red-500">
+      <button
+        onClick={() => setIsOpen(!isOpen)}
+        className="w-full px-4 py-3 flex items-center justify-between hover:bg-gray-50 hover:bg-opacity-50 transition-colors focus:outline-none focus:ring-2 focus:ring-primary-600 focus:ring-inset rounded-lg"
+        aria-expanded={isOpen}
+        aria-controls={`${sectionId}-content`}
+        id={`${sectionId}-button`}
+      >
+        <div className="flex items-center gap-3">
+          <AlertCircle className="w-5 h-5 text-red-600" aria-hidden="true" />
+          <h3 className="font-semibold text-gray-900">{t('validation.sections.subnetMultipathConsistency')}</h3>
+          {hasData && (
+            <span className="px-2 py-0.5 text-xs font-medium rounded-full bg-red-100 text-red-700" aria-label={t('validation.itemCount', { count })}>
+              {count}
+            </span>
+          )}
+        </div>
+        <span aria-hidden="true">
+          {isOpen ? <ChevronDown className="w-4 h-4 text-gray-500" /> : <ChevronRight className="w-4 h-4 text-gray-500" />}
+        </span>
+      </button>
+      {isOpen && (
+        <div id={`${sectionId}-content`} role="region" aria-labelledby={`${sectionId}-button`} className="px-4 pb-4 border-t border-gray-100">
+          <div className="flex gap-2 mt-3 mb-3">
+            <input type="text" placeholder={t('validation.subnetMultipath.nodePlaceholder')} value={nodeFilter} onChange={(e) => setNodeFilter(e.target.value)}
+              className="flex-1 px-3 py-1.5 text-sm border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-primary-600"
+              aria-label={t('validation.subnetMultipath.aria.nodeFilter')} />
+            <button onClick={handleExecute} disabled={mutation.isPending}
+              className="px-4 py-1.5 text-sm bg-primary-600 hover:bg-primary-700 disabled:bg-gray-400 text-white rounded-md transition-colors focus:outline-none focus:ring-2 focus:ring-primary-600 focus:ring-offset-1">
+              {mutation.isPending ? (
+                <span className="flex items-center gap-1.5">
+                  <span className="animate-spin rounded-full h-4 w-4 border-b-2 border-white" aria-hidden="true" />
+                  {t('common.loading')}
+                </span>
+              ) : t('common.search')}
+            </button>
+          </div>
+          {mutation.isError && <p className="text-sm text-red-600 mb-2">{String(mutation.error)}</p>}
+          {mutation.isSuccess && (
+            hasData ? (
+              <div className="max-h-96 overflow-y-auto">
+                <pre className="text-xs bg-gray-50 p-3 rounded overflow-x-auto" aria-label={t('validation.subnetMultipath.aria.results')}>
+                  {JSON.stringify(mutation.data, null, 2)}
+                </pre>
+              </div>
+            ) : (
+              <div className="flex items-center gap-2 text-sm text-gray-700 py-3">
+                <CheckCircle className="w-4 h-4 text-green-600" aria-hidden="true" />
+                <span>{t('validation.noIssues')}</span>
+              </div>
+            )
           )}
         </div>
       )}
@@ -192,7 +268,7 @@ export function ValidationPanel() {
     loopbackMultipathConsistency.isLoading
 
   return (
-    <div className="space-y-4" role="region" aria-label="Network validation">
+    <div className="space-y-4" role="region" aria-label={t('validation.title')}>
       <div className="flex items-center justify-between">
         <h2 className="text-lg font-semibold text-gray-900">{t('validation.title')}</h2>
         {!isLoading && (
@@ -264,6 +340,8 @@ export function ValidationPanel() {
           data={loopbackMultipathConsistency.data}
           severity="error"
         />
+
+        <SubnetMultipathSection />
 
         {/* Warnings */}
         <Section

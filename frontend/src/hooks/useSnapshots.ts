@@ -126,6 +126,8 @@ export function useActivateSnapshot() {
       queryClient.refetchQueries({ queryKey: ['ha'] })
       queryClient.refetchQueries({ queryKey: ['advanced'] })
       queryClient.refetchQueries({ queryKey: ['analysis'] })
+      queryClient.refetchQueries({ queryKey: ['bgp'] })
+      queryClient.refetchQueries({ queryKey: ['snmp-security'] })
     },
   })
 }

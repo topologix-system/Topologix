@@ -163,8 +163,8 @@ class DatabaseManager:
         """
         try:
             with self.engine.connect() as conn:
-                conn.execute("SELECT 1" if not self.database_url.startswith('sqlite')
-                           else "SELECT 1")
+                from sqlalchemy import text
+                conn.execute(text("SELECT 1"))
             logger.info("Database connection check successful")
             return True
         except Exception as e:

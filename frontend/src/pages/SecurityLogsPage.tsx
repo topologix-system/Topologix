@@ -216,6 +216,14 @@ export function SecurityLogsPage() {
     }
   }, [])
 
+  const handleFilterChange = useCallback((key: string, value: unknown) => {
+    setFilters((prev) => ({
+      ...prev,
+      [key]: value,
+    }))
+    setPage(1)
+  }, [])
+
   // Handle clear filters - reset input states
   const handleClearFilters = useCallback(() => {
     setFilters({})

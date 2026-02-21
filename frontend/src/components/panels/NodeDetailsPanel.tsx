@@ -33,7 +33,7 @@ import type { SwitchedVlanProperties } from '../../types/vlan'
 import type { IPOwner } from '../../types/ip'
 import type { DefinedStructure, ReferencedStructure, NamedStructure } from '../../types/structures'
 import type { FileParseStatus, InitIssue, ParseWarning } from '../../types/validation'
-import type { FlowTrace } from '../../types/reachability'
+import type { FilterLineReachability, FilterApplication, AddressOwnership, EnrichedFilterEntry, FilterGroup } from '../../types/reachability'
 import type { AAAAuthenticationLogin } from '../../types/policy'
 import type { BGPEdge, EIGRPEdge, ISISEdge, VXLANEdge } from '../../types/edges'
 import type { AllNetworkData } from '../../types/api'
@@ -54,7 +54,10 @@ import {
   FileText,
   Share2,
   Circle,
-  Cloud
+  Cloud,
+  ChevronDown,
+  ChevronRight,
+  Search
 } from 'lucide-react'
 
 type TabType = 'basic' | 'interfaces' | 'routing' | 'ospf' | 'services' | 'security' | 'validation' | 'bgp' | 'acl' | 'vlan' | 'config' | 'eigrp' | 'isis' | 'vxlan'
@@ -345,6 +348,8 @@ export const NodeDetailsPanel = memo(function NodeDetailsPanel() {
           <AclTab
             node={node}
             filterReachability={allFilterReachability}
+            allInterfaces={data?.interface_properties || []}
+            allIpOwners={data?.ip_owners || []}
           />
         )}
         {activeTab === 'vlan' && (
@@ -1521,123 +1526,611 @@ function BgpTab({ node, edges, peerConfig, processConfig, sessionStatus, session
   )
 }
 
+// ACL/Filters Tab — Helper functions
+
+const IPV4_REGEX = /\b(\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}(?:\/\d{1,2})?)\b/g
+
+function ipToInt(ip: string): number | null {
+  const parts = ip.split('.')
+  if (parts.length !== 4) return null
+  let result = 0
+  for (const part of parts) {
+    const num = parseInt(part, 10)
+    if (isNaN(num) || num < 0 || num > 255) return null
+    result = (result << 8) | num
+  }
+  return result >>> 0
+}
+
+function prefixToMaskInt(prefix: number): number {
+  if (prefix <= 0) return 0
+  if (prefix >= 32) return 0xFFFFFFFF
+  return (~0 << (32 - prefix)) >>> 0
+}
+
+function extractAddresses(unreachableLine: string, blockingLines: string[]): string[] {
+  const allText = [unreachableLine || '', ...(blockingLines || [])].join(' ')
+  if (!allText.trim()) return []
+  const matches = allText.match(IPV4_REGEX) || []
+  return [...new Set(matches)]
+}
+
+interface IPOwnerEntry {
+  owner: IPOwner
+  ipInt: number
+  maskInt: number
+}
+
+function findAddressOwners(
+  addresses: string[],
+  index: { exactMap: Map<string, IPOwner[]>; cidrEntries: IPOwnerEntry[] }
+): AddressOwnership[] {
+  const results: AddressOwnership[] = []
+
+  for (const addr of addresses) {
+    const [ipPart, maskPart] = addr.split('/')
+    const hasPrefix = maskPart !== undefined
+
+    const exactOwners = index.exactMap.get(ipPart) || []
+    for (const owner of exactOwners) {
+      results.push({
+        address: addr,
+        match_type: 'exact',
+        owner_node: owner.node,
+        owner_interface: owner.interface,
+        owner_vrf: owner.vrf,
+      })
+    }
+
+    if (hasPrefix) {
+      // Forward: referenced CIDR → find owners whose IP falls within this subnet
+      const prefixLen = parseInt(maskPart, 10)
+      if (prefixLen < 0 || prefixLen > 32 || isNaN(prefixLen)) continue
+      const addrInt = ipToInt(ipPart)
+      const addrMask = prefixToMaskInt(prefixLen)
+      if (addrInt !== null) {
+        const addrNetwork = (addrInt & addrMask) >>> 0
+        for (const entry of index.cidrEntries) {
+          const ownerNetwork = (entry.ipInt & addrMask) >>> 0
+          if (ownerNetwork === addrNetwork) {
+            results.push({
+              address: addr,
+              match_type: 'cidr_contains',
+              owner_node: entry.owner.node,
+              owner_interface: entry.owner.interface,
+              owner_vrf: entry.owner.vrf,
+            })
+          }
+        }
+      }
+    } else if (exactOwners.length === 0) {
+      // Inverse: bare host IP with no exact match → check if it falls within any owner's subnet
+      const addrInt = ipToInt(ipPart)
+      if (addrInt !== null) {
+        for (const entry of index.cidrEntries) {
+          const ownerNetwork = (entry.ipInt & entry.maskInt) >>> 0
+          const addrNetwork = (addrInt & entry.maskInt) >>> 0
+          if (ownerNetwork === addrNetwork) {
+            results.push({
+              address: addr,
+              match_type: 'cidr_contains',
+              owner_node: entry.owner.node,
+              owner_interface: entry.owner.interface,
+              owner_vrf: entry.owner.vrf,
+            })
+          }
+        }
+      }
+    }
+  }
+
+  const seen = new Set<string>()
+  return results.filter((r) => {
+    const key = `${r.address}|${r.owner_node}|${r.owner_interface}`
+    if (seen.has(key)) return false
+    seen.add(key)
+    return true
+  })
+}
+
+function parseNodeFilter(filter: FilterLineReachability): { node: string; filterName: string } {
+  if (filter.node && filter.filter) {
+    return { node: filter.node, filterName: filter.filter }
+  }
+  // Try to extract "node: filter" or "node:filter" from sources field
+  const parseSrc = (s: string): { node: string; filterName: string } | null => {
+    // Prefer ": " (colon+space), fall back to ":" (colon only)
+    const sepIdx = s.indexOf(': ')
+    if (sepIdx > 0) {
+      return { node: s.slice(0, sepIdx).trim(), filterName: s.slice(sepIdx + 2).trim() }
+    }
+    const colonIdx = s.indexOf(':')
+    if (colonIdx > 0) {
+      return { node: s.slice(0, colonIdx).trim(), filterName: s.slice(colonIdx + 1).trim() }
+    }
+    return null
+  }
+  const sources = filter.sources
+  if (typeof sources === 'string') {
+    const parsed = parseSrc(sources)
+    if (parsed) return parsed
+  }
+  if (Array.isArray(sources) && sources.length > 0) {
+    const parsed = parseSrc(String(sources[0]))
+    if (parsed) return parsed
+  }
+  return { node: filter.node || '', filterName: filter.filter || '' }
+}
+
+function toSafeId(str: string): string {
+  return str.replace(/[^a-zA-Z0-9-]/g, '-').replace(/-+/g, '-').toLowerCase()
+}
+
+function aclGroupId(node: string, filterName: string, index: number): string {
+  return `acl-group-${toSafeId(node)}-${toSafeId(filterName)}-${index}`
+}
+
 // ACL/Filters Tab
-function AclTab({ node, filterReachability }: {
+function AclTab({ node, filterReachability, allInterfaces, allIpOwners }: {
   node: NodeProperties
-  filterReachability: FlowTrace[]
+  filterReachability: FilterLineReachability[]
+  allInterfaces: InterfaceProperties[]
+  allIpOwners: IPOwner[]
 }) {
   const { t } = useTranslation()
-  // Separate filters by whether they belong to current node
-  const nodeFilters = filterReachability.filter((f) => f.node === node.node)
-  const otherFilters = filterReachability.filter((f) => f.node !== node.node)
+  const setSelectedNodeId = useUIStore((s) => s.setSelectedNodeId)
+  const [expandedGroups, setExpandedGroups] = useState<Set<string>>(new Set())
+  const [searchQuery, setSearchQuery] = useState('')
 
-  return (
-    <div className="space-y-4">
-      {filterReachability.length === 0 && (
-        <p className="text-sm text-gray-700">{t('nodeDetails.noAclData')}</p>
+  const toggleGroup = useCallback((gid: string) => {
+    setExpandedGroups((prev) => {
+      const next = new Set(prev)
+      if (next.has(gid)) next.delete(gid)
+      else next.add(gid)
+      return next
+    })
+  }, [])
+
+  // Step 0: Pre-indexed lookup structures
+  const interfacesByHost = useMemo(() => {
+    const map = new Map<string, InterfaceProperties[]>()
+    for (const iface of allInterfaces) {
+      const list = map.get(iface.hostname) || []
+      list.push(iface)
+      map.set(iface.hostname, list)
+    }
+    return map
+  }, [allInterfaces])
+
+  const ipOwnerIndex = useMemo(() => {
+    const exactMap = new Map<string, IPOwner[]>()
+    const cidrEntries: IPOwnerEntry[] = []
+    for (const owner of allIpOwners) {
+      if (!owner.active || !owner.ip) continue
+      const list = exactMap.get(owner.ip) || []
+      list.push(owner)
+      exactMap.set(owner.ip, list)
+      const ipInt = ipToInt(owner.ip)
+      const maskInt = owner.mask != null ? prefixToMaskInt(parseInt(String(owner.mask), 10)) : 0xFFFFFFFF
+      if (ipInt !== null) {
+        cidrEntries.push({ owner, ipInt, maskInt })
+      }
+    }
+    return { exactMap, cidrEntries }
+  }, [allIpOwners])
+
+  // Step 1-3: Enrichment
+  const enrichedFilters = useMemo((): EnrichedFilterEntry[] => {
+    if (!filterReachability.length) return []
+    return filterReachability.map((filter) => {
+      const { node: nodeName, filterName } = parseNodeFilter(filter)
+      const appliedTo: FilterApplication[] = []
+      const hostInterfaces = interfacesByHost.get(nodeName) || []
+      for (const iface of hostInterfaces) {
+        if (iface.incoming_filter_name === filterName) {
+          appliedTo.push({
+            interface_name: iface.interface,
+            direction: 'inbound',
+            zone: iface.zone || null,
+            primary_address: iface.primary_address || null,
+          })
+        }
+        if (iface.outgoing_filter_name === filterName) {
+          appliedTo.push({
+            interface_name: iface.interface,
+            direction: 'outbound',
+            zone: iface.zone || null,
+            primary_address: iface.primary_address || null,
+          })
+        }
+      }
+      const referencedAddresses = extractAddresses(filter.unreachable_line, filter.blocking_lines)
+      const addressOwners = findAddressOwners(referencedAddresses, ipOwnerIndex)
+      return {
+        ...filter,
+        node: nodeName,
+        filter: filterName,
+        applied_to: appliedTo,
+        referenced_addresses: referencedAddresses,
+        address_owners: addressOwners,
+      }
+    })
+  }, [filterReachability, interfacesByHost, ipOwnerIndex])
+
+  // Grouping
+  const { currentNodeGroups, otherNodeGroups, totalNodes } = useMemo(() => {
+    const currentGroups: FilterGroup[] = []
+    const otherGroups: FilterGroup[] = []
+    const groupMap = new Map<string, EnrichedFilterEntry[]>()
+    const nodeSet = new Set<string>()
+
+    let unknownIdx = 0
+    for (const entry of enrichedFilters) {
+      let key: string
+      if (!entry.node && !entry.filter) {
+        // Each unknown-source entry gets its own group to prevent merging unrelated entries
+        key = `__unknown_${unknownIdx++}|||`
+      } else {
+        key = `${entry.node}|||${entry.filter}`
+      }
+      const list = groupMap.get(key) || []
+      list.push(entry)
+      groupMap.set(key, list)
+      if (entry.node) nodeSet.add(entry.node)
+    }
+
+    for (const [, entries] of groupMap) {
+      // Use actual entry values (not the grouping key, which may be synthetic for unknown entries)
+      const nodeName = entries[0]?.node || ''
+      const filterName = entries[0]?.filter || ''
+      const deny = entries.filter((e) => e.action?.toUpperCase() === 'DENY').length
+      const permit = entries.filter((e) => e.action?.toUpperCase() === 'PERMIT').length
+      const other = entries.length - deny - permit
+      const group: FilterGroup = {
+        filter_name: filterName || t('nodeDetails.acl.defaults.unnamedFilter'),
+        node: nodeName,
+        applied_to: entries[0]?.applied_to || [],
+        severity: entries.length >= 3 ? 'high' : 'low',
+        action_breakdown: { deny, permit, other },
+        entries,
+      }
+      if (nodeName === node.node) {
+        currentGroups.push(group)
+      } else {
+        otherGroups.push(group)
+      }
+    }
+
+    return { currentNodeGroups: currentGroups, otherNodeGroups: otherGroups, totalNodes: nodeSet.size }
+  }, [enrichedFilters, node.node, t])
+
+  // Search filter for other nodes
+  const filteredOtherGroups = useMemo(() => {
+    if (!searchQuery.trim()) return otherNodeGroups
+    const q = searchQuery.toLowerCase()
+    return otherNodeGroups.filter(
+      (g) => g.node.toLowerCase().includes(q) || g.filter_name.toLowerCase().includes(q)
+    )
+  }, [otherNodeGroups, searchQuery])
+
+  // Group other node groups by node name
+  const otherNodeGroupsByNode = useMemo(() => {
+    const map = new Map<string, FilterGroup[]>()
+    for (const g of filteredOtherGroups) {
+      const list = map.get(g.node) || []
+      list.push(g)
+      map.set(g.node, list)
+    }
+    return map
+  }, [filteredOtherGroups])
+
+  const totalCurrentLines = currentNodeGroups.reduce((sum, g) => sum + g.entries.length, 0)
+  const totalOtherLines = otherNodeGroups.reduce((sum, g) => sum + g.entries.length, 0)
+
+  // Render helpers
+  const renderActionBadge = (action: string) => {
+    const upper = action?.toUpperCase() || ''
+    if (upper === 'DENY') return <span className="text-red-600 font-semibold">{upper}</span>
+    if (upper === 'PERMIT') return <span className="text-emerald-600 font-semibold">{upper}</span>
+    return <span className="text-gray-600 font-medium">{action || t('common.notAvailable')}</span>
+  }
+
+  const renderAppliedTo = (appliedTo: FilterApplication[]) => {
+    if (appliedTo.length === 0) {
+      return <p className="text-xs text-gray-400 italic">{t('nodeDetails.acl.notApplied')}</p>
+    }
+    return (
+      <div className="space-y-1.5">
+        {appliedTo.map((app, i) => (
+          <div key={`${app.interface_name}-${app.direction}-${i}`} className="flex items-center gap-2 text-xs">
+            <span className="font-mono text-gray-900">{app.interface_name}</span>
+            <span
+              className={`px-2.5 py-1 rounded-md font-medium text-sm ${
+                app.direction === 'inbound'
+                  ? 'bg-blue-100 text-blue-700'
+                  : 'bg-green-100 text-green-700'
+              }`}
+              aria-label={`${t(`nodeDetails.acl.direction.${app.direction}`)} - ${app.interface_name}`}
+            >
+              {app.direction === 'inbound' ? '← ' : '→ '}{t(`nodeDetails.acl.direction.${app.direction}`)}
+            </span>
+            {app.zone && (
+              <span className="text-gray-500">{t('nodeDetails.acl.fields.zone')}: {app.zone}</span>
+            )}
+            {app.primary_address && (
+              <span className="font-mono text-gray-500">{app.primary_address}</span>
+            )}
+          </div>
+        ))}
+      </div>
+    )
+  }
+
+  const renderAddressOwners = (entry: EnrichedFilterEntry) => {
+    if (entry.referenced_addresses.length === 0) {
+      return <p className="text-xs text-gray-400 italic">{t('nodeDetails.acl.noAddresses')}</p>
+    }
+    return (
+      <table className="text-xs w-full">
+        <thead>
+          <tr className="text-xs font-semibold text-gray-500 uppercase tracking-wide border-b border-gray-200">
+            <th className="text-left py-1 pr-2">{t('nodeDetails.acl.fields.address')}</th>
+            <th className="text-left py-1 pr-2">{t('nodeDetails.acl.fields.owner')}</th>
+            <th className="text-left py-1 pr-2">{t('nodeDetails.acl.fields.interface')}</th>
+            <th className="text-left py-1">{t('nodeDetails.acl.fields.vrf')}</th>
+          </tr>
+        </thead>
+        <tbody>
+          {entry.referenced_addresses.map((addr) => {
+            const owners = entry.address_owners.filter((o) => o.address === addr)
+            if (owners.length === 0) {
+              return (
+                <tr key={addr} className="border-b border-gray-50">
+                  <td className="font-mono py-1 pr-2">{addr}</td>
+                  <td className="text-gray-400 italic py-1 pr-2" colSpan={3}>{t('nodeDetails.acl.unknownOwner')}</td>
+                </tr>
+              )
+            }
+            return owners.map((owner, oi) => (
+              <tr key={`${addr}-${owner.owner_node}-${owner.owner_interface}-${oi}`} className="border-b border-gray-50">
+                {oi === 0 && <td className="font-mono py-1 pr-2" rowSpan={owners.length}>{addr}</td>}
+                <td className="py-1 pr-2">
+                  <button
+                    onClick={() => setSelectedNodeId(owner.owner_node)}
+                    className="text-primary-600 hover:underline text-xs focus:outline-none focus:ring-2 focus:ring-primary-500 focus:ring-offset-1 rounded"
+                    aria-label={t('nodeDetails.acl.navigateToNode', { node: owner.owner_node })}
+                  >
+                    {owner.match_type === 'cidr_contains' && (
+                      <span title={t('nodeDetails.acl.cidrMatch')}>~</span>
+                    )}
+                    {owner.owner_node}
+                  </button>
+                </td>
+                <td className="font-mono py-1 pr-2">{owner.owner_interface}</td>
+                <td className="py-1">{owner.owner_vrf}</td>
+              </tr>
+            ))
+          })}
+        </tbody>
+      </table>
+    )
+  }
+
+  const renderEntryCard = (entry: EnrichedFilterEntry, idx: number, borderColor: string) => (
+    <div key={idx} className={`bg-white p-4 rounded-lg text-sm border-l-4 ${borderColor} shadow-sm border border-gray-200`}>
+      <div className="flex items-center gap-2 mb-2">
+        {entry.line != null && (
+          <>
+            <span className="text-xs font-semibold text-gray-500 uppercase tracking-wide">
+              {t('nodeDetails.acl.fields.line')} {entry.line}
+            </span>
+            <span className="text-xs" aria-hidden="true">·</span>
+          </>
+        )}
+        {renderActionBadge(entry.action)}
+      </div>
+
+      {entry.unreachable_line && (
+        <div className="bg-gray-800 text-gray-100 rounded-md p-3 font-mono text-xs mb-3">
+          <code role="code">{entry.unreachable_line}</code>
+        </div>
       )}
 
-      {/* Current Node's Unreachable Filter Lines */}
-      {nodeFilters.length > 0 && (
-        <div className="bg-gray-50 rounded-lg p-4">
-          <h3 className="font-medium text-gray-900 mb-3">
-            {t('nodeDetails.sections.unreachableFilters')} ({nodeFilters.length})
-          </h3>
-          <div className="space-y-2">
-            {nodeFilters.map((filter, index) => (
-              <div key={index} className="bg-white p-3 rounded text-sm border-l-4 border-red-400">
-                <div className="flex items-start justify-between mb-2">
-                  <div className="font-medium text-gray-900">
-                    {filter.filter || t('nodeDetails.acl.defaults.unnamedFilter')}
-                  </div>
-                  <span className="px-2 py-0.5 rounded text-xs font-medium bg-red-100 text-red-800">
-                    {t('nodeDetails.acl.unreachable')}
-                  </span>
-                </div>
-                <div className="grid grid-cols-2 gap-2 text-xs text-gray-700">
-                  <div>
-                    <span className="font-medium">{t('nodeDetails.acl.fields.line')}:</span> {filter.line || t('common.notAvailable')}
-                  </div>
-                  <div>
-                    <span className="font-medium">{t('nodeDetails.acl.fields.action')}:</span> {filter.action || t('common.notAvailable')}
-                  </div>
-                </div>
-                {filter.reason && (
-                  <div className="mt-2 text-xs text-gray-600">
-                    <span className="font-medium">{t('nodeDetails.acl.fields.reason')}:</span> {filter.reason}
-                  </div>
-                )}
-                {filter.unreachable_line && (
-                  <div className="mt-2 p-2 bg-gray-100 rounded text-xs font-mono text-gray-800">
-                    {filter.unreachable_line}
-                  </div>
-                )}
-                {filter.blocking_lines && filter.blocking_lines.length > 0 && (
-                  <div className="mt-2">
-                    <span className="text-xs font-medium text-gray-700">{t('nodeDetails.acl.fields.blockedByLines')}:</span>
-                    <div className="ml-2 text-xs text-gray-600">
-                      {filter.blocking_lines.join(', ')}
-                    </div>
-                  </div>
-                )}
-                {filter.sources && (
-                  <div className="mt-2">
-                    <span className="text-xs font-medium text-gray-700">{t('nodeDetails.acl.fields.sources')}:</span>
-                    <div className="ml-2 text-xs text-gray-600">{filter.sources}</div>
-                  </div>
-                )}
-                {filter.destinations && (
-                  <div className="mt-1">
-                    <span className="text-xs font-medium text-gray-700">{t('nodeDetails.acl.fields.destinations')}:</span>
-                    <div className="ml-2 text-xs text-gray-600">{filter.destinations}</div>
-                  </div>
-                )}
-              </div>
+      <div className="mt-3 pt-3 border-t border-gray-100">
+        <h5 className="text-xs font-semibold text-gray-500 uppercase tracking-wide mb-1">
+          {t('nodeDetails.acl.referencedAddresses')}
+        </h5>
+        {renderAddressOwners(entry)}
+      </div>
+
+      {entry.blocking_lines && entry.blocking_lines.length > 0 && (
+        <div className="mt-3 pt-3 border-t border-gray-100">
+          <h5 className="text-xs font-semibold text-gray-500 uppercase tracking-wide mb-1">
+            {t('nodeDetails.acl.blockedBy')}
+          </h5>
+          <div className="text-xs text-gray-700 space-y-1">
+            {entry.blocking_lines.map((bl, bi) => (
+              <div key={bi} className="bg-gray-800 text-gray-100 rounded-md p-2 font-mono"><code role="code">{bl}</code></div>
             ))}
           </div>
         </div>
       )}
 
-      {/* Other Nodes' Unreachable Filter Lines (for reference) */}
-      {otherFilters.length > 0 && (
-        <div className="bg-gray-50 rounded-lg p-4">
-          <h3 className="font-medium text-gray-900 mb-3">
-            {t('nodeDetails.sections.unreachableFiltersOther')} ({otherFilters.length})
-          </h3>
-          <div className="space-y-2 max-h-96 overflow-y-auto">
-            {otherFilters.map((filter, index) => (
-              <div key={index} className="bg-white p-3 rounded text-sm border-l-4 border-yellow-400">
-                <div className="flex items-start justify-between mb-2">
-                  <div>
-                    <div className="font-medium text-gray-900">
-                      {filter.filter || t('nodeDetails.acl.defaults.unnamedFilter')}
-                    </div>
-                    <div className="text-xs text-gray-600">{t('nodeDetails.acl.fields.node')}: {filter.node}</div>
-                  </div>
-                  <span className="px-2 py-0.5 rounded text-xs font-medium bg-yellow-100 text-yellow-800">
-                    {t('nodeDetails.acl.unreachable')}
-                  </span>
-                </div>
-                <div className="grid grid-cols-2 gap-2 text-xs text-gray-700">
-                  <div>
-                    <span className="font-medium">{t('nodeDetails.acl.fields.line')}:</span> {filter.line || t('common.notAvailable')}
-                  </div>
-                  <div>
-                    <span className="font-medium">{t('nodeDetails.acl.fields.action')}:</span> {filter.action || t('common.notAvailable')}
-                  </div>
-                </div>
-                {filter.reason && (
-                  <div className="mt-2 text-xs text-gray-600">
-                    <span className="font-medium">{t('nodeDetails.acl.fields.reason')}:</span> {filter.reason}
-                  </div>
-                )}
-                {filter.unreachable_line && (
-                  <div className="mt-2 p-2 bg-gray-100 rounded text-xs font-mono text-gray-800 truncate">
-                    {filter.unreachable_line}
-                  </div>
-                )}
+      {entry.reason && (
+        <div className="mt-3 pt-3 border-t border-gray-100">
+          <h5 className="text-xs font-semibold text-gray-500 uppercase tracking-wide mb-1">
+            {t('nodeDetails.acl.fields.reason')}
+          </h5>
+          <p className="text-xs text-gray-600">{entry.reason}</p>
+        </div>
+      )}
+    </div>
+  )
+
+  const renderFilterGroup = (group: FilterGroup, idx: number, borderColor: string) => {
+    const gid = aclGroupId(group.node, group.filter_name, idx)
+    return (
+      <div key={gid}>
+        <button
+          id={`${gid}-button`}
+          onClick={() => toggleGroup(gid)}
+          aria-expanded={expandedGroups.has(gid)}
+          aria-controls={`${gid}-content`}
+          className="w-full flex items-center justify-between p-3 hover:bg-gray-50 transition-colors
+                     focus:outline-none focus:ring-2 focus:ring-primary-600 focus:ring-inset rounded-lg"
+        >
+          <div className="flex items-center gap-2">
+            {expandedGroups.has(gid)
+              ? <ChevronDown className="w-4 h-4 text-gray-500" aria-hidden="true" />
+              : <ChevronRight className="w-4 h-4 text-gray-500" aria-hidden="true" />}
+            <span className="font-medium text-gray-900">{group.filter_name}</span>
+            <span className="text-xs text-gray-500">
+              — {t('nodeDetails.acl.collapsePreview', {
+                count: group.entries.length,
+                deny: group.action_breakdown.deny,
+                permit: group.action_breakdown.permit,
+              })}
+            </span>
+          </div>
+          <span
+            className={`w-2.5 h-2.5 rounded-full ${
+              group.severity === 'high' ? 'bg-red-500' : 'bg-yellow-400'
+            }`}
+            aria-label={t(`nodeDetails.acl.severity.${group.severity}`)}
+          />
+        </button>
+
+        {expandedGroups.has(gid) && (
+          <div
+            id={`${gid}-content`}
+            role="region"
+            aria-labelledby={`${gid}-button`}
+            className="px-4 pb-4"
+          >
+            {!group.node && !group.entries[0]?.filter && group.entries[0]?.sources && (
+              <div className="mb-3 text-xs text-gray-400 italic">
+                {t('nodeDetails.acl.unknownSource')}: {
+                  Array.isArray(group.entries[0].sources)
+                    ? group.entries[0].sources.join(', ')
+                    : String(group.entries[0].sources)
+                }
               </div>
-            ))}
+            )}
+
+            <div className="mb-3">
+              <h4 className="text-xs font-semibold text-gray-500 uppercase tracking-wide mb-1.5">
+                {t('nodeDetails.acl.appliedTo')}
+              </h4>
+              {renderAppliedTo(group.applied_to)}
+            </div>
+
+            <div className="space-y-3">
+              {group.entries.map((entry, ei) => renderEntryCard(entry, ei, borderColor))}
+            </div>
+          </div>
+        )}
+      </div>
+    )
+  }
+
+  if (filterReachability.length === 0) {
+    return (
+      <div className="space-y-4">
+        <p className="text-sm text-gray-700">{t('nodeDetails.acl.noData')}</p>
+      </div>
+    )
+  }
+
+  return (
+    <div className="space-y-4">
+      {/* Summary Bar */}
+      <div className="bg-gray-100 rounded-lg px-4 py-3 text-sm text-gray-700" role="status">
+        {t('nodeDetails.acl.summary', { count: filterReachability.length, nodeCount: totalNodes })}
+      </div>
+
+      {/* Current Node Filters */}
+      {currentNodeGroups.length > 0 && (
+        <div className="bg-white rounded-lg">
+          <h3 className="font-medium text-gray-900 px-4 pt-4 pb-2">
+            {t('nodeDetails.acl.currentNodeFilters')} ({t('nodeDetails.acl.filterCount', {
+              filterCount: currentNodeGroups.length,
+              lineCount: totalCurrentLines,
+            })})
+          </h3>
+          <div className="space-y-1">
+            {currentNodeGroups.map((group, idx) => renderFilterGroup(group, idx, 'border-red-400'))}
+          </div>
+        </div>
+      )}
+
+      {/* Other Nodes' Filters */}
+      {otherNodeGroups.length > 0 && (
+        <div className="bg-gray-50 rounded-lg">
+          <h3 className="font-medium text-gray-900 px-4 pt-4 pb-2">
+            {t('nodeDetails.acl.otherNodeFilters')} ({t('nodeDetails.acl.filterCount', {
+              filterCount: otherNodeGroups.length,
+              lineCount: totalOtherLines,
+            })})
+          </h3>
+
+          <div className="px-4 pb-3">
+            <div className="relative">
+              <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400" aria-hidden="true" />
+              <input
+                type="text"
+                value={searchQuery}
+                onChange={(e) => setSearchQuery(e.target.value)}
+                placeholder={t('nodeDetails.acl.searchPlaceholder')}
+                aria-label={t('nodeDetails.acl.searchPlaceholder')}
+                className="w-full pl-9 pr-3 py-2 text-sm border border-gray-300 rounded-md
+                           focus:outline-none focus:ring-2 focus:ring-primary-600"
+              />
+            </div>
+          </div>
+
+          {filteredOtherGroups.length === 0 && searchQuery.trim() && (
+            <p className="text-xs text-gray-400 italic px-4 pb-4">{t('nodeDetails.acl.noSearchResults')}</p>
+          )}
+
+          <div className="space-y-1 max-h-[600px] overflow-y-auto">
+            {Array.from(otherNodeGroupsByNode.entries()).map(([nodeName, groups], nodeIdx) => {
+              const nodeGid = `acl-node-${nodeName ? toSafeId(nodeName) : `unknown-${nodeIdx}`}`
+              const displayName = nodeName || t('nodeDetails.acl.unknownSource')
+              return (
+                <div key={nodeGid}>
+                  <button
+                    id={`${nodeGid}-button`}
+                    onClick={() => toggleGroup(nodeGid)}
+                    aria-expanded={expandedGroups.has(nodeGid)}
+                    aria-controls={`${nodeGid}-content`}
+                    className="w-full flex items-center gap-2 p-3 hover:bg-gray-100 transition-colors
+                               focus:outline-none focus:ring-2 focus:ring-primary-600 focus:ring-inset rounded-lg font-medium text-gray-900"
+                  >
+                    {expandedGroups.has(nodeGid)
+                      ? <ChevronDown className="w-4 h-4 text-gray-500" aria-hidden="true" />
+                      : <ChevronRight className="w-4 h-4 text-gray-500" aria-hidden="true" />}
+                    <span className={!nodeName ? 'text-gray-400 italic' : ''}>{displayName}</span>
+                    <span className="text-xs text-gray-500 font-normal">
+                      ({t('nodeDetails.acl.filterCount', {
+                        filterCount: groups.length,
+                        lineCount: groups.reduce((s, g) => s + g.entries.length, 0),
+                      })})
+                    </span>
+                  </button>
+
+                  {expandedGroups.has(nodeGid) && (
+                    <div
+                      id={`${nodeGid}-content`}
+                      role="region"
+                      aria-labelledby={`${nodeGid}-button`}
+                      className="pl-4"
+                    >
+                      {groups.map((group, idx) => renderFilterGroup(group, idx, 'border-yellow-400'))}
+                    </div>
+                  )}
+                </div>
+              )
+            })}
           </div>
         </div>
       )}

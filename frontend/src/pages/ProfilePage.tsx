@@ -6,7 +6,7 @@
  * - React Query mutations with success messages and auto-clearing timeouts
  * - Displays user roles (read-only) - only admins can modify roles via UserEditPage
  */
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
 import { useTranslation } from 'react-i18next'
 import { Link } from 'react-router-dom'
 import { User, AlertCircle, CheckCircle, ArrowLeft } from 'lucide-react'
@@ -23,12 +23,15 @@ export function ProfilePage() {
   const [fullName, setFullName] = useState('')
   const [successMessage, setSuccessMessage] = useState('')
   const [isEditing, setIsEditing] = useState(false)
+  const [initialized, setInitialized] = useState(false)
 
-  // Initialize form values when user data loads
-  if (currentUser && !isEditing && !email && !fullName) {
-    setEmail(currentUser.email)
-    setFullName(currentUser.full_name || '')
-  }
+  useEffect(() => {
+    if (currentUser && !initialized) {
+      setEmail(currentUser.email)
+      setFullName(currentUser.full_name || '')
+      setInitialized(true)
+    }
+  }, [currentUser, initialized])
 
   /**
    * Handle profile update form submission
@@ -84,7 +87,7 @@ export function ProfilePage() {
   const errorMessage = updateUserMutation.error
     ? (updateUserMutation.error as any)?.response?.data?.message ||
       (updateUserMutation.error as any)?.message ||
-      'Update failed'
+      t('common.updateFailed')
     : null
 
   if (isLoading) {
@@ -100,7 +103,7 @@ export function ProfilePage() {
       <div className="flex items-center justify-center h-screen bg-gray-50">
         <div className="bg-red-50 border border-red-200 rounded-lg p-4 flex items-start gap-2">
           <AlertCircle className="w-5 h-5 text-red-600 flex-shrink-0 mt-0.5" aria-hidden="true" />
-          <p className="text-sm text-red-800">Failed to load user profile</p>
+          <p className="text-sm text-red-800">{t('profile.failedToLoad')}</p>
         </div>
       </div>
     )
@@ -167,7 +170,7 @@ export function ProfilePage() {
                 disabled
                 className="w-full px-3 py-2 border border-gray-300 rounded-lg bg-gray-50 text-gray-500 cursor-not-allowed"
               />
-              <p className="mt-1 text-xs text-gray-500">Username cannot be changed</p>
+              <p className="mt-1 text-xs text-gray-500">{t('users.usernameImmutable')}</p>
             </div>
 
             <div>

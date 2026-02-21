@@ -19,6 +19,13 @@ from sqlalchemy import select
 logger = logging.getLogger(__name__)
 
 
+class TooManyAttemptsError(Exception):
+    """Raised when progressive delay threshold is reached instead of blocking the worker"""
+    def __init__(self, retry_after: int):
+        self.retry_after = retry_after
+        super().__init__(f"Too many attempts, retry after {retry_after}s")
+
+
 def get_client_ip() -> str:
     """Get real client IP address with validation
 
@@ -101,11 +108,20 @@ def _initialize_passwords():
 
     Only used when AUTH_ENABLED=false.
     When AUTH_ENABLED=true, users are managed in the database.
+    Passwords are read from environment variables or generated randomly at startup.
     """
+    import os
+    admin_pass = os.getenv('DEV_ADMIN_PASSWORD') or secrets.token_urlsafe(16)
+    viewer_pass = os.getenv('DEV_VIEWER_PASSWORD') or secrets.token_urlsafe(16)
+
     if USERS_DB["admin"]["password_hash"] is None:
-        USERS_DB["admin"]["password_hash"] = generate_password_hash("ChangeMe123!Admin")
+        USERS_DB["admin"]["password_hash"] = generate_password_hash(admin_pass)
+        if not os.getenv('DEV_ADMIN_PASSWORD'):
+            logger.warning("Generated random dev admin password (set DEV_ADMIN_PASSWORD to fix)")
     if USERS_DB["viewer"]["password_hash"] is None:
-        USERS_DB["viewer"]["password_hash"] = generate_password_hash("ChangeMe123!Viewer")
+        USERS_DB["viewer"]["password_hash"] = generate_password_hash(viewer_pass)
+        if not os.getenv('DEV_VIEWER_PASSWORD'):
+            logger.warning("Generated random dev viewer password (set DEV_VIEWER_PASSWORD to fix)")
 
 _initialize_passwords()
 
@@ -223,9 +239,26 @@ class JWTManager:
             jwt.InvalidTokenError: If token is invalid
             jwt.ExpiredSignatureError: If token has expired
         """
-        # Check if token is blacklisted
+        # Check if token is blacklisted (in-memory cache)
         if token in self.token_blacklist:
             raise jwt.InvalidTokenError("Token has been revoked")
+
+        # Check persistent blacklist by JTI
+        try:
+            pre_payload = jwt.decode(token, self.secret_key, algorithms=[self.algorithm], options={"verify_exp": False})
+            jti = pre_payload.get('jti')
+            if jti:
+                from database.session import get_db
+                from database.models import RevokedToken
+                from sqlalchemy import select
+                with next(get_db()) as db:
+                    if db.scalars(select(RevokedToken).filter_by(jti=jti)).first() is not None:
+                        self.token_blacklist.add(token)
+                        raise jwt.InvalidTokenError("Token has been revoked")
+        except jwt.InvalidTokenError:
+            raise
+        except Exception:
+            pass
 
         try:
             payload = jwt.decode(
@@ -248,12 +281,27 @@ class JWTManager:
             raise
 
     def revoke_token(self, token: str):
-        """Revoke a token by adding it to blacklist
+        """Revoke a token by adding it to blacklist (in-memory + persistent DB)
 
         Args:
             token: JWT token to revoke
         """
         self.token_blacklist.add(token)
+        try:
+            payload = jwt.decode(token, self.secret_key, algorithms=[self.algorithm], options={"verify_exp": False})
+            jti = payload.get('jti')
+            exp = payload.get('exp')
+            if jti and exp:
+                from database.session import get_db
+                from database.models import RevokedToken
+                with next(get_db()) as db:
+                    db.add(RevokedToken(
+                        jti=jti,
+                        expires_at=datetime.fromtimestamp(exp, tz=timezone.utc)
+                    ))
+                    db.commit()
+        except Exception as e:
+            logger.warning(f"Failed to persist token revocation to DB: {e}")
         logger.info(f"Token revoked for {get_client_ip()}")
 
     def _extract_token(self) -> Optional[str]:
@@ -326,29 +374,23 @@ class JWTManager:
         }
 
     def _apply_progressive_delay(self, attempt_count: int):
-        """Apply progressive delay based on failed attempt count
+        """Reject request instead of blocking the worker thread
 
-        Implements exponential backoff to slow down brute force attacks.
-        Delay increases with each failed attempt: 1s, 2s, 4s, 8s, 16s, max 30s
+        Raises TooManyAttemptsError with retry_after value instead of sleeping.
+        The login route handler catches this and returns 429.
 
         Args:
             attempt_count: Number of failed login attempts
-        """
-        import time
-        import random
 
+        Raises:
+            TooManyAttemptsError: with retry_after seconds
+        """
         if attempt_count <= 0:
             return
 
-        # Exponential backoff: 2^(n-1) seconds, capped at 30 seconds
         base_delay = min(2 ** (attempt_count - 1), 30)
-
-        # Add jitter (0-0.5 seconds) to prevent timing attacks
-        jitter = random.uniform(0, 0.5)
-        total_delay = base_delay + jitter
-
-        logger.info(f"Applying progressive delay: {total_delay:.2f}s for attempt #{attempt_count}")
-        time.sleep(total_delay)
+        logger.info(f"Progressive delay triggered: {base_delay}s for attempt #{attempt_count}")
+        raise TooManyAttemptsError(retry_after=base_delay)
 
     def _check_ip_rate_limit(self, ip_address: str) -> tuple[bool, int]:
         """Check if IP address is rate limited

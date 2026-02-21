@@ -8,7 +8,7 @@
  */
 import axios, { AxiosInstance, AxiosError, AxiosRequestConfig } from 'axios'
 import { runtimeConfig } from '../config/runtimeConfig'
-import { isTokenExpired } from '../lib/auth/tokenManager'
+// isTokenExpired removed — expiry now checked via stored tokenExpiresAt timestamp
 import { logger } from '../utils/logger'
 import { CSRFService } from './csrfService'
 import type {
@@ -42,13 +42,37 @@ import type {
   Snapshot,
   SnapshotFile,
   CreateSnapshotRequest,
+  BGPEdge,
+  BGPPeerConfiguration,
+  BGPProcessConfiguration,
+  BGPSessionStatus,
+  BGPSessionCompatibility,
+  BGPRib,
+  SNMPCommunityConfig,
+  DuplicateRouterID,
+  BFDSessionStatus,
+  Layer1Edge,
+  Layer2Topology,
+  IPSecSessionStatus,
+  IPSecEdge,
+  IPSecPeerConfiguration,
+  VXLANEdge,
+  VIModel,
+  Layer1Topology,
+  Layer1TopologySaveResult,
+  SnapshotInterfaces,
+  User,
+  RegisterRequest,
+  UpdateUserRequest,
+  ChangePasswordRequest,
+  SecurityLogsQueryParams,
+  PaginatedSecurityLogsResponse,
+  SecurityStats,
 } from '../types'
 
 const API_BASE_URL = runtimeConfig.apiBaseUrl || 'http://localhost:5000'
 
 interface AuthState {
-  accessToken: string | null
-  refreshToken: string | null
   csrfToken: string | null
   tokenExpiresAt: number | null
   user: {
@@ -61,9 +85,7 @@ interface AuthState {
 const tokenExpiresAtStr = localStorage.getItem('token_expires_at')
 
 let authState: AuthState = {
-  accessToken: localStorage.getItem('access_token'),
-  refreshToken: localStorage.getItem('refresh_token'),
-  csrfToken: null,  // CSRF token now managed via cookie (CSRFService)
+  csrfToken: null,
   tokenExpiresAt: tokenExpiresAtStr ? parseInt(tokenExpiresAtStr, 10) : null,
   user: null
 }
@@ -88,34 +110,22 @@ const apiClient: AxiosInstance = axios.create({
 
 apiClient.interceptors.request.use(
   async (config) => {
-    // Check if token is expired BEFORE sending request
-    if (authState.accessToken && isTokenExpired(authState.accessToken)) {
+    // Check if token is expired BEFORE sending request (via stored timestamp)
+    if (authState.tokenExpiresAt && Date.now() > authState.tokenExpiresAt) {
       logger.warn('[API Secure] Access token expired, clearing local state')
 
-      // Clear local state immediately (no server notification to avoid infinite loop)
-      authState.accessToken = null
-      authState.refreshToken = null
       authState.csrfToken = null
       authState.tokenExpiresAt = null
       authState.user = null
 
-      localStorage.removeItem('access_token')
-      localStorage.removeItem('refresh_token')
       localStorage.removeItem('user')
       localStorage.removeItem('token_expires_at')
-      // Note: CSRF cookie is cleared by server on logout
 
-      // Dispatch event to trigger redirect to login
       window.dispatchEvent(new CustomEvent('auth:unauthorized', {
         detail: { reason: 'token_expired', timestamp: Date.now() }
       }))
 
-      // Reject request to prevent sending expired token
       return Promise.reject(new Error('Token expired'))
-    }
-
-    if (authState.accessToken) {
-      config.headers['Authorization'] = `Bearer ${authState.accessToken}`
     }
 
     // Add CSRF token for state-changing methods (double-submit pattern with async retrieval)
@@ -147,37 +157,27 @@ apiClient.interceptors.response.use(
     if (error.response?.status === 401 && !originalRequest._retry) {
       originalRequest._retry = true
 
-      if (authState.refreshToken && !isTokenExpired(authState.refreshToken)) {
-        try {
-          const refreshResponse = await axios.post(
-            `${API_BASE_URL}/api/auth/refresh`,
-            { refresh_token: authState.refreshToken }
-          )
+      try {
+        // Refresh via HTTP-only cookie (sent automatically with withCredentials)
+        const refreshResponse = await axios.post(
+          `${API_BASE_URL}/api/auth/refresh`,
+          {},
+          { withCredentials: true }
+        )
 
-          const { access_token, expires_in } = refreshResponse.data.data
-          authState.accessToken = access_token
+        const { expires_in } = refreshResponse.data.data
 
-          // Calculate and store expiration time
-          const expiresAt = Date.now() + (expires_in * 1000)
-          authState.tokenExpiresAt = expiresAt
+        // Update local expiration tracking
+        const expiresAt = Date.now() + (expires_in * 1000)
+        authState.tokenExpiresAt = expiresAt
+        localStorage.setItem('token_expires_at', expiresAt.toString())
 
-          localStorage.setItem('access_token', access_token)
-          localStorage.setItem('token_expires_at', expiresAt.toString())
-
-          if (originalRequest.headers) {
-            originalRequest.headers['Authorization'] = `Bearer ${access_token}`
-          }
-          return apiClient(originalRequest)
-        } catch (refreshError) {
-          // Refresh failed - let React Query global handler deal with it
-          logger.error('[API Secure] Refresh token failed')
-          await authAPI.logout()
-          return Promise.reject(refreshError)
-        }
-      } else {
-        // No refresh token or expired - logout
-        logger.error('[API Secure] No valid refresh token available')
+        // Retry original request (cookie updated by Set-Cookie header)
+        return apiClient(originalRequest)
+      } catch (refreshError) {
+        logger.error('[API Secure] Refresh token failed')
         await authAPI.logout()
+        return Promise.reject(refreshError)
       }
     }
 
@@ -242,32 +242,24 @@ apiClient.interceptors.response.use(
 export const authAPI = {
   async login(username: string, password: string) {
     const response = await axios.post<APIResponse<{
-      access_token: string
-      refresh_token: string
       token_type: string
       expires_in: number
       user: { username: string; roles: string[]; email: string }
       csrf_token: string
-    }>>(`${API_BASE_URL}/api/auth/login`, { username, password })
+    }>>(`${API_BASE_URL}/api/auth/login`, { username, password }, { withCredentials: true })
 
     const data = response.data.data
 
-    authState.accessToken = data.access_token
-    authState.refreshToken = data.refresh_token
     authState.csrfToken = data.csrf_token
     authState.user = data.user
 
-    // Calculate and store token expiration
     const expiresAt = Date.now() + (data.expires_in * 1000)
     authState.tokenExpiresAt = expiresAt
 
-    localStorage.setItem('access_token', data.access_token)
-    localStorage.setItem('refresh_token', data.refresh_token)
     localStorage.setItem('user', JSON.stringify(data.user))
     localStorage.setItem('token_expires_at', expiresAt.toString())
     sessionStorage.setItem('csrf_token', data.csrf_token)
 
-    // Store CSRF token in memory for immediate availability (prevents race condition)
     CSRFService.setMemoryToken(data.csrf_token)
 
     return data
@@ -280,15 +272,11 @@ export const authAPI = {
       logger.error('Logout error:', e)
     } finally {
       authState = {
-        accessToken: null,
-        refreshToken: null,
         csrfToken: null,
         tokenExpiresAt: null,
         user: null
       }
 
-      localStorage.removeItem('access_token')
-      localStorage.removeItem('refresh_token')
       localStorage.removeItem('user')
       localStorage.removeItem('token_expires_at')
       sessionStorage.removeItem('csrf_token')
@@ -300,11 +288,9 @@ export const authAPI = {
   },
 
   isAuthenticated() {
-    // Check both token existence AND expiration
-    if (!authState.accessToken) return false
-
-    // Use token expiration check
-    return !isTokenExpired(authState.accessToken)
+    if (!authState.user) return false
+    if (authState.tokenExpiresAt && Date.now() > authState.tokenExpiresAt) return false
+    return true
   },
 
   hasRole(role: string) {
@@ -524,6 +510,406 @@ function isValidIP(ip: string): boolean {
 function isValidCIDR(cidr: string): boolean {
   const cidrRegex = /^((25[0-5]|(2[0-4]|1\d|[1-9]|)\d)\.?\b){4}\/(3[0-2]|[12]?\d)$/
   return cidrRegex.test(cidr)
+}
+
+export const edgesAPI = {
+  async getOSPFEdges() {
+    const response = await apiClient.get<APIResponse<OSPFEdge[]>>('/edges/ospf')
+    return response.data.data
+  },
+
+  async getPhysicalEdges() {
+    const response = await apiClient.get<APIResponse<PhysicalEdge[]>>('/edges/physical')
+    return response.data.data
+  },
+
+  async getLayer3Edges() {
+    const response = await apiClient.get<APIResponse<Layer3Edge[]>>('/edges/layer3')
+    return response.data.data
+  },
+
+  async getBGPEdges() {
+    const response = await apiClient.get<APIResponse<BGPEdge[]>>('/bgp/edges')
+    return response.data.data
+  },
+}
+
+export const bgpAPI = {
+  async getEdges() {
+    const response = await apiClient.get<APIResponse<BGPEdge[]>>('/bgp/edges')
+    return response.data.data
+  },
+
+  async getPeerConfiguration() {
+    const response = await apiClient.get<APIResponse<BGPPeerConfiguration[]>>('/bgp/peer-configuration')
+    return response.data.data
+  },
+
+  async getProcessConfiguration() {
+    const response = await apiClient.get<APIResponse<BGPProcessConfiguration[]>>('/bgp/process-configuration')
+    return response.data.data
+  },
+
+  async getSessionStatus() {
+    const response = await apiClient.get<APIResponse<BGPSessionStatus[]>>('/bgp/session-status')
+    return response.data.data
+  },
+
+  async getSessionCompatibility() {
+    const response = await apiClient.get<APIResponse<BGPSessionCompatibility[]>>('/bgp/session-compatibility')
+    return response.data.data
+  },
+
+  async getRib() {
+    const response = await apiClient.get<APIResponse<BGPRib[]>>('/bgp/rib')
+    return response.data.data
+  },
+}
+
+export const configAPI = {
+  async getDefinedStructures() {
+    const response = await apiClient.get<APIResponse<DefinedStructure[]>>('/config/defined-structures')
+    return response.data.data
+  },
+
+  async getReferencedStructures() {
+    const response = await apiClient.get<APIResponse<ReferencedStructure[]>>('/config/referenced-structures')
+    return response.data.data
+  },
+
+  async getNamedStructures() {
+    const response = await apiClient.get<APIResponse<NamedStructure[]>>('/config/named-structures')
+    return response.data.data
+  },
+
+  async getAAAAuthentication() {
+    const response = await apiClient.get<APIResponse<AAAAuthenticationLogin[]>>('/config/aaa-authentication')
+    return response.data.data
+  },
+}
+
+export const securityAPI = {
+  async getSNMPCommunities(): Promise<SNMPCommunityConfig[]> {
+    const response = await apiClient.get<APIResponse<SNMPCommunityConfig[]>>('/security/snmp-communities')
+    return response.data.data
+  },
+}
+
+export const validationAPI = {
+  async getFileParseStatus() {
+    const response = await apiClient.get<APIResponse<FileParseStatus[]>>('/validation/file-parse-status')
+    return response.data.data
+  },
+
+  async getInitIssues() {
+    const response = await apiClient.get<APIResponse<InitIssue[]>>('/validation/init-issues')
+    return response.data.data
+  },
+
+  async getParseWarnings() {
+    const response = await apiClient.get<APIResponse<ParseWarning[]>>('/validation/parse-warnings')
+    return response.data.data
+  },
+
+  async getVIConversionStatus() {
+    const response = await apiClient.get<APIResponse<ViConversionStatus[]>>('/validation/vi-conversion-status')
+    return response.data.data
+  },
+
+  async getUnusedStructures() {
+    const response = await apiClient.get<APIResponse>('/validation/unused-structures')
+    return response.data.data
+  },
+
+  async getUndefinedReferences() {
+    const response = await apiClient.get<APIResponse>('/validation/undefined-references')
+    return response.data.data
+  },
+
+  async getForwardingLoops() {
+    const response = await apiClient.get<APIResponse>('/validation/detect-loops')
+    return response.data.data
+  },
+
+  async getMultipathConsistency() {
+    const response = await apiClient.get<APIResponse>('/validation/multipath-consistency')
+    return response.data.data
+  },
+
+  async getSubnetMultipathConsistency(request?: { node?: string }) {
+    const response = await apiClient.post<APIResponse>('/validation/subnet-multipath-consistency', request || {})
+    return response.data.data
+  },
+
+  async getDifferentialReachability(request?: { reference_snapshot?: string }) {
+    const response = await apiClient.post<APIResponse>('/advanced/differential-reachability', request || {})
+    return response.data.data
+  },
+
+  async getLoopbackMultipathConsistency() {
+    const response = await apiClient.get<APIResponse>('/validation/loopback-multipath-consistency')
+    return response.data.data
+  },
+}
+
+export const haAPI = {
+  async getVRRPProperties() {
+    const response = await apiClient.get<APIResponse>('/ha/vrrp-properties')
+    return response.data.data
+  },
+
+  async getHSRPProperties() {
+    const response = await apiClient.get<APIResponse>('/ha/hsrp-properties')
+    return response.data.data
+  },
+
+  async getMLAGProperties() {
+    const response = await apiClient.get<APIResponse>('/ha/mlag-properties')
+    return response.data.data
+  },
+
+  async getDuplicateRouterIDs() {
+    const response = await apiClient.get<APIResponse<DuplicateRouterID[]>>('/ha/duplicate-router-ids')
+    return response.data.data
+  },
+
+  async getSwitchingProperties() {
+    const response = await apiClient.get<APIResponse<SwitchedVlanProperties[]>>('/ha/switching-properties')
+    return response.data.data
+  },
+}
+
+export const protocolsAPI = {
+  async getEIGRPEdges() {
+    const response = await apiClient.get<APIResponse>('/protocols/eigrp/edges')
+    return response.data.data
+  },
+
+  async getEIGRPInterfaces() {
+    const response = await apiClient.get<APIResponse>('/protocols/eigrp/interface-configuration')
+    return response.data.data
+  },
+
+  async getISISEdges() {
+    const response = await apiClient.get<APIResponse>('/protocols/isis/edges')
+    return response.data.data
+  },
+
+  async getISISInterfaces() {
+    const response = await apiClient.get<APIResponse>('/protocols/isis/interface-configuration')
+    return response.data.data
+  },
+
+  async getISISLoopbackInterfaces() {
+    const response = await apiClient.get<APIResponse>('/protocols/isis-loopback-interfaces')
+    return response.data.data
+  },
+
+  async getBFDSessionStatus() {
+    const response = await apiClient.get<APIResponse<BFDSessionStatus[]>>('/protocols/bfd-session-status')
+    return response.data.data
+  },
+
+  async getEVPNRib() {
+    const response = await apiClient.get<APIResponse>('/protocols/evpn/rib')
+    return response.data.data
+  },
+}
+
+export const topologyAPI = {
+  async getLayer1Topology() {
+    const response = await apiClient.get<APIResponse<Layer1Edge[]>>('/topology/layer1-topology')
+    return response.data.data
+  },
+
+  async getLayer2Topology() {
+    const response = await apiClient.get<APIResponse<Layer2Topology[]>>('/topology/layer2-topology')
+    return response.data.data
+  },
+
+  async getVXLANVNIProperties() {
+    const response = await apiClient.get<APIResponse>('/protocols/evpn/vxlan-vni-properties')
+    return response.data.data
+  },
+
+  async getVXLANEdges() {
+    const response = await apiClient.get<APIResponse<VXLANEdge[]>>('/protocols/evpn/vxlan-edges')
+    return response.data.data
+  },
+
+  async getIPSecSessionStatus() {
+    const response = await apiClient.get<APIResponse<IPSecSessionStatus[]>>('/topology/ipsec-session-status')
+    return response.data.data
+  },
+
+  async getIPSecEdges() {
+    const response = await apiClient.get<APIResponse<IPSecEdge[]>>('/topology/ipsec-edges')
+    return response.data.data
+  },
+
+  async getIPSecPeerConfiguration() {
+    const response = await apiClient.get<APIResponse<IPSecPeerConfiguration[]>>('/topology/ipsec-peer-configuration')
+    return response.data.data
+  },
+
+  async getInterfaceMTU() {
+    const response = await apiClient.get<APIResponse>('/topology/interface-mtu')
+    return response.data.data
+  },
+
+  async getIPSpaceAssignment() {
+    const response = await apiClient.get<APIResponse>('/topology/ip-space-assignment')
+    return response.data.data
+  },
+}
+
+export const advancedAPI = {
+  async getF5VIPs() {
+    const response = await apiClient.get<APIResponse>('/advanced/f5-bigip-vip-configuration')
+    return response.data.data
+  },
+
+  async testRoutePolicies(request: { direction: string; policy: string }) {
+    const response = await apiClient.post<APIResponse>('/advanced/test-route-policies', request)
+    return response.data.data
+  },
+
+  async searchRoutePolicies(request?: { action?: string; nodes?: string[] }) {
+    const response = await apiClient.post<APIResponse>('/advanced/search-route-policies', request || {})
+    return response.data.data
+  },
+
+  async getFilterLineReachability(request?: { filters?: string; nodes?: string[] }) {
+    const response = await apiClient.get<APIResponse>('/acl/filter-line-reachability', { params: request })
+    return response.data.data
+  },
+
+  async testFilters(request: { filters: string; nodes?: string[] }) {
+    const response = await apiClient.post<APIResponse>('/acl/test-filters', request)
+    return response.data.data
+  },
+
+  async findMatchingFilterLines(request: { headers: object; filters?: string; nodes?: string[] }) {
+    const response = await apiClient.post<APIResponse>('/acl/find-matching-lines', request)
+    return response.data.data
+  },
+
+  async searchFilters(request?: { action?: string; filters?: string; nodes?: string[] }) {
+    const response = await apiClient.post<APIResponse>('/acl/search-filters', request || {})
+    return response.data.data
+  },
+
+  async reduceReachability(request?: { pathConstraints?: object }) {
+    const response = await apiClient.post<APIResponse>('/advanced/reduce-reachability', request || {})
+    return response.data.data
+  },
+
+  async getVIModel() {
+    const response = await apiClient.get<APIResponse<VIModel[]>>('/advanced/vi-model')
+    return response.data.data
+  },
+}
+
+export const layer1API = {
+  async getTopology(snapshotName: string) {
+    const response = await apiClient.get<APIResponse<Layer1Topology>>(
+      `/snapshots/${snapshotName}/layer1-topology`
+    )
+    return response.data.data
+  },
+
+  async saveTopology(snapshotName: string, topology: Layer1Topology) {
+    const response = await apiClient.put<APIResponse<Layer1TopologySaveResult>>(
+      `/snapshots/${snapshotName}/layer1-topology`,
+      topology
+    )
+    return response.data.data
+  },
+
+  async deleteTopology(snapshotName: string) {
+    await apiClient.delete(`/snapshots/${snapshotName}/layer1-topology`)
+  },
+
+  async getInterfaces(snapshotName: string) {
+    const response = await apiClient.get<APIResponse<SnapshotInterfaces>>(
+      `/snapshots/${snapshotName}/interfaces`
+    )
+    return response.data.data
+  },
+}
+
+export const usersAPI = {
+  async register(data: RegisterRequest) {
+    const response = await apiClient.post<APIResponse<User>>('/users', data)
+    return response.data.data
+  },
+
+  async list() {
+    const response = await apiClient.get<APIResponse<User[]>>('/users')
+    return response.data.data
+  },
+
+  async getMe() {
+    const response = await apiClient.get<APIResponse<User>>('/users/me')
+    return response.data.data
+  },
+
+  async getById(id: number) {
+    const response = await apiClient.get<APIResponse<User>>(`/users/${id}`)
+    return response.data.data
+  },
+
+  async update(id: number, data: UpdateUserRequest) {
+    const response = await apiClient.put<APIResponse<User>>(`/users/${id}`, data)
+    return response.data.data
+  },
+
+  async changePassword(id: number, data: ChangePasswordRequest) {
+    const response = await apiClient.put<APIResponse<void>>(`/users/${id}/password`, data)
+    return response.data.data
+  },
+
+  async delete(id: number) {
+    const response = await apiClient.delete<APIResponse<void>>(`/users/${id}`)
+    return response.data.data
+  },
+}
+
+export const securityLogsAPI = {
+  async list(params?: SecurityLogsQueryParams) {
+    const queryParams = new URLSearchParams()
+    if (params?.page) queryParams.append('page', params.page.toString())
+    if (params?.per_page) queryParams.append('per_page', params.per_page.toString())
+    if (params?.ip_address) {
+      if (!isValidIP(params.ip_address)) {
+        throw new Error('Invalid IP address format in security logs query')
+      }
+      queryParams.append('ip_address', params.ip_address)
+    }
+    if (params?.username) queryParams.append('username', params.username)
+    if (params?.success !== undefined) queryParams.append('success', params.success.toString())
+    if (params?.start_date) queryParams.append('start_date', params.start_date)
+    if (params?.end_date) queryParams.append('end_date', params.end_date)
+    if (params?.sort) queryParams.append('sort', params.sort)
+
+    const queryString = queryParams.toString()
+    const url = `/admin/security-logs${queryString ? `?${queryString}` : ''}`
+
+    const response = await apiClient.get<APIResponse<PaginatedSecurityLogsResponse>>(url)
+    return response.data.data
+  },
+
+  async getStats() {
+    const response = await apiClient.get<APIResponse<SecurityStats>>('/admin/security-logs/stats')
+    return response.data.data
+  },
+}
+
+export const metaAPI = {
+  async getEndpoints() {
+    const response = await apiClient.get('/endpoints')
+    return response.data.data
+  },
 }
 
 export { apiClient }

@@ -2,7 +2,7 @@
  * React Query hooks for security audit logs
  * Handles login attempt tracking, security statistics, and audit log queries
  */
-import { useQuery } from '@tanstack/react-query'
+import { useQuery, keepPreviousData } from '@tanstack/react-query'
 import { securityLogsAPI } from '../services/api'
 import type { SecurityLogsQueryParams } from '../types'
 
@@ -31,7 +31,7 @@ export function useSecurityLogs(params?: SecurityLogsQueryParams, enabled = true
     queryFn: () => securityLogsAPI.list(params),
     enabled,
     staleTime: 30000, // 30 seconds
-    keepPreviousData: true, // Keep previous data while loading new page
+    placeholderData: keepPreviousData, // Keep previous data while loading new page
   })
 }
 

@@ -1,4 +1,7 @@
 """
+DEPRECATED: This file is a duplicate of csrf.py and should not be used.
+Import from security.csrf instead. This file will be removed in a future release.
+
 Cross-Site Request Forgery (CSRF) protection implementation
 - CSRFProtect class for Flask application integration
 - Token generation with HMAC-SHA256 signing

@@ -98,6 +98,7 @@ export interface NodeProperties {
 }
 
 export interface InterfaceProperties {
+  hostname: string
   interface: string
   access_vlan?: number
   active: boolean

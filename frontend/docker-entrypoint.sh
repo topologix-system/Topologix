@@ -31,4 +31,10 @@ window.__TOPOLOGIX_CONFIG__ = {
 };
 EOF
 
+# Expand CSP connect-src if external API host is configured
+CSP_CONNECT_SRC="${CSP_CONNECT_SRC:-}"
+if [ -n "$CSP_CONNECT_SRC" ]; then
+  sed -i "s|connect-src 'self'|connect-src 'self' ${CSP_CONNECT_SRC}|g" /etc/nginx/conf.d/*.conf
+fi
+
 exec "$@"

@@ -22,9 +22,9 @@ RUN useradd -m -u 1000 appuser && \
 
 # Pre-create writable directories with proper ownership
 # This ensures directories exist with correct permissions
-RUN mkdir -p /app/flask_session /app/data /app/logs /tmp/topologix_uploads && \
-    chown appuser:appuser /app/flask_session /app/data /app/logs /tmp/topologix_uploads && \
-    chmod 755 /app/flask_session /app/data /app/logs /tmp/topologix_uploads
+RUN mkdir -p /app/flask_session /app/data /app/logs /app/snapshots /tmp/topologix_uploads && \
+    chown appuser:appuser /app/flask_session /app/data /app/logs /app/snapshots /tmp/topologix_uploads && \
+    chmod 755 /app/flask_session /app/data /app/logs /app/snapshots /tmp/topologix_uploads
 
 # Create entrypoint script to handle volume permissions
 # Runs as root initially to fix permissions, then drops to appuser
@@ -62,6 +62,13 @@ fi\n\
 chown -R appuser:appuser /tmp/topologix_uploads\n\
 chmod 755 /tmp/topologix_uploads\n\
 \n\
+# Snapshots directory (bind mount)\n\
+if [ ! -d "/app/snapshots" ]; then\n\
+    mkdir -p /app/snapshots\n\
+fi\n\
+chown -R appuser:appuser /app/snapshots\n\
+chmod 755 /app/snapshots\n\
+\n\
 # Drop privileges and execute command as appuser\n\
 exec gosu appuser "$@"\n' > /docker-entrypoint.sh && \
     chmod +x /docker-entrypoint.sh
@@ -71,6 +78,5 @@ EXPOSE 5000
 # Use entrypoint script to handle permissions before running app
 ENTRYPOINT ["/docker-entrypoint.sh"]
 
-# Development: Flask dev server
-# Production: gunicorn (can be overridden in docker-compose.yaml)
-CMD ["python", "app.py"]
+# Production: gunicorn (dev environments override via docker-compose)
+CMD ["gunicorn", "--worker-class", "gevent", "--workers", "4", "--bind", "0.0.0.0:5000", "app:app"]

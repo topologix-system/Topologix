@@ -4,12 +4,12 @@
  * - Implements automatic token refresh on 401 errors with interceptors
  * - Provides typed API methods for all network analysis endpoints (Batfish integration)
  * - Handles environment/runtime-based auth enable/disable configuration
- * - Role-based access control with hasRole() and hasPermission() helpers
+ * - Role-based access control with hasRole() helper
  * - Uses CSRFService for stateless double-submit cookie pattern
  */
 import axios, { AxiosInstance, AxiosError, AxiosRequestConfig } from 'axios'
 import { runtimeConfig } from '../config/runtimeConfig'
-import { isTokenExpired } from '../lib/auth/tokenManager'
+// isTokenExpired removed — expiry now checked via stored tokenExpiresAt timestamp
 import { logger } from '../utils/logger'
 import { CSRFService } from './csrfService'
 import type {
@@ -70,14 +70,16 @@ import type {
   Layer1Topology,
   Layer1TopologySaveResult,
   SnapshotInterfaces,
+  VXLANEdge,
+  SecurityLogsQueryParams,
+  PaginatedSecurityLogsResponse,
+  SecurityStats,
 } from '../types'
 
 const API_BASE_URL = runtimeConfig.apiBaseUrl || ''
 const AUTH_ENABLED = runtimeConfig.authEnabled
 
 interface AuthState {
-  accessToken: string | null
-  refreshToken: string | null
   csrfToken: string | null
   tokenExpiresAt: number | null
   user: {
@@ -88,8 +90,6 @@ interface AuthState {
 }
 
 let authState: AuthState = {
-  accessToken: null,
-  refreshToken: null,
   csrfToken: null,
   tokenExpiresAt: null,
   user: null
@@ -99,9 +99,7 @@ if (AUTH_ENABLED) {
   const tokenExpiresAtStr = localStorage.getItem('token_expires_at')
 
   authState = {
-    accessToken: localStorage.getItem('access_token'),
-    refreshToken: localStorage.getItem('refresh_token'),
-    csrfToken: null,  // CSRF token now managed via cookie (CSRFService)
+    csrfToken: null,
     tokenExpiresAt: tokenExpiresAtStr ? parseInt(tokenExpiresAtStr, 10) : null,
     user: null
   }
@@ -132,34 +130,22 @@ const apiClient: AxiosInstance = axios.create({
 if (AUTH_ENABLED) {
   apiClient.interceptors.request.use(
     async (config) => {
-      // Check if token is expired BEFORE sending request
-      if (authState.accessToken && isTokenExpired(authState.accessToken)) {
+      // Check if token is expired based on stored expiration time
+      if (authState.tokenExpiresAt && Date.now() > authState.tokenExpiresAt) {
         logger.warn('[API] Access token expired, clearing local state')
 
-        // Clear local state immediately (no server notification for expired tokens)
-        authState.accessToken = null
-        authState.refreshToken = null
         authState.csrfToken = null
         authState.tokenExpiresAt = null
         authState.user = null
 
-        localStorage.removeItem('access_token')
-        localStorage.removeItem('refresh_token')
         localStorage.removeItem('user')
         localStorage.removeItem('token_expires_at')
-        // Note: CSRF cookie is cleared by server on logout
 
-        // Dispatch event to trigger redirect to login
         window.dispatchEvent(new CustomEvent('auth:unauthorized', {
           detail: { reason: 'token_expired', timestamp: Date.now() }
         }))
 
-        // Reject request to prevent sending expired token
         return Promise.reject(new Error('Token expired'))
-      }
-
-      if (authState.accessToken) {
-        config.headers['Authorization'] = `Bearer ${authState.accessToken}`
       }
 
       // Add CSRF token for state-changing methods (double-submit pattern with async retrieval)
@@ -193,37 +179,26 @@ apiClient.interceptors.response.use(
       if (error.response?.status === 401 && !originalRequest._retry) {
         originalRequest._retry = true
 
-        if (authState.refreshToken && !isTokenExpired(authState.refreshToken)) {
-          try {
-            const refreshResponse = await axios.post(
-              `${API_BASE_URL}/api/auth/refresh`,
-              { refresh_token: authState.refreshToken }
-            )
+        try {
+          // Refresh via HTTP-only cookie (sent automatically with withCredentials)
+          const refreshResponse = await axios.post(
+            `${API_BASE_URL}/api/auth/refresh`,
+            {},
+            { withCredentials: true }
+          )
 
-            const { access_token, expires_in } = refreshResponse.data.data
-            authState.accessToken = access_token
+          const { expires_in } = refreshResponse.data.data
 
-            // Calculate and store expiration time
-            const expiresAt = Date.now() + (expires_in * 1000)
-            authState.tokenExpiresAt = expiresAt
+          const expiresAt = Date.now() + (expires_in * 1000)
+          authState.tokenExpiresAt = expiresAt
+          localStorage.setItem('token_expires_at', expiresAt.toString())
 
-            localStorage.setItem('access_token', access_token)
-            localStorage.setItem('token_expires_at', expiresAt.toString())
-
-            if (originalRequest.headers) {
-              originalRequest.headers['Authorization'] = `Bearer ${access_token}`
-            }
-            return apiClient(originalRequest)
-          } catch (refreshError) {
-            // Refresh failed - let React Query global handler deal with it
-            logger.error('[API] Refresh token failed')
-            await authAPI.logout()
-            return Promise.reject(refreshError)
-          }
-        } else {
-          // No refresh token or expired - logout
-          logger.error('[API] No valid refresh token available')
+          // Retry original request (cookie updated by Set-Cookie header)
+          return apiClient(originalRequest)
+        } catch (refreshError) {
+          logger.error('[API] Refresh token failed')
           await authAPI.logout()
+          return Promise.reject(refreshError)
         }
       }
 
@@ -293,27 +268,20 @@ export const authAPI = {
     }
 
     const response = await axios.post<APIResponse<{
-      access_token: string
-      refresh_token: string
       token_type: string
       expires_in: number
       user: { username: string; roles: string[]; email: string }
       csrf_token: string
-    }>>(`${API_BASE_URL}/api/auth/login`, { username, password })
+    }>>(`${API_BASE_URL}/api/auth/login`, { username, password }, { withCredentials: true })
 
     const data = response.data.data
 
-    authState.accessToken = data.access_token
-    authState.refreshToken = data.refresh_token
-    authState.csrfToken = data.csrf_token  // Keep in state for reference (actual token in cookie)
+    authState.csrfToken = data.csrf_token
     authState.user = data.user
 
-    // Calculate and store token expiration
     const expiresAt = Date.now() + (data.expires_in * 1000)
     authState.tokenExpiresAt = expiresAt
 
-    localStorage.setItem('access_token', data.access_token)
-    localStorage.setItem('refresh_token', data.refresh_token)
     localStorage.setItem('user', JSON.stringify(data.user))
     localStorage.setItem('token_expires_at', expiresAt.toString())
 
@@ -333,18 +301,13 @@ export const authAPI = {
     } catch (e) {
       logger.error('Logout error:', e)
     } finally {
-      authState.accessToken = null
-      authState.refreshToken = null
       authState.csrfToken = null
       authState.tokenExpiresAt = null
       authState.user = null
 
-      localStorage.removeItem('access_token')
-      localStorage.removeItem('refresh_token')
       localStorage.removeItem('user')
       localStorage.removeItem('token_expires_at')
 
-      // Clear memory CSRF token
       CSRFService.clearToken()
     }
   },
@@ -356,11 +319,11 @@ export const authAPI = {
   isAuthenticated() {
     if (!AUTH_ENABLED) return true
 
-    // Check both token existence AND expiration
-    if (!authState.accessToken) return false
+    if (!authState.user) return false
 
-    // Use token expiration check
-    return !isTokenExpired(authState.accessToken)
+    if (authState.tokenExpiresAt && Date.now() > authState.tokenExpiresAt) return false
+
+    return true
   },
 
   hasRole(role: string) {
@@ -631,8 +594,8 @@ export const validationAPI = {
     return response.data.data
   },
 
-  async getMultipathConsistency(request?: { protocol?: string }) {
-    const response = await apiClient.post<APIResponse>('/validation/multipath-consistency', request || {})
+  async getMultipathConsistency() {
+    const response = await apiClient.get<APIResponse>('/validation/multipath-consistency')
     return response.data.data
   },
 
@@ -642,12 +605,12 @@ export const validationAPI = {
   },
 
   async getDifferentialReachability(request?: { reference_snapshot?: string }) {
-    const response = await apiClient.post<APIResponse>('/validation/differential-reachability', request || {})
+    const response = await apiClient.post<APIResponse>('/advanced/differential-reachability', request || {})
     return response.data.data
   },
 
-  async getLoopbackMultipathConsistency(request?: { node?: string }) {
-    const response = await apiClient.post<APIResponse>('/validation/loopback-multipath-consistency', request || {})
+  async getLoopbackMultipathConsistency() {
+    const response = await apiClient.get<APIResponse>('/validation/loopback-multipath-consistency')
     return response.data.data
   },
 }
@@ -669,12 +632,16 @@ export const analysisAPI = {
   },
 
   async traceroute(request?: TracerouteRequest) {
-    const response = await apiClient.post<APIResponse<TracerouteResponse[]>>('/path/traceroute', request)
+    const response = await apiClient.post<APIResponse<TracerouteResponse[]>>(
+      '/path/traceroute', request, { timeout: 120000 }
+    )
     return response.data.data
   },
 
   async bidirectionalTraceroute(request?: TracerouteRequest) {
-    const response = await apiClient.post<APIResponse<BidirectionalTracerouteResponse[]>>('/path/bidirectional-traceroute', request)
+    const response = await apiClient.post<APIResponse<BidirectionalTracerouteResponse[]>>(
+      '/path/bidirectional-traceroute', request, { timeout: 120000 }
+    )
     return response.data.data
   },
 }
@@ -918,22 +885,22 @@ export const advancedAPI = {
   },
 
   async getFilterLineReachability(request?: { filters?: string; nodes?: string[] }) {
-    const response = await apiClient.post<APIResponse>('/advanced/filter-line-reachability', request || {})
+    const response = await apiClient.get<APIResponse>('/acl/filter-line-reachability', { params: request })
     return response.data.data
   },
 
   async testFilters(request: { filters: string; nodes?: string[] }) {
-    const response = await apiClient.post<APIResponse>('/advanced/test-filters', request)
+    const response = await apiClient.post<APIResponse>('/acl/test-filters', request)
     return response.data.data
   },
 
   async findMatchingFilterLines(request: { headers: object; filters?: string; nodes?: string[] }) {
-    const response = await apiClient.post<APIResponse>('/advanced/find-matching-filter-lines', request)
+    const response = await apiClient.post<APIResponse>('/acl/find-matching-lines', request)
     return response.data.data
   },
 
   async searchFilters(request?: { action?: string; filters?: string; nodes?: string[] }) {
-    const response = await apiClient.post<APIResponse>('/advanced/search-filters', request || {})
+    const response = await apiClient.post<APIResponse>('/acl/search-filters', request || {})
     return response.data.data
   },
 

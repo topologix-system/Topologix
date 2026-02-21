@@ -31,8 +31,10 @@ export interface TracerouteRequest {
     ecns?: number[]
     packetLengths?: string
   }
+  /** Ingress device/interface where the trace starts (Batfish query param) */
   startLocation?: string
   pathConstraints?: {
+    /** Path constraint: restrict traces to those starting from this location */
     startLocation?: string
     endLocation?: string
     transitLocations?: string
@@ -40,7 +42,6 @@ export interface TracerouteRequest {
   }
   maxTraces?: number
   ignoreFilters?: boolean
-  actions?: string[]
 }
 
 export interface TracerouteFlow {
@@ -85,4 +86,60 @@ export interface BidirectionalTracerouteResponse {
   forward_traces: Trace[] | string[]
   reverse_flow: TracerouteFlow | string
   reverse_traces: Trace[] | string[]
+}
+
+export interface FilterLineReachability {
+  node: string
+  filter: string
+  sources: string | string[] | null
+  unreachable_line: string
+  unreachable_line_action: string
+  action: string
+  blocking_lines: string[]
+  different_action: boolean
+  reason: string
+  additional_info: string
+  line: number | null
+  destinations?: string
+}
+
+export interface FilterApplication {
+  interface_name: string
+  direction: 'inbound' | 'outbound'
+  zone: string | null
+  primary_address: string | null
+}
+
+export interface AddressOwnership {
+  address: string
+  match_type: 'exact' | 'cidr_contains'
+  owner_node: string
+  owner_interface: string
+  owner_vrf: string
+}
+
+export interface EnrichedFilterEntry {
+  node: string
+  filter: string
+  action: string
+  line: number | null
+  unreachable_line: string
+  unreachable_line_action: string
+  blocking_lines: string[]
+  different_action: boolean
+  reason: string
+  additional_info: string
+  sources: string | string[] | null
+  applied_to: FilterApplication[]
+  referenced_addresses: string[]
+  address_owners: AddressOwnership[]
+}
+
+export interface FilterGroup {
+  filter_name: string
+  node: string
+  applied_to: FilterApplication[]
+  severity: 'low' | 'high'
+  action_breakdown: { deny: number; permit: number; other: number }
+  entries: EnrichedFilterEntry[]
 }

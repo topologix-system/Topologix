@@ -225,6 +225,33 @@
       }
     },
     "acl": {
+      "unreachable": "到達不可能",
+      "noData": "ACL/フィルタ分析データがありません",
+      "summary": "フィルタ分析: {{nodeCount}}ノードにわたる{{count}}件の到達不可能行",
+      "currentNodeFilters": "現在のノードのフィルタ",
+      "otherNodeFilters": "他ノードのフィルタ",
+      "filterCount": "{{filterCount}}フィルタ、{{lineCount}}件の到達不可能行",
+      "appliedTo": "適用先",
+      "notApplied": "どのインターフェースにも適用されていません",
+      "direction": {
+        "inbound": "インバウンド",
+        "outbound": "アウトバウンド"
+      },
+      "unreachableLine": "到達不可能行",
+      "referencedAddresses": "参照アドレス",
+      "unknownOwner": "所有者不明",
+      "noAddresses": "ルールにIPアドレスが見つかりません",
+      "unknownSource": "フィルタソース不明",
+      "blockedBy": "ブロック元",
+      "searchPlaceholder": "ノード名またはフィルタ名で検索...",
+      "noSearchResults": "検索条件に一致するフィルタがありません",
+      "collapsePreview": "{{count}}件の到達不可能 ({{deny}} DENY, {{permit}} PERMIT)",
+      "severity": {
+        "high": "重要度: 高",
+        "low": "重要度: 低"
+      },
+      "cidrMatch": "CIDRコンテインメントマッチ（近似）",
+      "navigateToNode": "ノード {{node}} に移動",
       "fields": {
         "line": "行",
         "action": "アクション",
@@ -232,7 +259,12 @@
         "blockedByLines": "ブロック行",
         "sources": "送信元",
         "destinations": "宛先",
-        "node": "ノード"
+        "node": "ノード",
+        "zone": "ゾーン",
+        "address": "アドレス",
+        "interface": "インターフェース",
+        "vrf": "VRF",
+        "owner": "所有者"
       },
       "defaults": {
         "unnamedFilter": "名前なしフィルタ"
@@ -279,9 +311,6 @@
     },
     "routing": {
       "direct": "直接"
-    },
-    "acl": {
-      "unreachable": "到達不可能"
     },
     "fields": {
       "name": "名前",
@@ -383,6 +412,7 @@
     "description": "設定の検証結果、パース問題、構造上の問題を確認します。",
     "loading": "{{section}}を読み込み中...",
     "noIssues": "問題は見つかりませんでした",
+    "dataJsonFormat": "{{title}} JSON形式のデータ",
     "status": {
       "errorsFound": "エラー検出",
       "warnings": "警告",
@@ -397,7 +427,15 @@
       "parseWarnings": "パース警告",
       "unusedStructures": "未使用構造",
       "fileParseStatus": "ファイルパース状態",
-      "viConversionStatus": "VI変換状態"
+      "viConversionStatus": "VI変換状態",
+      "subnetMultipathConsistency": "サブネットマルチパス整合性"
+    },
+    "subnetMultipath": {
+      "nodePlaceholder": "ノードフィルタ (任意)...",
+      "aria": {
+        "nodeFilter": "ノードフィルタ入力",
+        "results": "サブネットマルチパス整合性の結果"
+      }
     },
     "itemCount": "{{count}} 項目"
   },
@@ -406,13 +444,16 @@
     "description": "ネットワークトポロジー構造、ルーティングプロトコル、設定詳細を探索します。",
     "loading": "{{section}}を読み込み中...",
     "noData": "利用可能なデータがありません",
+    "dataJsonFormat": "{{title}} JSON形式のデータ",
+    "categoriesLabel": "分析カテゴリー",
     "tabs": {
       "validation": "検証",
       "highAvailability": "高可用性",
       "network": "ネットワーク",
       "protocols": "プロトコル",
       "topology": "トポロジー",
-      "advanced": "詳細"
+      "advanced": "詳細",
+      "acl": "ACL分析"
     },
     "sections": {
       "topology": "トポロジー",
@@ -471,7 +512,56 @@
       "referencedStructures": "参照構造",
       "namedStructures": "名前付き構造",
       "aaaAuthentication": "AAA認証",
-      "routePolicies": "ルートポリシー"
+      "routePolicies": "ルートポリシー",
+      "searchRoutePolicies": "ルートポリシー検索",
+      "reduceReachability": "制約付き到達性"
+    },
+    "acl": {
+      "description": "ACL/フィルタ設定を分析し、到達不可能なルールを検出し、トラフィックマッチングをテストします。",
+      "filterLineReachability": "フィルタ行到達性",
+      "filterLineReachabilityDesc": "先行エントリにシャドウされた到達不可能なACL行を検出",
+      "testFilters": "フィルタテスト",
+      "testFiltersDesc": "指定したACL/フィルタ設定に対するトラフィックをシミュレート",
+      "findMatchingLines": "マッチング行検索",
+      "findMatchingLinesDesc": "指定したパケットヘッダにマッチするACL行を検索",
+      "searchFilters": "フィルタ検索",
+      "searchFiltersDesc": "デバイス全体でpermit/denyアクションによるACLを検索",
+      "filtersPlaceholder": "フィルタ名 (正規表現)...",
+      "nodesPlaceholder": "ノード名 (カンマ区切り)...",
+      "headersPlaceholder": "パケットヘッダJSON...",
+      "execute": "実行",
+      "executing": "実行中...",
+      "noResults": "結果なし",
+      "actionAll": "すべてのアクション",
+      "actionPermit": "Permit",
+      "actionDeny": "Deny",
+      "invalidJson": "無効なJSON",
+      "aria": {
+        "filterName": "フィルタ名入力",
+        "nodes": "ノード入力",
+        "headersJson": "パケットヘッダJSON入力",
+        "actionFilter": "アクションフィルタ",
+        "filterLineResults": "フィルタ行到達性の結果",
+        "testFiltersResults": "フィルタテストの結果",
+        "matchingLinesResults": "マッチングフィルタ行の結果",
+        "searchFiltersResults": "フィルタ検索の結果"
+      }
+    },
+    "advanced": {
+      "searchRoutePoliciesDesc": "デバイス全体でアクション別にルートポリシーを検索",
+      "reduceReachabilityDesc": "パス制約条件で到達性を分析",
+      "headersPlaceholder": "フローヘッダJSON...",
+      "nodePlaceholder": "ノードでフィルタ...",
+      "allActions": "全アクション",
+      "permit": "PERMIT",
+      "deny": "DENY",
+      "aria": {
+        "searchRoutePoliciesResults": "ルートポリシー検索の結果",
+        "reduceReachabilityResults": "制約付き到達性の結果",
+        "flowHeaders": "フローヘッダJSON入力",
+        "nodeFilter": "ノードフィルタ",
+        "actionFilter": "アクションフィルタ"
+      }
     },
     "itemCount": "{{count}} 項目"
   },
@@ -671,6 +761,9 @@
     "interfaces": "インターフェース",
     "routes": "ルート",
     "backToDashboard": "ダッシュボードに戻る",
+    "accessDenied": "アクセス拒否",
+    "adminRequired": "このページにアクセスするには管理者権限が必要です。",
+    "updateFailed": "更新に失敗しました",
     "default": "デフォルト",
     "none": "なし",
     "previousPage": "前のページ",
@@ -688,6 +781,19 @@
     "protocol": {
       "bgp": "BGP"
     }
+  },
+  "time": {
+    "justNow": "たった今",
+    "minutesAgo_one": "{{count}}分前",
+    "minutesAgo_other": "{{count}}分前",
+    "hoursAgo_one": "{{count}}時間前",
+    "hoursAgo_other": "{{count}}時間前",
+    "daysAgo_one": "{{count}}日前",
+    "daysAgo_other": "{{count}}日前",
+    "monthsAgo_one": "{{count}}ヶ月前",
+    "monthsAgo_other": "{{count}}ヶ月前",
+    "yearsAgo_one": "{{count}}年前",
+    "yearsAgo_other": "{{count}}年前"
   },
   "errors": {
     "networkError": "ネットワークエラーが発生しました",
@@ -752,7 +858,12 @@
     "updateProfile": "プロフィールを更新",
     "passwordMismatch": "パスワードが一致しません",
     "updated": "プロフィールが正常に更新されました",
-    "passwordChanged": "パスワードが正常に変更されました"
+    "passwordChanged": "パスワードが正常に変更されました",
+    "failedToLoad": "ユーザープロフィールの読み込みに失敗しました"
+  },
+  "password": {
+    "minLength": "パスワードは12文字以上必要です",
+    "changeFailed": "パスワードの変更に失敗しました"
   },
   "users": {
     "title": "ユーザー管理",
@@ -762,7 +873,12 @@
     "confirmDelete": "このユーザーを削除してもよろしいですか？",
     "userDeleted": "ユーザーが正常に削除されました",
     "deleteFailed": "ユーザーの削除に失敗しました",
-    "cannotDeleteSelf": "自分のアカウントは削除できません"
+    "cannotDeleteSelf": "自分のアカウントは削除できません",
+    "failedToLoad": "ユーザーの読み込みに失敗しました",
+    "failedToLoadUser": "ユーザーの読み込みに失敗しました",
+    "registeredCount": "{{count}} ユーザー登録済み",
+    "usernameImmutable": "ユーザー名は変更できません",
+    "superuser": "スーパーユーザー"
   },
   "userEdit": {
     "title": "ユーザー編集",
@@ -840,7 +956,12 @@
     "placeholders": {
       "sourceIp": "例: 192.168.1.1",
       "destinationIp": "例: 10.0.0.1",
-      "ipProtocols": "例: TCP, UDP, ICMP",
+      "startLocation": "例: router1[GigabitEthernet0/0]",
+      "maxTraces": "例: 10",
+      "endLocation": "例: router2",
+      "transitLocations": "例: firewall1",
+      "forbiddenLocations": "例: switch1",
+      "ipProtocols": "プロトコルを検索...",
       "applications": "例: HTTP, SSH, DNS",
       "sourcePorts": "例: 1024-65535",
       "destinationPorts": "例: 80, 443",
@@ -868,7 +989,9 @@
       "hop": "ホップ",
       "hopsCount": "{{count}} ホップ",
       "flowPair": "フローペア",
-      "stepsCount": "{{count}} ステップ"
+      "stepsCount": "{{count}} ステップ",
+      "flowDetails": "フロー詳細",
+      "reverseFlowDetails": "逆方向フロー詳細"
     },
     "directions": {
       "forward": "順方向",
@@ -876,9 +999,31 @@
     },
     "messages": {
       "noTraces": "このフローで利用可能なトレースはありません",
-      "noHops": "このトレースにホップはありません"
+      "noHops": "このトレースにホップはありません",
+      "noForwardTraces": "順方向トレースがありません",
+      "noReverseTraces": "逆方向トレースがありません",
+      "failed": "トレースルートに失敗しました。パラメータを確認して再試行してください。",
+      "analyzing": "ネットワークパスを分析中..."
     },
-    "error": "エラー"
+    "error": "エラー",
+    "protocol": {
+      "showAll": "全{{count}}プロトコルを表示",
+      "showCommon": "主要プロトコルを表示",
+      "noResults": "一致するプロトコルがありません",
+      "hint": "名前、番号(0-255)、または ! で除外",
+      "rawValue": "値をそのまま使用: {{value}}",
+      "categories": {
+        "transport": "トランスポート",
+        "control": "制御",
+        "multicast": "マルチキャスト",
+        "routing": "ルーティング",
+        "redundancy": "冗長化",
+        "tunneling": "トンネリング",
+        "ipsec": "IPsec",
+        "signaling": "シグナリング",
+        "other": "その他"
+      }
+    }
   },
   "securityLogs": {
     "title": "セキュリティログ",
@@ -978,8 +1123,11 @@
     "noDevices": "スナップショットにデバイスが見つかりません",
     "noInterfaces": "使用可能なインターフェースがありません",
     "totalConnections": "{{count}}件の接続",
+    "totalConnections_other": "{{count}}件の接続",
     "totalDevices": "{{count}}台のデバイス",
+    "totalDevices_other": "{{count}}台のデバイス",
     "interfaceCount": "{{count}}個のインターフェース",
+    "interfaceCount_other": "{{count}}個のインターフェース",
     "node1": "ノード1",
     "node2": "ノード2",
     "hostname": "ホスト名",

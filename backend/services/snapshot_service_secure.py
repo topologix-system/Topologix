@@ -9,6 +9,9 @@ Secure network configuration snapshot management service
 - Snapshot export/import with integrity verification
 - Metadata tracking for all snapshots
 - Restricted file permissions (0o750 for directories, 0o640 for files)
+
+NOTE: This is a reference implementation. Use snapshot_service.py for production.
+Security features here can be selectively ported to snapshot_service.py.
 """
 import logging
 import os
@@ -424,7 +427,22 @@ class SecureSnapshotService:
                         if actual_hash != expected_hash:
                             raise ValueError(f"Integrity check failed for {rel_path}")
 
-            # Import snapshot
-            # Implementation depends on specific requirements
+            # Validate extracted structure contains configs
+            configs_dir = Path(tmp_dir) / 'configs'
+            if not configs_dir.exists():
+                for d in Path(tmp_dir).iterdir():
+                    if d.is_dir() and (d / 'configs').exists():
+                        configs_dir = d / 'configs'
+                        break
+                else:
+                    raise ValueError("Archive missing required 'configs' directory")
 
-        return {"status": "imported"}
+            # Determine snapshot name and copy to snapshots dir
+            import shutil
+            snapshot_name = name or Path(archive_path).stem
+            snapshot_dir = Path(self.snapshots_dir) / snapshot_name
+            if snapshot_dir.exists():
+                raise ValueError(f"Snapshot '{snapshot_name}' already exists")
+            shutil.copytree(configs_dir.parent, snapshot_dir)
+
+        return {"status": "imported", "name": snapshot_name}

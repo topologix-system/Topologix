@@ -12,13 +12,8 @@ export interface IPSecSessionStatus {
   tunnel_interfaces: string[]
 }
 
-export interface IPSecEdge {
-  node: string
-  remote_node: string
-  local_interface: string
-  remote_interface: string
-  tunnel_interfaces: string[]
-}
+/** @deprecated Use IPsecEdge from './edges' instead (standardized RFC 6071 casing) */
+export type IPSecEdge = import('./edges').IPsecEdge
 
 export interface IPSecPeerConfiguration {
   [key: string]: any

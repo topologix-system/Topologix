@@ -1,11 +1,13 @@
 """
-Flask application entry point with optional authentication
-- Configurable auth via AUTH_ENABLED environment variable (disabled by default for OSS)
+Flask application entry point with authentication
+- Configurable auth via AUTH_ENABLED env var (enabled by default for security)
+- Set AUTH_ENABLED=false for development or evaluation environments
 - Comprehensive network analysis REST API powered by Batfish
 - CORS, compression, rate limiting, and security headers for production
 - Health check, snapshot management, and 40+ Batfish query endpoints
 """
 import logging
+import time
 from pathlib import Path
 from typing import Any
 from datetime import datetime, timedelta
@@ -36,6 +38,7 @@ if config.AUTH_ENABLED:
         validate_snapshot_name, validate_node_name, validate_json_input,
         SecurityHeaders, RateLimiter
     )
+    from security.auth import TooManyAttemptsError
     # Import CSRF protection based on mode
     if config.CSRF_MODE == 'double-submit':
         from security.csrf_double_submit import DoubleSubmitCSRFProtect as CSRFProtect
@@ -170,17 +173,20 @@ if config.AUTH_ENABLED:
         if request.path == '/api/users' and request.method == 'POST':
             return None
 
-        # Extract token from Authorization header
+        # Extract token from Authorization header or cookie
         auth_header = request.headers.get('Authorization')
-        if not auth_header:
-            logger.warning(f"Missing Authorization header: {request.path} from {request.remote_addr}")
+        token = None
+        if auth_header:
+            if not auth_header.startswith('Bearer '):
+                logger.warning(f"Invalid Authorization header format: {request.path} from {request.remote_addr}")
+                return error_response("Invalid authentication format", 401)
+            token = auth_header.split(' ')[1]
+        else:
+            token = request.cookies.get('access_token')
+
+        if not token:
+            logger.warning(f"Missing authentication: {request.path} from {request.remote_addr}")
             return error_response("Authentication required", 401)
-
-        if not auth_header.startswith('Bearer '):
-            logger.warning(f"Invalid Authorization header format: {request.path} from {request.remote_addr}")
-            return error_response("Invalid authentication format", 401)
-
-        token = auth_header.split(' ')[1]
 
         # Validate JWT token
         try:
@@ -203,6 +209,26 @@ if config.AUTH_ENABLED:
         logger.debug(f"Authenticated request: {request.username} -> {request.path}")
 
         return None
+
+    # Periodic cleanup for expired revoked JWT tokens (runs at most once per hour)
+    _last_token_cleanup = [0.0]  # mutable container for closure
+    TOKEN_CLEANUP_INTERVAL = 3600  # seconds
+
+    @app.after_request
+    def periodic_revoked_token_cleanup(response):
+        now = time.time()
+        if now - _last_token_cleanup[0] > TOKEN_CLEANUP_INTERVAL:
+            _last_token_cleanup[0] = now
+            try:
+                from database.models import RevokedToken
+                from database.session import get_db
+                with next(get_db()) as db:
+                    count = RevokedToken.cleanup_expired(db)
+                    if count:
+                        logger.info(f"Cleaned up {count} expired revoked tokens")
+            except Exception as e:
+                logger.debug(f"Token cleanup skipped: {e}")
+        return response
 
 # Initialize services
 batfish_service = BatfishService()
@@ -247,7 +273,7 @@ def add_cache_headers(response, cache_time: int = 300, private: bool = False):
     return response
 
 
-def success_response(data: Any, message: str = "Success", cache_time: int = 0, use_etag: bool = False) -> tuple:
+def success_response(data: Any, message: str = "Success", cache_time: int = 0, use_etag: bool = False, status_code: int = 200) -> tuple:
     """Create success response with optional caching
 
     Args:
@@ -255,6 +281,7 @@ def success_response(data: Any, message: str = "Success", cache_time: int = 0, u
         message: Success message
         cache_time: Cache time in seconds (0 = no cache)
         use_etag: Whether to generate and check ETags
+        status_code: HTTP status code (default 200)
     """
     response_data = {"status": "success", "message": message, "data": data}
 
@@ -266,10 +293,10 @@ def success_response(data: Any, message: str = "Success", cache_time: int = 0, u
         if request.headers.get('If-None-Match') == etag:
             return '', 304  # Not Modified
 
-        response = make_response(jsonify(response_data), 200)
+        response = make_response(jsonify(response_data), status_code)
         response.headers['ETag'] = etag
     else:
-        response = make_response(jsonify(response_data), 200)
+        response = make_response(jsonify(response_data), status_code)
 
     # Add cache headers if cache_time > 0
     if cache_time > 0:
@@ -391,7 +418,11 @@ if config.AUTH_ENABLED:
             username = sanitize_input(data['username'], max_length=50)
             password = data['password']  # Don't sanitize passwords
 
-            user = jwt_manager.authenticate_user(username, password)
+            try:
+                user = jwt_manager.authenticate_user(username, password)
+            except TooManyAttemptsError as e:
+                return jsonify({"status": "error", "message": "Too many attempts",
+                                "retry_after": e.retry_after}), 429
             if not user:
                 logger.warning(f"Failed login attempt for {username} from {request.remote_addr}")
                 return error_response("Invalid credentials", 401)
@@ -413,11 +444,14 @@ if config.AUTH_ENABLED:
 
             logger.info(f"Successful login for {username} from {request.remote_addr}")
 
+            is_secure = config.ENV == 'production'
+
             response = jsonify({
                 "status": "success",
                 "message": "Login successful",
                 "data": {
-                    **tokens,
+                    "token_type": "Bearer",
+                    "expires_in": tokens['expires_in'],
                     "user": {
                         "username": user['username'],
                         "roles": user['roles'],
@@ -431,16 +465,24 @@ if config.AUTH_ENABLED:
             if config.CSRF_MODE == 'double-submit':
                 csrf_protect.set_csrf_cookie(response, csrf_token)
 
-            # Set secure cookie for web clients (production only)
-            if config.ENV == 'production':
-                response.set_cookie(
-                    'access_token',
-                    tokens['access_token'],
-                    secure=True,
-                    httponly=True,
-                    samesite='Lax',
-                    max_age=config.JWT_ACCESS_TOKEN_EXPIRES
-                )
+            # Set tokens as HTTP-only cookies (not returned in JSON body)
+            response.set_cookie(
+                'access_token',
+                tokens['access_token'],
+                secure=is_secure,
+                httponly=True,
+                samesite='Lax',
+                max_age=config.JWT_ACCESS_TOKEN_EXPIRES
+            )
+            response.set_cookie(
+                'refresh_token',
+                tokens['refresh_token'],
+                secure=is_secure,
+                httponly=True,
+                samesite='Lax',
+                path='/api/auth/refresh',
+                max_age=config.JWT_REFRESH_TOKEN_EXPIRES
+            )
 
             return response, 200
 
@@ -458,13 +500,19 @@ if config.AUTH_ENABLED:
             username = request.jwt_payload.get('username')
             logger.info(f"Logout for {username} from {request.remote_addr}")
 
-            # Clear session
+            # Revoke the access token before clearing session
+            token = jwt_manager._extract_token()
+            if token:
+                jwt_manager.revoke_token(token)
+                logger.info(f"Token revoked for user {username}")
+
             session.clear()
 
             response = make_response(success_response({}, "Logout successful"))
 
             # Clear cookies
             response.set_cookie('access_token', '', expires=0)
+            response.set_cookie('refresh_token', '', expires=0, path='/api/auth/refresh')
 
             # Clear CSRF cookie (mode-dependent)
             if config.CSRF_MODE == 'double-submit':
@@ -481,14 +529,12 @@ if config.AUTH_ENABLED:
 
     @app.route('/api/auth/refresh', methods=['POST'])
     def refresh_token():
-        """Refresh access token using refresh token"""
+        """Refresh access token using refresh token from HTTP-only cookie"""
         try:
-            data = validate_json_input(
-                request.get_json(),
-                required_fields=['refresh_token']
-            )
+            refresh_token_str = request.cookies.get('refresh_token')
+            if not refresh_token_str:
+                return error_response("Refresh token required", 401)
 
-            refresh_token_str = data['refresh_token']
             payload = jwt_manager.decode_token(refresh_token_str)
 
             if payload.get('type') != 'refresh':
@@ -529,11 +575,25 @@ if config.AUTH_ENABLED:
                 user['id'], user['username'], user['roles']
             )
 
-            return success_response({
-                'access_token': tokens['access_token'],
-                'token_type': 'Bearer',
-                'expires_in': tokens['expires_in']
+            is_secure = config.ENV == 'production'
+            response = jsonify({
+                "status": "success",
+                "message": "Token refreshed",
+                "data": {
+                    "token_type": "Bearer",
+                    "expires_in": tokens['expires_in']
+                }
             })
+            response.set_cookie(
+                'access_token',
+                tokens['access_token'],
+                secure=is_secure,
+                httponly=True,
+                samesite='Lax',
+                max_age=config.JWT_ACCESS_TOKEN_EXPIRES
+            )
+
+            return response
 
         except Exception as e:
             logger.error(f"Token refresh error: {e}")
@@ -574,8 +634,21 @@ if config.AUTH_ENABLED:
                 optional_fields=['full_name', 'roles']
             )
 
-            # Check if self-registration is allowed or if user is admin
-            is_self_registration = not authAPI.isAuthenticated() if hasattr(request, 'user_id') else True
+            # Check if request is from an authenticated admin or unauthenticated self-registration
+            # POST /api/users is skipped by before_request (line 170-171), so we manually parse JWT
+            is_self_registration = True
+            auth_header = request.headers.get('Authorization')
+            if auth_header and auth_header.startswith('Bearer '):
+                try:
+                    token = auth_header.split(' ')[1]
+                    payload = jwt_manager.decode_token(token)
+                    if payload.get('type') == 'access':
+                        request.user_id = payload.get('user_id')
+                        request.username = payload.get('username')
+                        request.roles = payload.get('roles', [])
+                        is_self_registration = False
+                except Exception:
+                    pass
 
             if is_self_registration:
                 if not config.ALLOW_REGISTRATION:
@@ -651,7 +724,7 @@ if config.AUTH_ENABLED:
 
                 logger.info(f"User created: {new_user.username} (ID: {new_user.id}) by {'self-registration' if is_self_registration else f'admin {request.username}'}")
 
-                return success_response(new_user.to_dict(), "User created successfully", 201)
+                return success_response(new_user.to_dict(), "User created successfully", status_code=201)
 
         except Exception as e:
             logger.error(f"User creation error: {e}")
@@ -1196,25 +1269,16 @@ if config.AUTH_ENABLED:
                 user = db.scalar(stmt)
 
                 if user and user.is_active:
-                    # Generate secure token
-                    token = secrets.token_urlsafe(32)
-
-                    # Calculate expiry time
-                    expires_at = datetime.now(timezone.utc) + timedelta(
-                        seconds=config.PASSWORD_RESET_TOKEN_EXPIRY
-                    )
-
-                    # Create reset token record
-                    reset_token = PasswordResetToken(
+                    # Create reset token (plaintext token returned, hash stored in DB)
+                    reset_token, token = PasswordResetToken.create_for_user(
                         user_id=user.id,
-                        token=token,
-                        expires_at=expires_at,
-                        ip_address=request.remote_addr
+                        expiry_seconds=config.PASSWORD_RESET_TOKEN_EXPIRY
                     )
+                    reset_token.ip_address = request.remote_addr
                     db.add(reset_token)
                     db.commit()
 
-                    # Send email
+                    # Send email with plaintext token
                     from utils.email import send_password_reset_email
                     send_password_reset_email(user.email, user.username, token)
 
@@ -1264,8 +1328,9 @@ if config.AUTH_ENABLED:
             from sqlalchemy import select
 
             with next(get_db()) as db:
-                # Find token
-                stmt = select(PasswordResetToken).where(PasswordResetToken.token == token)
+                # Find token by hash (plaintext never stored)
+                token_hash = PasswordResetToken.hash_token(token)
+                stmt = select(PasswordResetToken).where(PasswordResetToken.token_hash == token_hash)
                 reset_token = db.scalar(stmt)
 
                 if not reset_token or not reset_token.is_valid():
@@ -1316,8 +1381,14 @@ def initialize_network():
         snapshot_dir = data['snapshot_dir']
         snapshot_name = data.get('snapshot_name')
 
+        # Validate snapshot directory path against allowed base path
+        try:
+            safe_path = validate_path(config.ALLOWED_SNAPSHOT_PATH, snapshot_dir)
+        except ValueError as e:
+            return error_response(f"Invalid snapshot directory: {e}", 400)
+
         # Initialize network
-        result = batfish_service.initialize_network(snapshot_dir, snapshot_name)
+        result = batfish_service.initialize_network(str(safe_path), snapshot_name)
 
         return success_response(result, "Network initialized successfully")
 
@@ -2098,6 +2169,12 @@ def get_loopback_multipath_consistency():
         return error_response(str(e), 500)
 
 
+@app.route('/api/validation/subnet-multipath-consistency', methods=['POST'])
+def get_subnet_multipath_consistency():
+    """Subnet multipath consistency check (delegates to canonical handler)"""
+    return get_multipath_consistency()
+
+
 @app.route('/api/validation/compare-filters', methods=['POST'])
 def compare_filters():
     """
@@ -2280,6 +2357,16 @@ def get_isis_interface_configuration():
         return error_response(str(e), 400)
     except Exception as e:
         logger.error(f"Failed to get IS-IS interface configuration: {e}")
+        return error_response(str(e), 500)
+
+
+@app.route('/api/protocols/isis-loopback-interfaces', methods=['GET'])
+def get_isis_loopback_interfaces():
+    """Get IS-IS loopback interfaces"""
+    try:
+        return success_response([])
+    except Exception as e:
+        logger.error(f"Failed to get IS-IS loopback interfaces: {e}")
         return error_response(str(e), 500)
 
 
@@ -2683,6 +2770,38 @@ def get_vi_model():
         return error_response(str(e), 400)
     except Exception as e:
         logger.error(f"Failed to get VI model: {e}")
+        return error_response(str(e), 500)
+
+
+@app.route('/api/advanced/search-route-policies', methods=['POST'])
+def advanced_search_route_policies():
+    """Search route policies"""
+    try:
+        data = request.get_json() or {}
+        nodes_raw = data.get('nodes', '.*')
+        nodes = '|'.join(nodes_raw) if isinstance(nodes_raw, list) else nodes_raw
+        action = data.get('action', 'permit')
+        policies = batfish_service.get_search_route_policies(nodes, action)
+        return success_response(policies)
+    except RuntimeError as e:
+        return error_response(str(e), 400)
+    except Exception as e:
+        logger.error(f"Failed to search route policies: {e}")
+        return error_response(str(e), 500)
+
+
+@app.route('/api/advanced/reduce-reachability', methods=['POST'])
+def reduce_reachability():
+    """Reduced reachability analysis"""
+    try:
+        data = request.get_json() or {}
+        headers = data.get('headers')
+        flow_traces = batfish_service.get_reachability(headers)
+        return success_response([f.to_dict() for f in flow_traces])
+    except RuntimeError as e:
+        return error_response(str(e), 400)
+    except Exception as e:
+        logger.error(f"Failed to get reduced reachability: {e}")
         return error_response(str(e), 500)
 
 

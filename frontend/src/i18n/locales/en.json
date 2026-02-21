@@ -225,6 +225,33 @@
       }
     },
     "acl": {
+      "unreachable": "Unreachable",
+      "noData": "No ACL/filter analysis data available",
+      "summary": "Filter Analysis: {{count}} unreachable lines across {{nodeCount}} nodes",
+      "currentNodeFilters": "Current Node Filters",
+      "otherNodeFilters": "Other Nodes' Filters",
+      "filterCount": "{{filterCount}} filters, {{lineCount}} unreachable lines",
+      "appliedTo": "Applied To",
+      "notApplied": "Not applied to any interface",
+      "direction": {
+        "inbound": "Inbound",
+        "outbound": "Outbound"
+      },
+      "unreachableLine": "Unreachable Line",
+      "referencedAddresses": "Referenced Addresses",
+      "unknownOwner": "Unknown owner",
+      "noAddresses": "No IP addresses found in rule",
+      "unknownSource": "Unknown filter source",
+      "blockedBy": "Blocked By",
+      "searchPlaceholder": "Search by node or filter name...",
+      "noSearchResults": "No filters matching search criteria",
+      "collapsePreview": "{{count}} unreachable ({{deny}} DENY, {{permit}} PERMIT)",
+      "severity": {
+        "high": "High severity",
+        "low": "Low severity"
+      },
+      "cidrMatch": "CIDR containment match (approximate)",
+      "navigateToNode": "Navigate to node {{node}}",
       "fields": {
         "line": "Line",
         "action": "Action",
@@ -232,7 +259,12 @@
         "blockedByLines": "Blocked by lines",
         "sources": "Sources",
         "destinations": "Destinations",
-        "node": "Node"
+        "node": "Node",
+        "zone": "Zone",
+        "address": "Address",
+        "interface": "Interface",
+        "vrf": "VRF",
+        "owner": "Owner"
       },
       "defaults": {
         "unnamedFilter": "Unnamed Filter"
@@ -279,9 +311,6 @@
     },
     "routing": {
       "direct": "Direct"
-    },
-    "acl": {
-      "unreachable": "Unreachable"
     },
     "fields": {
       "name": "Name",
@@ -383,6 +412,7 @@
     "description": "Review configuration validation results, parse issues, and structural problems.",
     "loading": "Loading {{section}}...",
     "noIssues": "No issues found",
+    "dataJsonFormat": "{{title}} data in JSON format",
     "status": {
       "errorsFound": "Errors Found",
       "warnings": "Warnings",
@@ -397,7 +427,15 @@
       "parseWarnings": "Parse Warnings",
       "unusedStructures": "Unused Structures",
       "fileParseStatus": "File Parse Status",
-      "viConversionStatus": "VI Conversion Status"
+      "viConversionStatus": "VI Conversion Status",
+      "subnetMultipathConsistency": "Subnet Multipath Consistency"
+    },
+    "subnetMultipath": {
+      "nodePlaceholder": "Node filter (optional)...",
+      "aria": {
+        "nodeFilter": "Node filter input",
+        "results": "Subnet multipath consistency results"
+      }
     },
     "itemCount": "{{count}} items"
   },
@@ -406,13 +444,16 @@
     "description": "Explore network topology structure, routing protocols, and configuration details.",
     "loading": "Loading {{section}}...",
     "noData": "No data available",
+    "dataJsonFormat": "{{title}} data in JSON format",
+    "categoriesLabel": "Analysis categories",
     "tabs": {
       "validation": "Validation",
       "highAvailability": "High Availability",
       "network": "Network",
       "protocols": "Protocols",
       "topology": "Topology",
-      "advanced": "Advanced"
+      "advanced": "Advanced",
+      "acl": "ACL Analysis"
     },
     "sections": {
       "topology": "Topology",
@@ -471,7 +512,56 @@
       "referencedStructures": "Referenced Structures",
       "namedStructures": "Named Structures",
       "aaaAuthentication": "AAA Authentication",
-      "routePolicies": "Route Policies"
+      "routePolicies": "Route Policies",
+      "searchRoutePolicies": "Search Route Policies",
+      "reduceReachability": "Reduced Reachability"
+    },
+    "acl": {
+      "description": "Analyze ACL/filter configurations, detect unreachable rules, and test traffic matching.",
+      "filterLineReachability": "Filter Line Reachability",
+      "filterLineReachabilityDesc": "Detect unreachable ACL lines shadowed by earlier entries",
+      "testFilters": "Test Filters",
+      "testFiltersDesc": "Simulate traffic against specified ACL/filter configurations",
+      "findMatchingLines": "Find Matching Lines",
+      "findMatchingLinesDesc": "Find which ACL lines would match specified packet headers",
+      "searchFilters": "Search Filters",
+      "searchFiltersDesc": "Search ACLs by permit/deny action across devices",
+      "filtersPlaceholder": "Filter name (regex)...",
+      "nodesPlaceholder": "Node names (comma-separated)...",
+      "headersPlaceholder": "Packet headers JSON...",
+      "execute": "Execute",
+      "executing": "Executing...",
+      "noResults": "No results",
+      "actionAll": "All Actions",
+      "actionPermit": "Permit",
+      "actionDeny": "Deny",
+      "invalidJson": "Invalid JSON",
+      "aria": {
+        "filterName": "Filter name input",
+        "nodes": "Nodes input",
+        "headersJson": "Packet headers JSON input",
+        "actionFilter": "Action filter",
+        "filterLineResults": "Filter line reachability results",
+        "testFiltersResults": "Test filters results",
+        "matchingLinesResults": "Find matching filter lines results",
+        "searchFiltersResults": "Search filters results"
+      }
+    },
+    "advanced": {
+      "searchRoutePoliciesDesc": "Search route policies by action across devices",
+      "reduceReachabilityDesc": "Analyze reachability with path constraints",
+      "headersPlaceholder": "Flow headers JSON...",
+      "nodePlaceholder": "Filter by node...",
+      "allActions": "All Actions",
+      "permit": "PERMIT",
+      "deny": "DENY",
+      "aria": {
+        "searchRoutePoliciesResults": "Search route policies results",
+        "reduceReachabilityResults": "Reduce reachability results",
+        "flowHeaders": "Flow headers JSON input",
+        "nodeFilter": "Node filter",
+        "actionFilter": "Action filter"
+      }
     },
     "itemCount": "{{count}} items"
   },
@@ -671,6 +761,9 @@
     "interfaces": "Interfaces",
     "routes": "Routes",
     "backToDashboard": "Back to Dashboard",
+    "accessDenied": "Access Denied",
+    "adminRequired": "You need admin privileges to access this page.",
+    "updateFailed": "Update failed",
     "default": "default",
     "none": "None",
     "previousPage": "Previous page",
@@ -688,6 +781,19 @@
     "protocol": {
       "bgp": "BGP"
     }
+  },
+  "time": {
+    "justNow": "just now",
+    "minutesAgo_one": "{{count}} minute ago",
+    "minutesAgo_other": "{{count}} minutes ago",
+    "hoursAgo_one": "{{count}} hour ago",
+    "hoursAgo_other": "{{count}} hours ago",
+    "daysAgo_one": "{{count}} day ago",
+    "daysAgo_other": "{{count}} days ago",
+    "monthsAgo_one": "{{count}} month ago",
+    "monthsAgo_other": "{{count}} months ago",
+    "yearsAgo_one": "{{count}} year ago",
+    "yearsAgo_other": "{{count}} years ago"
   },
   "errors": {
     "networkError": "Network error occurred",
@@ -752,7 +858,12 @@
     "updateProfile": "Update Profile",
     "passwordMismatch": "Passwords do not match",
     "updated": "Profile updated successfully",
-    "passwordChanged": "Password changed successfully"
+    "passwordChanged": "Password changed successfully",
+    "failedToLoad": "Failed to load user profile"
+  },
+  "password": {
+    "minLength": "Password must be at least 12 characters",
+    "changeFailed": "Password change failed"
   },
   "users": {
     "title": "User Management",
@@ -762,7 +873,12 @@
     "confirmDelete": "Are you sure you want to delete this user?",
     "userDeleted": "User deleted successfully",
     "deleteFailed": "Failed to delete user",
-    "cannotDeleteSelf": "Cannot delete your own account"
+    "cannotDeleteSelf": "Cannot delete your own account",
+    "failedToLoad": "Failed to load users",
+    "failedToLoadUser": "Failed to load user",
+    "registeredCount": "{{count}} users registered",
+    "usernameImmutable": "Username cannot be changed",
+    "superuser": "Superuser"
   },
   "userEdit": {
     "title": "Edit User",
@@ -837,19 +953,6 @@
       "transitLocations": "Transit Locations (Must Pass Through)",
       "forbiddenLocations": "Forbidden Locations (Must NOT Pass Through)"
     },
-    "placeholders": {
-      "sourceIp": "e.g., 192.168.1.1",
-      "destinationIp": "e.g., 10.0.0.1",
-      "ipProtocols": "e.g., TCP, UDP, ICMP",
-      "applications": "e.g., HTTP, SSH, DNS",
-      "sourcePorts": "e.g., 1024-65535",
-      "destinationPorts": "e.g., 80, 443",
-      "icmpTypes": "e.g., 8 (Echo Request)",
-      "icmpCodes": "e.g., 0",
-      "dscpValues": "e.g., 0-63",
-      "ecnValues": "e.g., 0-3",
-      "packetLength": "e.g., 64-1500"
-    },
     "modes": {
       "unidirectional": "Unidirectional",
       "bidirectional": "Bidirectional"
@@ -862,13 +965,33 @@
       "running": "Running...",
       "reset": "Reset"
     },
+    "placeholders": {
+      "sourceIp": "e.g., 192.168.1.1",
+      "destinationIp": "e.g., 10.0.0.1",
+      "startLocation": "e.g., router1[GigabitEthernet0/0]",
+      "maxTraces": "e.g., 10",
+      "endLocation": "e.g., router2",
+      "transitLocations": "e.g., firewall1",
+      "forbiddenLocations": "e.g., switch1",
+      "ipProtocols": "Search protocols...",
+      "applications": "e.g., HTTP, SSH, DNS",
+      "sourcePorts": "e.g., 1024-65535",
+      "destinationPorts": "e.g., 80, 443",
+      "icmpTypes": "e.g., 8 (Echo Request)",
+      "icmpCodes": "e.g., 0",
+      "dscpValues": "e.g., 0-63",
+      "ecnValues": "e.g., 0-3",
+      "packetLength": "e.g., 64-1500"
+    },
     "labels": {
       "flow": "Flow",
       "trace": "Trace",
       "hop": "Hop",
       "hopsCount": "{{count}} hops",
       "flowPair": "Flow Pair",
-      "stepsCount": "{{count}} steps"
+      "stepsCount": "{{count}} steps",
+      "flowDetails": "Flow Details",
+      "reverseFlowDetails": "Reverse Flow Details"
     },
     "directions": {
       "forward": "Forward",
@@ -876,9 +999,31 @@
     },
     "messages": {
       "noTraces": "No traces available for this flow",
-      "noHops": "No hops in this trace"
+      "noHops": "No hops in this trace",
+      "noForwardTraces": "No forward traces available",
+      "noReverseTraces": "No reverse traces available",
+      "failed": "Traceroute failed. Please check your parameters and try again.",
+      "analyzing": "Analyzing network paths..."
     },
-    "error": "Error"
+    "error": "Error",
+    "protocol": {
+      "showAll": "Show all {{count}} protocols",
+      "showCommon": "Show common protocols",
+      "noResults": "No matching protocols",
+      "hint": "Type a name, number (0-255), or ! to exclude",
+      "rawValue": "Use raw value: {{value}}",
+      "categories": {
+        "transport": "Transport",
+        "control": "Control",
+        "multicast": "Multicast",
+        "routing": "Routing",
+        "redundancy": "Redundancy",
+        "tunneling": "Tunneling",
+        "ipsec": "IPsec",
+        "signaling": "Signaling",
+        "other": "Other"
+      }
+    }
   },
   "securityLogs": {
     "title": "Security Logs",

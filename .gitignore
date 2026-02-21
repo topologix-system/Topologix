@@ -18,6 +18,10 @@ backend/security/*secret*
 backend/security/*credential*
 *.key
 *.pem
+*.p12
+*.pfx
+*.jks
+*.keystore
 
 # ===== データベース・永続化データ =====
 postgres-data/
@@ -35,6 +39,7 @@ docker-compose.override.yml
 # ユーザー作成のスナップショットを除外
 backend/snapshots/*
 snapshots/*
+!snapshots/.gitkeep
 configs/*
 
 # ===== Python（GitHub公式準拠） =====

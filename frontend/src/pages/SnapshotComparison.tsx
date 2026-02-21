@@ -15,6 +15,7 @@ export function SnapshotComparison() {
   const [comparisonSnapshot, setComparisonSnapshot] = useState<string>('')
   const [activeTab, setActiveTab] = useState<'nodes' | 'topology' | 'routes' | 'reachability'>('nodes')
   const [comparisonResult, setComparisonResult] = useState<ComparisonResult | null>(null)
+  const [error, setError] = useState<string | null>(null)
 
   /**
    * Fetch available snapshots for selection dropdowns
@@ -32,15 +33,16 @@ export function SnapshotComparison() {
    */
   const handleCompare = () => {
     if (!baseSnapshot || !comparisonSnapshot) {
-      alert('Please select both base and comparison snapshots')
+      setError('Please select both base and comparison snapshots')
       return
     }
 
     if (baseSnapshot === comparisonSnapshot) {
-      alert('Please select different snapshots to compare')
+      setError('Please select different snapshots to compare')
       return
     }
 
+    setError(null)
     compareMutation.mutate(
       {
         base_snapshot: baseSnapshot,
@@ -50,8 +52,8 @@ export function SnapshotComparison() {
         onSuccess: (data) => {
           setComparisonResult(data)
         },
-        onError: (error: any) => {
-          alert(`Comparison failed: ${error.message || 'Unknown error'}`)
+        onError: (err: any) => {
+          setError(`Comparison failed: ${err.message || 'Unknown error'}`)
         },
       }
     )
@@ -167,6 +169,10 @@ export function SnapshotComparison() {
             )}
           </button>
         </div>
+
+        {error && (
+          <div className="text-red-600 text-sm mt-2" role="alert">{error}</div>
+        )}
 
         {/* Comparison results */}
         {comparisonResult && summary && (

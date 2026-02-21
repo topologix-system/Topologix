@@ -14,6 +14,12 @@ services:
     networks:
       - topologix-network
     restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:9996/"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 60s
 
   # Backend API Service (Python + Flask)
   backend:
@@ -48,6 +54,9 @@ services:
       - AUTH_DEFAULT_ADMIN_PASS=${AUTH_DEFAULT_ADMIN_PASS}
       # Allow user self-registration (set to 'false' for admin-only registration)
       - ALLOW_REGISTRATION=${ALLOW_REGISTRATION:-true}
+
+      # CSRF protection mode (session or double-submit)
+      - CSRF_MODE=${CSRF_MODE:-session}
 
       # Security Keys (auto-generated if not set, but should be set in production)
       - SECRET_KEY=${SECRET_KEY}
@@ -104,10 +113,11 @@ services:
     networks:
       - topologix-network
     depends_on:
-      - batfish
+      batfish:
+        condition: service_healthy
     restart: unless-stopped
     healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:5000/api/health"]
+      test: ["CMD", "python3", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:5000/api/health')"]
       interval: 30s
       timeout: 10s
       retries: 3

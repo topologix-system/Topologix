@@ -7,11 +7,10 @@ FROM node:20.11-alpine3.19 AS builder
 WORKDIR /app
 
 # Copy dependency files
-COPY package*.json ./
+COPY package.json package-lock.json ./
 
-# Install dependencies
-# Temporarily using npm install instead of npm ci due to lock file sync issue
-RUN npm install
+# Install all dependencies (devDependencies needed for build step)
+RUN npm ci
 
 # Copy application code
 COPY . .

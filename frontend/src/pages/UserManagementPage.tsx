@@ -46,9 +46,9 @@ export function UserManagementPage() {
         <div className="bg-red-50 border border-red-200 rounded-lg p-4 flex items-start gap-2">
           <AlertCircle className="w-5 h-5 text-red-600 flex-shrink-0 mt-0.5" aria-hidden="true" />
           <div>
-            <p className="text-sm font-medium text-red-800">Access Denied</p>
+            <p className="text-sm font-medium text-red-800">{t('common.accessDenied')}</p>
             <p className="text-xs text-red-600 mt-1">
-              You need admin privileges to access this page.
+              {t('common.adminRequired')}
             </p>
           </div>
         </div>
@@ -69,7 +69,7 @@ export function UserManagementPage() {
       <div className="flex items-center justify-center h-screen bg-gray-50">
         <div className="bg-red-50 border border-red-200 rounded-lg p-4 flex items-start gap-2">
           <AlertCircle className="w-5 h-5 text-red-600 flex-shrink-0 mt-0.5" aria-hidden="true" />
-          <p className="text-sm text-red-800">Failed to load users</p>
+          <p className="text-sm text-red-800">{t('users.failedToLoad')}</p>
         </div>
       </div>
     )
@@ -94,7 +94,7 @@ export function UserManagementPage() {
               <div>
                 <h1 className="text-2xl font-bold text-gray-900">{t('users.title')}</h1>
                 <p className="text-sm text-gray-600 mt-1">
-                  {users?.length || 0} {users?.length === 1 ? 'user' : 'users'} registered
+                  {t('users.registeredCount', { count: users?.length || 0 })}
                 </p>
               </div>
             </div>

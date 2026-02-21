@@ -1,0 +1,58 @@
+# Security — prevent secrets from leaking into image layers
+.env
+.env.*
+*.env
+*.key
+*.pem
+*.p12
+*.pfx
+*.jks
+*.keystore
+security/tokens/
+security/certs/
+
+# Git
+.git
+.gitignore
+
+# Python artifacts
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+
+# Runtime data (volume-mounted in production)
+flask_session/
+data/
+logs/
+snapshots/
+
+# Testing
+test/
+tests/
+.pytest_cache/
+.coverage
+htmlcov/
+.tox/
+.nox/
+
+# Type checking / Linting
+.mypy_cache/
+.ruff_cache/
+
+# Virtual environments
+venv/
+.venv/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# Documentation
+*.md
+
+# OS
+.DS_Store
+Thumbs.db

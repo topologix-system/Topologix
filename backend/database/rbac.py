@@ -9,6 +9,7 @@ Role-Based Access Control (RBAC) implementation
 - Only enforced when AUTH_ENABLED=true
 - Comprehensive logging for access control decisions
 """
+import warnings
 from functools import wraps
 from typing import Optional
 from flask import request, jsonify, current_app
@@ -167,22 +168,24 @@ def get_user_permissions(user_id: int) -> list[str]:
 
 
 def require_role(role_name: str):
-    """Decorator to require specific role for endpoint access
+    """DEPRECATED: Use security.auth.require_role() instead.
 
-    Simpler than require_permission when role-level access is sufficient.
+    This is a duplicate implementation kept for backward compatibility.
+    The canonical version in security/auth.py is used by all endpoints.
+    Do not add new usages of this decorator.
 
     Args:
         role_name: Role name (e.g., "admin", "engineer")
 
-    Example:
-        @app.route('/api/admin/users', methods=['GET'])
-        @require_role('admin')
-        def list_users():
-            return jsonify({'users': []})
-
     Returns:
         Decorated function that checks role before execution
     """
+    warnings.warn(
+        "database.rbac.require_role() is deprecated. Use security.auth.require_role() instead.",
+        DeprecationWarning,
+        stacklevel=2
+    )
+
     def decorator(f):
         @wraps(f)
         def decorated_function(*args, **kwargs):

@@ -3,8 +3,9 @@
  * Handles reachability queries, traceroute, route policies, and forwarding analysis
  */
 import { useQuery, useMutation } from '@tanstack/react-query'
+import type { AxiosError } from 'axios'
 import { analysisAPI } from '../services/api'
-import type { ReachabilityRequest, TracerouteRequest } from '../types'
+import type { ReachabilityRequest, TracerouteRequest, TracerouteResponse, BidirectionalTracerouteResponse } from '../types'
 
 /**
  * Query key factory for network analysis-related React Query caches
@@ -55,8 +56,12 @@ export function useRoutePolicies(params?: { nodes?: string; action?: string }, e
  * Used in TraceroutePanel for path analysis
  */
 export function useTraceroute() {
-  return useMutation({
-    mutationFn: (request?: TracerouteRequest) => analysisAPI.traceroute(request),
+  return useMutation<TracerouteResponse[], AxiosError, TracerouteRequest | undefined>({
+    mutationFn: (request) => analysisAPI.traceroute(request),
+    retry: (failureCount, error) => {
+      if (error?.response?.status && error.response.status >= 500 && failureCount < 2) return true
+      return false
+    },
   })
 }
 
@@ -67,7 +72,11 @@ export function useTraceroute() {
  * Used in TraceroutePanel for comprehensive path analysis
  */
 export function useBidirectionalTraceroute() {
-  return useMutation({
-    mutationFn: (request?: TracerouteRequest) => analysisAPI.bidirectionalTraceroute(request),
+  return useMutation<BidirectionalTracerouteResponse[], AxiosError, TracerouteRequest | undefined>({
+    mutationFn: (request) => analysisAPI.bidirectionalTraceroute(request),
+    retry: (failureCount, error) => {
+      if (error?.response?.status && error.response.status >= 500 && failureCount < 2) return true
+      return false
+    },
   })
 }

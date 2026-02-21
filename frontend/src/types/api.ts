@@ -15,14 +15,22 @@ import { SwitchedVlanProperties } from './vlan'
 import { IPOwner } from './ip'
 import { DefinedStructure, ReferencedStructure, NamedStructure } from './structures'
 import { FileParseStatus, InitIssue, ParseWarning, ViConversionStatus } from './validation'
-import { FlowTrace } from './reachability'
+import { FlowTrace, FilterLineReachability } from './reachability'
 import { RoutePolicy, AAAAuthenticationLogin } from './policy'
 
-export interface APIResponse<T> {
-  status: 'success' | 'error'
+export interface APISuccessResponse<T> {
+  status: 'success'
   message: string
-  data?: T
+  data: T
 }
+
+export interface APIErrorResponse {
+  status: 'error'
+  message: string
+  data?: never
+}
+
+export type APIResponse<T> = APISuccessResponse<T> | APIErrorResponse
 
 export interface NetworkInitializeRequest {
   snapshot_dir: string
@@ -72,6 +80,7 @@ export interface AllNetworkData {
   reachability: FlowTrace[]
   search_route_policies: RoutePolicy[]
   aaa_authentication_login: AAAAuthenticationLogin[]
+  filter_line_reachability: FilterLineReachability[]
 }
 
 export interface ReachabilityRequest {

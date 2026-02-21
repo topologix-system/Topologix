@@ -29,6 +29,14 @@ export const logger = {
     : () => {},
 
   /**
+   * Info-level logging (alias for structured logging)
+   * Only active in development environment
+   */
+  info: isDevelopment
+    ? (...args: unknown[]) => console.info(...args)
+    : () => {},
+
+  /**
    * Warning-level logging for non-critical issues
    * Always active in all environments
    */

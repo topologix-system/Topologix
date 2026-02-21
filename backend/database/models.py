@@ -4,9 +4,12 @@ SQLAlchemy database models for authentication and authorization
 - Role model with hierarchical permissions
 - Many-to-many user-role association
 - Password reset tokens and login attempt tracking
+- Revoked JWT token persistence
 - SQLAlchemy 2.0 declarative base with type hints
 """
-from datetime import datetime, timezone
+import hashlib
+import secrets
+from datetime import datetime, timedelta, timezone
 from typing import List, Optional
 from sqlalchemy import String, Integer, Boolean, DateTime, ForeignKey, Table, Column, Index
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, relationship
@@ -342,8 +345,8 @@ class PasswordResetToken(Base):
         index=True
     )
 
-    # Secure random token (should be hashed in production, but using plain for simplicity)
-    token: Mapped[str] = mapped_column(String(255), unique=True, nullable=False, index=True)
+    # SHA-256 hash of the token (plaintext never stored)
+    token_hash: Mapped[str] = mapped_column(String(255), unique=True, nullable=False, index=True)
 
     # Expiration timestamp
     expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
@@ -366,10 +369,23 @@ class PasswordResetToken(Base):
 
     # Indexes for efficient queries
     __table_args__ = (
-        Index('idx_password_reset_token', 'token'),
+        Index('idx_password_reset_token_hash', 'token_hash'),
         Index('idx_password_reset_user_created', 'user_id', 'created_at'),
         Index('idx_password_reset_expires', 'expires_at'),
     )
+
+    @staticmethod
+    def hash_token(token: str) -> str:
+        return hashlib.sha256(token.encode()).hexdigest()
+
+    @classmethod
+    def create_for_user(cls, user_id: int, expiry_seconds: int = 3600):
+        token = secrets.token_urlsafe(32)
+        return cls(
+            user_id=user_id,
+            token_hash=cls.hash_token(token),
+            expires_at=datetime.now(timezone.utc) + timedelta(seconds=expiry_seconds)
+        ), token
 
     def is_valid(self) -> bool:
         """Check if token is still valid (not used and not expired)
@@ -392,3 +408,35 @@ class PasswordResetToken(Base):
 
     def __repr__(self) -> str:
         return f"<PasswordResetToken(id={self.id}, user_id={self.user_id}, expires_at={self.expires_at})>"
+
+
+class RevokedToken(Base):
+    """Revoked JWT tokens for persistent blacklist across restarts and workers"""
+    __tablename__ = 'revoked_tokens'
+
+    id: Mapped[int] = mapped_column(primary_key=True, autoincrement=True)
+    jti: Mapped[str] = mapped_column(String(255), unique=True, nullable=False, index=True)
+    revoked_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        default=lambda: datetime.now(timezone.utc),
+        nullable=False
+    )
+    expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+
+    __table_args__ = (
+        Index('idx_revoked_tokens_jti', 'jti'),
+        Index('idx_revoked_tokens_expires', 'expires_at'),
+    )
+
+    @classmethod
+    def cleanup_expired(cls, db) -> int:
+        """Remove expired revoked tokens from the database"""
+        from sqlalchemy import delete
+        now = datetime.now(timezone.utc)
+        stmt = delete(cls).where(cls.expires_at < now)
+        result = db.execute(stmt)
+        db.commit()
+        return result.rowcount
+
+    def __repr__(self) -> str:
+        return f"<RevokedToken(jti={self.jti}, expires_at={self.expires_at})>"

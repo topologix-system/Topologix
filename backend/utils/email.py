@@ -121,22 +121,22 @@ class SMTPEmailProvider(EmailProvider):
                 msg.attach(part_html)
 
             # Connect to SMTP server
-            if config.SMTP_USE_TLS:
-                server = smtplib.SMTP(config.SMTP_HOST, config.SMTP_PORT)
-                server.starttls()
-            else:
-                server = smtplib.SMTP(config.SMTP_HOST, config.SMTP_PORT)
+            server = smtplib.SMTP(config.SMTP_HOST, config.SMTP_PORT)
+            try:
+                if config.SMTP_USE_TLS:
+                    server.starttls()
 
-            # Login if credentials provided
-            if config.SMTP_USERNAME and config.SMTP_PASSWORD:
-                server.login(config.SMTP_USERNAME, config.SMTP_PASSWORD)
+                if config.SMTP_USERNAME and config.SMTP_PASSWORD:
+                    server.login(config.SMTP_USERNAME, config.SMTP_PASSWORD)
 
-            # Send email
-            server.send_message(msg)
-            server.quit()
-
-            logger.info(f"Email sent successfully to {to_email}")
-            return True
+                server.send_message(msg)
+                logger.info(f"Email sent successfully to {to_email}")
+                return True
+            finally:
+                try:
+                    server.quit()
+                except Exception:
+                    pass
 
         except Exception as e:
             logger.error(f"Failed to send email to {to_email}: {e}")

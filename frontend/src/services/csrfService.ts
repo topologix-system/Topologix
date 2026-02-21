@@ -13,8 +13,9 @@
 
 import { logger } from '../utils/logger';
 import axios from 'axios';
+import { runtimeConfig } from '../config/runtimeConfig';
 
-const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || '';
+const API_BASE_URL = runtimeConfig.apiBaseUrl || '';
 
 export class CSRFService {
   private static readonly COOKIE_NAME = 'csrf_token';
@@ -112,17 +113,9 @@ export class CSRFService {
     try {
       logger.info('[CSRFService] Refreshing CSRF token from server');
 
-      // Get access token for authorization
-      const accessToken = sessionStorage.getItem('access_token') || localStorage.getItem('access_token');
-      if (!accessToken) {
-        throw new Error('No access token available for CSRF token refresh');
-      }
-
+      // Auth via HTTP-only cookie (sent automatically with withCredentials)
       const response = await axios.get(`${API_BASE_URL}/api/auth/csrf-token`, {
-        headers: {
-          'Authorization': `Bearer ${accessToken}`
-        },
-        withCredentials: true  // Important for cookie handling
+        withCredentials: true
       });
 
       if (!response.data || !response.data.data || !response.data.data.csrf_token) {

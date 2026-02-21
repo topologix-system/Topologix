@@ -2,7 +2,7 @@
  * React Query hooks for configuration validation data
  * Provides file parse status, init issues, parse warnings, and conversion status
  */
-import { useQuery } from '@tanstack/react-query'
+import { useQuery, useMutation } from '@tanstack/react-query'
 import { validationAPI } from '../services/api'
 
 /**
@@ -145,5 +145,17 @@ export function useLoopbackMultipathConsistency(enabled = true) {
     queryFn: () => validationAPI.getLoopbackMultipathConsistency(),
     enabled,
     staleTime: 60000,
+  })
+}
+
+/**
+ * Mutation to check subnet-level multipath consistency
+ * Validates ECMP behavior per subnet (more granular than global check)
+ * User-triggered analysis with optional node filter
+ */
+export function useSubnetMultipathConsistency() {
+  return useMutation({
+    mutationFn: (request?: { node?: string }) =>
+      validationAPI.getSubnetMultipathConsistency(request),
   })
 }

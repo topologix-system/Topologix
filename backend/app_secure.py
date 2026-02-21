@@ -6,8 +6,14 @@ Secure Flask application with comprehensive authentication and security
 - Input validation and sanitization for all endpoints
 - Comprehensive network analysis REST API powered by Batfish (40+ endpoints)
 - Requires authentication for all API endpoints except health/config
+
+WARNING: This is a REFERENCE IMPLEMENTATION covering ~20% of endpoints (19 of 113).
+94 endpoints from app.py are missing. Use app.py for production deployments.
+To complete this file, port remaining endpoints from app.py with @require_auth,
+@require_role, sanitize_input(), and audit_log() applied to each handler.
 """
 import logging
+import logging.handlers
 import json
 from pathlib import Path
 from typing import Any
@@ -230,7 +236,9 @@ def logout():
         # Clear session
         session.clear()
 
-        response = success_response({}, "Logout successful")
+        from flask import make_response
+        response_body, status_code = success_response({}, "Logout successful")
+        response = make_response(response_body, status_code)
 
         # Clear cookies
         response.set_cookie('access_token', '', expires=0)

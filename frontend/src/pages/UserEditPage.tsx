@@ -6,7 +6,7 @@
  * - React Query mutations for optimistic updates with auto-navigation after success
  * - Cannot modify username (immutable) or superuser status
  */
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
 import { useParams, useNavigate, Link } from 'react-router-dom'
 import { useTranslation } from 'react-i18next'
 import { User, AlertCircle, CheckCircle, ArrowLeft } from 'lucide-react'
@@ -29,24 +29,19 @@ export function UserEditPage() {
   const [isActive, setIsActive] = useState(true)
   const [successMessage, setSuccessMessage] = useState('')
   const [isEditing, setIsEditing] = useState(false)
+  const [initialized, setInitialized] = useState(false)
 
-  /**
-   * Check if current user has admin role for access control
-   * Non-admin users will see access denied message
-   */
   const isAdmin = authAPI.hasRole('admin')
 
-  /**
-   * Initialize form fields from user data when component mounts
-   * Only runs once when user data first loads (checks empty state)
-   * Populates email, full name, roles, and active status
-   */
-  if (user && !isEditing && !email && !fullName) {
-    setEmail(user.email)
-    setFullName(user.full_name || '')
-    setSelectedRoles(user.roles)
-    setIsActive(user.is_active)
-  }
+  useEffect(() => {
+    if (user && !initialized) {
+      setEmail(user.email)
+      setFullName(user.full_name || '')
+      setSelectedRoles(user.roles)
+      setIsActive(user.is_active)
+      setInitialized(true)
+    }
+  }, [user, initialized])
 
   /**
    * Handle user update form submission
@@ -120,7 +115,7 @@ export function UserEditPage() {
   const errorMessage = updateUserMutation.error
     ? (updateUserMutation.error as any)?.response?.data?.message ||
       (updateUserMutation.error as any)?.message ||
-      'Update failed'
+      t('common.updateFailed')
     : null
 
   if (!isAdmin) {
@@ -129,9 +124,9 @@ export function UserEditPage() {
         <div className="bg-red-50 border border-red-200 rounded-lg p-4 flex items-start gap-2">
           <AlertCircle className="w-5 h-5 text-red-600 flex-shrink-0 mt-0.5" aria-hidden="true" />
           <div>
-            <p className="text-sm font-medium text-red-800">Access Denied</p>
+            <p className="text-sm font-medium text-red-800">{t('common.accessDenied')}</p>
             <p className="text-xs text-red-600 mt-1">
-              You need admin privileges to access this page.
+              {t('common.adminRequired')}
             </p>
           </div>
         </div>
@@ -152,7 +147,7 @@ export function UserEditPage() {
       <div className="flex items-center justify-center h-screen bg-gray-50">
         <div className="bg-red-50 border border-red-200 rounded-lg p-4 flex items-start gap-2">
           <AlertCircle className="w-5 h-5 text-red-600 flex-shrink-0 mt-0.5" aria-hidden="true" />
-          <p className="text-sm text-red-800">Failed to load user</p>
+          <p className="text-sm text-red-800">{t('users.failedToLoadUser')}</p>
         </div>
       </div>
     )
@@ -187,7 +182,7 @@ export function UserEditPage() {
               <p className="text-sm text-gray-600">
                 @{user.username}
                 {user.is_superuser && (
-                  <span className="ml-2 text-xs text-primary-600 font-medium">(Superuser)</span>
+                  <span className="ml-2 text-xs text-primary-600 font-medium">({t('users.superuser')})</span>
                 )}
               </p>
             </div>
@@ -230,7 +225,7 @@ export function UserEditPage() {
                 disabled
                 className="w-full px-3 py-2 border border-gray-300 rounded-lg bg-gray-50 text-gray-500 cursor-not-allowed"
               />
-              <p className="mt-1 text-xs text-gray-500">Username cannot be changed</p>
+              <p className="mt-1 text-xs text-gray-500">{t('users.usernameImmutable')}</p>
             </div>
 
             <div>

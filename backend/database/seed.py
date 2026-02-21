@@ -217,10 +217,11 @@ def seed_admin_user(
     # Generate random password if not provided
     if not admin_password:
         admin_password = secrets.token_urlsafe(16)
-        logger.warning(
-            f"No admin password provided - generated random password: {admin_password}\n"
-            f"IMPORTANT: Save this password! It will not be shown again."
-        )
+        logger.warning("No admin password provided - generated random password (printed to stdout)")
+        print(f"\n{'=' * 60}")
+        print(f"  GENERATED ADMIN PASSWORD (save securely):")
+        print(f"  {admin_password}")
+        print(f"{'=' * 60}\n")
 
     # Create admin user
     admin_user = User(

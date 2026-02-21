@@ -44,7 +44,7 @@ export function PasswordChangeForm({ userId }: PasswordChangeFormProps) {
     }
 
     if (newPassword.length < 12) {
-      setValidationError('Password must be at least 12 characters')
+      setValidationError(t('password.minLength'))
       return
     }
 
@@ -74,7 +74,7 @@ export function PasswordChangeForm({ userId }: PasswordChangeFormProps) {
   const errorMessage =
     validationError ||
     (changePasswordMutation.error
-      ? extractErrorMessage(changePasswordMutation.error, 'Password change failed')
+      ? extractErrorMessage(changePasswordMutation.error, t('password.changeFailed'))
       : null)
 
   return (

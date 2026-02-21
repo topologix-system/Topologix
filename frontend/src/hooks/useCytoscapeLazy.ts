@@ -68,7 +68,7 @@ export interface UseCytoscapeLazyReturn {
   isLoaded: boolean
   initialize: (container: HTMLElement, elements?: ElementDefinition[]) => Promise<Core | null>
   destroy: () => void
-  updateElements: (elements: ElementDefinition[]) => void
+  updateElements: (elements: ElementDefinition[], applyLayout?: boolean) => void
   applyLayout: (layoutName: LayoutName) => void
   fit: () => void
   center: () => void

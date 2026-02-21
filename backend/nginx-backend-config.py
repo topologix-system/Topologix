@@ -9,6 +9,8 @@ Nginx reverse proxy configuration helper for Flask applications
 - Logging configuration compatible with nginx logs
 - Gunicorn production server configuration
 """
+import os
+
 from flask import Flask
 from werkzeug.middleware.proxy_fix import ProxyFix
 
@@ -255,7 +257,7 @@ GUNICORN_CONFIG = {
     'max_requests': 1000,
     'max_requests_jitter': 50,
     'graceful_timeout': 30,
-    'forwarded_allow_ips': '*',  # Trust all proxies (be careful in production)
+    'forwarded_allow_ips': os.getenv('TRUSTED_PROXY_IPS', '127.0.0.1'),
     'secure_scheme_headers': {
         'X-FORWARDED-PROTO': 'https',
     },

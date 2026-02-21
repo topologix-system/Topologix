@@ -7,7 +7,7 @@
  * - Used in SecurityLogsPage for admin security audit tracking
  */
 import { CheckCircle, XCircle, Monitor, User, Calendar } from 'lucide-react'
-import { useTranslation } from 'react-i18next'
+import { useTranslation, type TFunction } from 'react-i18next'
 import type { SecurityLog } from '../types'
 import { TIMEZONE } from '../constants'
 import { logger } from '../utils/logger'
@@ -26,20 +26,21 @@ function parseAsUtc(timestamp: string): Date {
 }
 
 /**
- * Convert date to human-readable relative time string
+ * Convert date to human-readable relative time string using i18n
  * @param date - Date object to convert
- * @returns Relative time string (e.g., "5 minutes ago", "2 days ago")
+ * @param t - i18n translation function
+ * @returns Localized relative time string
  */
-function timeAgo(date: Date): string {
+function timeAgo(date: Date, t: TFunction): string {
   const now = new Date()
   const seconds = Math.floor((now.getTime() - date.getTime()) / 1000)
 
-  if (seconds < 60) return 'just now'
-  if (seconds < 3600) return `${Math.floor(seconds / 60)} minutes ago`
-  if (seconds < 86400) return `${Math.floor(seconds / 3600)} hours ago`
-  if (seconds < 2592000) return `${Math.floor(seconds / 86400)} days ago`
-  if (seconds < 31536000) return `${Math.floor(seconds / 2592000)} months ago`
-  return `${Math.floor(seconds / 31536000)} years ago`
+  if (seconds < 60) return t('time.justNow')
+  if (seconds < 3600) return t('time.minutesAgo', { count: Math.floor(seconds / 60) })
+  if (seconds < 86400) return t('time.hoursAgo', { count: Math.floor(seconds / 3600) })
+  if (seconds < 2592000) return t('time.daysAgo', { count: Math.floor(seconds / 86400) })
+  if (seconds < 31536000) return t('time.monthsAgo', { count: Math.floor(seconds / 2592000) })
+  return t('time.yearsAgo', { count: Math.floor(seconds / 31536000) })
 }
 
 /**
@@ -49,9 +50,9 @@ function timeAgo(date: Date): string {
  * @param timezone - IANA timezone identifier (e.g., "Asia/Tokyo")
  * @returns Formatted date string in "YYYY/MM/DD HH:mm:ss" format
  */
-function formatDateInTimezone(date: Date, timezone: string): string {
+function formatDateInTimezone(date: Date, timezone: string, locale: string): string {
   try {
-    return new Intl.DateTimeFormat('ja-JP', {
+    return new Intl.DateTimeFormat(locale, {
       timeZone: timezone,
       year: 'numeric',
       month: '2-digit',
@@ -73,7 +74,7 @@ interface SecurityLogTableProps {
 }
 
 export function SecurityLogTable({ logs, isLoading }: SecurityLogTableProps) {
-  const { t } = useTranslation()
+  const { t, i18n } = useTranslation()
 
   if (isLoading) {
     return (
@@ -148,10 +149,10 @@ export function SecurityLogTable({ logs, isLoading }: SecurityLogTableProps) {
                 <Calendar className="w-4 h-4 mr-2 text-gray-400" />
                 <div>
                   <div className="font-medium">
-                    {formatDateInTimezone(parseAsUtc(log.attempt_time), TIMEZONE)}
+                    {formatDateInTimezone(parseAsUtc(log.attempt_time), TIMEZONE, i18n.language)}
                   </div>
                   <div className="text-xs text-gray-500">
-                    {timeAgo(parseAsUtc(log.attempt_time))}
+                    {timeAgo(parseAsUtc(log.attempt_time), t)}
                   </div>
                 </div>
               </div>

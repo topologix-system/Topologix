@@ -30,6 +30,8 @@ MAX_TRACKED_IPS = 10000
 class RateLimiter:
     """Simple in-memory rate limiter for API endpoints"""
 
+    _SENTINEL = object()
+
     def __init__(self, app=None):
         """Initialize Rate Limiter
 
@@ -42,6 +44,9 @@ class RateLimiter:
         # Thread management for graceful shutdown
         self._shutdown_event = threading.Event()
         self._cleanup_thread: Optional[threading.Thread] = None
+
+        # Lock for thread-safe limit overrides
+        self._limits_lock = threading.RLock()
 
         # Default rate limits
         self.default_limits = {
@@ -168,25 +173,30 @@ class RateLimiter:
             def decorated_function(*args, **kwargs):
                 ip = self._get_client_ip()
                 endpoint = request.path
+                original_limits = self._SENTINEL
 
-                # Override limits if specified
-                if any([per_minute, per_hour, burst]):
-                    original_limits = self.endpoint_limits.get(endpoint)
-                    self.endpoint_limits[endpoint] = {
-                        'per_minute': per_minute or self.default_limits['per_minute'],
-                        'per_hour': per_hour or self.default_limits['per_hour'],
-                        'burst': burst or self.default_limits['burst']
-                    }
+                with self._limits_lock:
+                    try:
+                        if any([per_minute, per_hour, burst]):
+                            original_limits = self.endpoint_limits.get(endpoint, self._SENTINEL)
+                            self.endpoint_limits[endpoint] = {
+                                'per_minute': per_minute or self.default_limits['per_minute'],
+                                'per_hour': per_hour or self.default_limits['per_hour'],
+                                'burst': burst or self.default_limits['burst']
+                            }
 
-                # Check rate limit
-                is_limited, reason = self._is_rate_limited(ip, endpoint)
+                        is_limited, reason = self._is_rate_limited(ip, endpoint)
+                    finally:
+                        if original_limits is not self._SENTINEL:
+                            self.endpoint_limits[endpoint] = original_limits
+                        elif any([per_minute, per_hour, burst]):
+                            self.endpoint_limits.pop(endpoint, None)
 
                 if is_limited:
                     logger.warning(
                         f"Rate limit exceeded for {ip} on {endpoint}: {reason}"
                     )
 
-                    # Get retry time
                     retry_after = self._get_retry_after(ip, endpoint)
 
                     response = jsonify({
@@ -202,10 +212,6 @@ class RateLimiter:
                     )
 
                     return response
-
-                # Restore original limits if they were temporarily overridden
-                if any([per_minute, per_hour, burst]) and original_limits:
-                    self.endpoint_limits[endpoint] = original_limits
 
                 return f(*args, **kwargs)
 

@@ -13,7 +13,6 @@ import type { RegisterRequest, UpdateUserRequest, ChangePasswordRequest } from '
 export const userKeys = {
   all: ['users'] as const,
   lists: () => [...userKeys.all, 'list'] as const,
-  list: () => [...userKeys.all, 'list'] as const,
   details: () => [...userKeys.all, 'detail'] as const,
   detail: (id: number) => [...userKeys.details(), id] as const,
   me: () => [...userKeys.all, 'me'] as const,
@@ -27,7 +26,7 @@ export const userKeys = {
  */
 export function useUsers(enabled = true) {
   return useQuery({
-    queryKey: userKeys.list(),
+    queryKey: userKeys.lists(),
     queryFn: () => usersAPI.list(),
     enabled,
     staleTime: 30000, // 30 seconds
@@ -77,7 +76,7 @@ export function useRegister() {
     mutationFn: (data: RegisterRequest) => usersAPI.register(data),
     onSuccess: () => {
       // Invalidate users list (admin view)
-      queryClient.invalidateQueries({ queryKey: userKeys.list() })
+      queryClient.invalidateQueries({ queryKey: userKeys.lists() })
     },
   })
 }
@@ -98,7 +97,7 @@ export function useUpdateUser() {
       // Invalidate specific user detail
       queryClient.invalidateQueries({ queryKey: userKeys.detail(variables.id) })
       // Invalidate users list
-      queryClient.invalidateQueries({ queryKey: userKeys.list() })
+      queryClient.invalidateQueries({ queryKey: userKeys.lists() })
       // Invalidate current user if updating self
       queryClient.invalidateQueries({ queryKey: userKeys.me() })
     },
@@ -134,7 +133,7 @@ export function useDeleteUser() {
       // Remove specific user from cache
       queryClient.removeQueries({ queryKey: userKeys.detail(id) })
       // Invalidate users list
-      queryClient.invalidateQueries({ queryKey: userKeys.list() })
+      queryClient.invalidateQueries({ queryKey: userKeys.lists() })
     },
   })
 }
