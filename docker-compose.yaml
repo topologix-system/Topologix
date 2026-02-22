@@ -15,11 +15,11 @@ services:
       - topologix-network
     restart: unless-stopped
     healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:9996/"]
+      test: ["CMD-SHELL", "timeout 5 bash -c '</dev/tcp/localhost/9996' || exit 1"]
       interval: 30s
       timeout: 10s
       retries: 5
-      start_period: 60s
+      start_period: 120s
 
   # Backend API Service (Python + Flask)
   backend:
