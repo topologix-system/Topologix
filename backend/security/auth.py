@@ -6,10 +6,11 @@ JWT authentication and authorization
 - Password reset token generation and validation
 """
 import logging
+import secrets
+import time
 from datetime import datetime, timedelta, timezone
 from functools import wraps
 from typing import Optional, Dict, Any, List
-import secrets
 
 import jwt
 from flask import request, jsonify, current_app
@@ -20,7 +21,7 @@ logger = logging.getLogger(__name__)
 
 
 class TooManyAttemptsError(Exception):
-    """Raised when progressive delay threshold is reached instead of blocking the worker"""
+    """Rate limiting exception for login attempts (retained for app.py handler compatibility)"""
     def __init__(self, retry_after: int):
         self.retry_after = retry_after
         super().__init__(f"Too many attempts, retry after {retry_after}s")
@@ -374,23 +375,24 @@ class JWTManager:
         }
 
     def _apply_progressive_delay(self, attempt_count: int):
-        """Reject request instead of blocking the worker thread
+        """Apply progressive delay after repeated failed login attempts
 
-        Raises TooManyAttemptsError with retry_after value instead of sleeping.
-        The login route handler catches this and returns 429.
+        Sleeps for an exponentially increasing duration after PROGRESSIVE_DELAY_THRESHOLD
+        consecutive failures. Unlike the raise-based approach, sleeping allows the request
+        to proceed to password verification — so a correct password will succeed and reset
+        the counter.
 
         Args:
             attempt_count: Number of failed login attempts
-
-        Raises:
-            TooManyAttemptsError: with retry_after seconds
         """
-        if attempt_count <= 0:
+        threshold = 3
+        if attempt_count < threshold:
             return
 
-        base_delay = min(2 ** (attempt_count - 1), 30)
-        logger.info(f"Progressive delay triggered: {base_delay}s for attempt #{attempt_count}")
-        raise TooManyAttemptsError(retry_after=base_delay)
+        effective_count = attempt_count - threshold + 1
+        base_delay = min(2 ** (effective_count - 1), 30)
+        logger.info(f"Progressive delay: sleeping {base_delay}s for attempt #{attempt_count}")
+        time.sleep(base_delay)
 
     def _check_ip_rate_limit(self, ip_address: str) -> tuple[bool, int]:
         """Check if IP address is rate limited
@@ -482,7 +484,6 @@ class JWTManager:
         """
         from database.models import User
         from database.session import get_db
-        import time
 
         ip_address = get_client_ip()
 
@@ -498,10 +499,7 @@ class JWTManager:
                 # 2. Check if user exists
                 if not user:
                     logger.warning(f"Login attempt for non-existent user {username} from {ip_address}")
-                    # Record failed attempt for security monitoring
                     self._record_login_attempt(ip_address, username, False)
-                    # Apply progressive delay to prevent timing attacks (use 1 attempt as baseline)
-                    self._apply_progressive_delay(1)
                     return None
 
                 # 3. Check if account is locked
