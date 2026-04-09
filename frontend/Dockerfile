@@ -1,3 +1,4 @@
+# check=skip=SecretsUsedInArgOrEnv
 # Multi-stage build for production-ready frontend
 # Stage 1: Build the application
 # Fixed Node.js 20.11 and Alpine 3.19 to ensure build reproducibility
@@ -19,7 +20,7 @@ COPY . .
 # These will be embedded into the build at compile time
 # Default to empty string for environment-independent builds (uses nginx proxy)
 ARG VITE_API_BASE_URL=""
-ARG VITE_AUTH_ENABLED="true"
+ARG VITE_AUTH_ENABLED="false"
 ARG VITE_TIMEZONE="Asia/Tokyo"
 
 # Set as environment variables for Vite build process

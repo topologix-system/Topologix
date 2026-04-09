@@ -32,7 +32,7 @@ services:
       - BATFISH_HOST=${BATFISH_HOST:-batfish}
       - BATFISH_PORT=${BATFISH_PORT:-9996}
       - CORS_ORIGINS=${CORS_ORIGINS:-http://localhost:3000,http://127.0.0.1:3000}
-      - AUTH_ENABLED=${AUTH_ENABLED:-true}
+      - AUTH_ENABLED=${AUTH_ENABLED:-false}
       - AUTH_DEFAULT_ADMIN_USER=${AUTH_DEFAULT_ADMIN_USER:-admin}
       - AUTH_DEFAULT_ADMIN_PASS=${AUTH_DEFAULT_ADMIN_PASS}
       - ALLOW_REGISTRATION=${ALLOW_REGISTRATION:-true}
@@ -86,7 +86,7 @@ services:
       - "3000:80"
     environment:
       - VITE_API_BASE_URL=${VITE_API_BASE_URL:-}
-      - VITE_AUTH_ENABLED=${VITE_AUTH_ENABLED:-true}
+      - VITE_AUTH_ENABLED=${VITE_AUTH_ENABLED:-false}
       - VITE_TIMEZONE=${VITE_TIMEZONE:-Asia/Tokyo}
     networks:
       - topologix-network

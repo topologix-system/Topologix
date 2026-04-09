@@ -21,7 +21,7 @@ function getDefaultConfig(): RuntimeConfig {
 
   return {
     apiBaseUrl: import.meta.env.VITE_API_BASE_URL || '',
-    authEnabled: parseBool(import.meta.env.VITE_AUTH_ENABLED, true),
+    authEnabled: parseBool(import.meta.env.VITE_AUTH_ENABLED, false),
     timezone: import.meta.env.VITE_TIMEZONE || 'Asia/Tokyo',
   }
 }

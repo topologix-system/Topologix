@@ -49,7 +49,7 @@ services:
       - CORS_ORIGINS=${CORS_ORIGINS:-http://localhost:3000,http://127.0.0.1:3000}
 
       # Authentication (disabled by default for OSS distribution)
-      - AUTH_ENABLED=${AUTH_ENABLED:-true}
+      - AUTH_ENABLED=${AUTH_ENABLED:-false}
       - AUTH_DEFAULT_ADMIN_USER=${AUTH_DEFAULT_ADMIN_USER:-admin}
       - AUTH_DEFAULT_ADMIN_PASS=${AUTH_DEFAULT_ADMIN_PASS}
       # Allow user self-registration (set to 'false' for admin-only registration)
@@ -134,7 +134,7 @@ services:
     environment:
       - VITE_API_BASE_URL=${VITE_API_BASE_URL:-}
       # Authentication (must match backend AUTH_ENABLED)
-      - VITE_AUTH_ENABLED=${VITE_AUTH_ENABLED:-true}
+      - VITE_AUTH_ENABLED=${VITE_AUTH_ENABLED:-false}
       # Timezone for frontend timestamp display
       - VITE_TIMEZONE=${VITE_TIMEZONE:-Asia/Tokyo}
     networks:

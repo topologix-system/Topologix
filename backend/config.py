@@ -36,8 +36,8 @@ class Config:
     HOST: str = os.getenv('HOST', '0.0.0.0')
     PORT: int = int(os.getenv('PORT', '5000'))
 
-    # Authentication - Optional (enabled by default for security)
-    AUTH_ENABLED: bool = os.getenv('AUTH_ENABLED', 'true').lower() == 'true'
+    # Authentication - Optional (disabled by default for OSS distribution)
+    AUTH_ENABLED: bool = os.getenv('AUTH_ENABLED', 'false').lower() == 'true'
     AUTH_DEFAULT_ADMIN_USER: str = os.getenv('AUTH_DEFAULT_ADMIN_USER', 'admin')
     AUTH_DEFAULT_ADMIN_PASS: str = os.getenv('AUTH_DEFAULT_ADMIN_PASS', '')  # Empty requires initial setup
     AUTH_FORCE_PASSWORD_CHANGE: bool = True  # Force password change on first login

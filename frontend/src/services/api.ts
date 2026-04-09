@@ -215,14 +215,13 @@ apiClient.interceptors.response.use(
 
         if (message.includes('csrf')) {
           try {
-            logger.warn('[API] CSRF validation failed, refreshing token')
+            logger.warn('[API] CSRF validation failed, force-refreshing token')
 
-            // ASYNC TOKEN RETRIEVAL: Use async getToken() which includes refresh logic
-            const newCsrfToken = await CSRFService.getToken()
+            const newCsrfToken = await CSRFService.forceRefresh()
 
             if (originalRequest.headers) {
               originalRequest.headers['X-CSRF-Token'] = newCsrfToken
-              logger.info('[API] CSRF token refreshed (async), retrying request')
+              logger.info('[API] CSRF token force-refreshed, retrying request')
               return apiClient(originalRequest)
             } else {
               logger.error('[API] Request headers not available for retry')
@@ -254,6 +253,26 @@ apiClient.interceptors.response.use(
     return Promise.reject(error)
   }
 )
+
+if (!AUTH_ENABLED) {
+  apiClient.interceptors.response.use(
+    (response) => response,
+    (error: AxiosError) => {
+      if (error.response?.status === 403) {
+        const errorData = error.response.data as { message?: string; error?: string } | undefined
+        const message = (errorData?.message || errorData?.error || '').toLowerCase()
+        if (message.includes('csrf')) {
+          logger.error(
+            '[API] Received CSRF 403 while AUTH_ENABLED=false. ' +
+            'The backend may have AUTH_ENABLED=true. ' +
+            'Check that frontend and backend AUTH_ENABLED values match.'
+          )
+        }
+      }
+      return Promise.reject(error)
+    }
+  )
+}
 
 /**
  * Authentication and authorization API methods
@@ -380,7 +399,7 @@ export const authAPI = {
  */
 export const networkAPI = {
   async health() {
-    const response = await apiClient.get<APIResponse<{ service: string; status: string }>>('/health')
+    const response = await apiClient.get<APIResponse<{ service: string; status: string; auth_enabled: boolean }>>('/health')
     return response.data.data
   },
 

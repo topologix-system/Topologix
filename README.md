@@ -41,8 +41,8 @@ On first startup, Topologix automatically initializes the database and creates D
 Open http://localhost:3000 in your browser.
 
 **First-time setup:**
-- If `AUTH_ENABLED=true` (default): You'll see a setup wizard to create admin account
-- If `AUTH_ENABLED=false`: Direct access to the topology viewer
+- If `AUTH_ENABLED=false` (default): Direct access to the topology viewer
+- If `AUTH_ENABLED=true`: You'll see a setup wizard to create admin account
 
 **Additional endpoints:**
 - **Backend API**: http://localhost:5000/api
@@ -72,7 +72,7 @@ Configure Topologix by editing `.env`. See [.env.example](.env.example) for comp
 
 | Variable | Description | Default |
 |----------|-------------|---------|
-| `AUTH_ENABLED` | Enable JWT authentication | `true` |
+| `AUTH_ENABLED` | Enable JWT authentication | `false` |
 | `AUTH_DEFAULT_ADMIN_USER` | Default admin username | `admin` |
 | `AUTH_DEFAULT_ADMIN_PASS` | Default admin password | _(empty)_ |
 | `JWT_SECRET_KEY` | JWT secret (auto-generated if empty) | _(empty)_ |
@@ -105,7 +105,7 @@ Supported databases:
 | Variable | Description | Default |
 |----------|-------------|---------|
 | `VITE_API_BASE_URL` | Backend API URL | `http://localhost:5000` |
-| `VITE_AUTH_ENABLED` | Enable authentication (must match backend) | `true` |
+| `VITE_AUTH_ENABLED` | Enable authentication (must match backend) | `false` |
 | `VITE_TIMEZONE` | Display timezone (IANA format) | `Asia/Tokyo` |
 
 ### Quick Configuration Examples

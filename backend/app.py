@@ -1,6 +1,6 @@
 """
 Flask application entry point with authentication
-- Configurable auth via AUTH_ENABLED env var (enabled by default for security)
+- Configurable auth via AUTH_ENABLED env var (disabled by default for OSS distribution)
 - Set AUTH_ENABLED=false for development or evaluation environments
 - Comprehensive network analysis REST API powered by Batfish
 - CORS, compression, rate limiting, and security headers for production

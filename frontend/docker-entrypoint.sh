@@ -9,7 +9,7 @@ escape_json() {
 API_BASE_URL_ESC=$(escape_json "${VITE_API_BASE_URL:-}")
 TIMEZONE_ESC=$(escape_json "${VITE_TIMEZONE:-Asia/Tokyo}")
 
-AUTH_FLAG=${VITE_AUTH_ENABLED:-true}
+AUTH_FLAG=${VITE_AUTH_ENABLED:-false}
 AUTH_NORMALIZED=$(printf '%s' "$AUTH_FLAG" | tr '[:upper:]' '[:lower:]')
 case "$AUTH_NORMALIZED" in
   true|1|yes)
@@ -19,7 +19,8 @@ case "$AUTH_NORMALIZED" in
     AUTH_VALUE=false
     ;;
   *)
-    AUTH_VALUE=true
+    echo "[Topologix] WARNING: Unrecognized VITE_AUTH_ENABLED value '${AUTH_FLAG}', defaulting to false" >&2
+    AUTH_VALUE=false
     ;;
 esac
 

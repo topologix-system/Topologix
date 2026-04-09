@@ -115,7 +115,11 @@ export class CSRFService {
 
       // Auth via HTTP-only cookie (sent automatically with withCredentials)
       const response = await axios.get(`${API_BASE_URL}/api/auth/csrf-token`, {
-        withCredentials: true
+        withCredentials: true,
+        headers: {
+          'Cache-Control': 'no-cache, no-store, must-revalidate',
+          'Pragma': 'no-cache',
+        },
       });
 
       if (!response.data || !response.data.data || !response.data.data.csrf_token) {
@@ -236,6 +240,33 @@ export class CSRFService {
    */
   static hasTokenAvailable(): boolean {
     return !!this.memoryToken || this.hasValidToken();
+  }
+
+  /**
+   * Force-refresh CSRF token from server, bypassing memory and cookie cache.
+   * Use after a CSRF 403 to ensure a stale cached token is not reused.
+   *
+   * @returns Promise resolving to fresh CSRF token
+   * @throws Error if token refresh fails
+   */
+  static async forceRefresh(retryCount = 0): Promise<string> {
+    const MAX_RETRIES = 2;
+    this.memoryToken = null;
+    logger.info('[CSRFService] Force-refreshing token (cache cleared)');
+    try {
+      const newToken = await this.refreshToken();
+      this.memoryToken = newToken;
+      return newToken;
+    } catch (error) {
+      if (retryCount < MAX_RETRIES) {
+        logger.warn(`[CSRFService] Force-refresh failed (attempt ${retryCount + 1}/${MAX_RETRIES}), retrying...`);
+        const backoffMs = 100 * Math.pow(2, retryCount);
+        await new Promise(resolve => setTimeout(resolve, backoffMs));
+        return this.forceRefresh(retryCount + 1);
+      }
+      logger.error(`[CSRFService] Force-refresh failed after ${MAX_RETRIES} retries`);
+      throw new Error(`Failed to force-refresh CSRF token after ${MAX_RETRIES} retries: ${error}`);
+    }
   }
 
   /**
