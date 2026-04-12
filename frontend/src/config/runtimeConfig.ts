@@ -8,6 +8,7 @@ export interface RuntimeConfig {
   apiBaseUrl: string
   authEnabled: boolean
   timezone: string
+  useHashRouter: boolean
 }
 
 function getDefaultConfig(): RuntimeConfig {
@@ -23,6 +24,7 @@ function getDefaultConfig(): RuntimeConfig {
     apiBaseUrl: import.meta.env.VITE_API_BASE_URL || '',
     authEnabled: parseBool(import.meta.env.VITE_AUTH_ENABLED, false),
     timezone: import.meta.env.VITE_TIMEZONE || 'Asia/Tokyo',
+    useHashRouter: parseBool(import.meta.env.VITE_USE_HASH_ROUTER, false),
   }
 }
 
@@ -40,5 +42,7 @@ export const runtimeConfig: RuntimeConfig = ((): RuntimeConfig => {
     authEnabled:
       typeof overrides.authEnabled === 'boolean' ? overrides.authEnabled : defaults.authEnabled,
     timezone: overrides.timezone ?? defaults.timezone,
+    useHashRouter:
+      typeof overrides.useHashRouter === 'boolean' ? overrides.useHashRouter : defaults.useHashRouter,
   }
 })()

@@ -4,8 +4,9 @@
  */
 import React, { Suspense, lazy } from 'react'
 import ReactDOM from 'react-dom/client'
-import { createBrowserRouter, RouterProvider } from 'react-router-dom'
+import { createBrowserRouter, createHashRouter, RouterProvider } from 'react-router-dom'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
+import { runtimeConfig } from './config/runtimeConfig'
 import './index.css'
 
 // Lazy load components for code splitting
@@ -61,7 +62,8 @@ const RouteLoadingFallback = () => (
 )
 
 // Create router with lazy loaded components
-const router = createBrowserRouter([
+const RouterFactory = runtimeConfig.useHashRouter ? createHashRouter : createBrowserRouter
+const router = RouterFactory([
   {
     path: '/login',
     element: (
