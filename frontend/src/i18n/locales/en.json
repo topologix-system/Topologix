@@ -148,6 +148,7 @@
       "bgpRoutingTable": "BGP Routing Table",
       "unreachableFilters": "Unreachable Filter Lines on This Node",
       "unreachableFiltersOther": "Unreachable Filter Lines on Other Nodes",
+      "vlanInterfaces": "VLAN Interfaces",
       "vlanProperties": "VLAN Properties",
       "vlanEdges": "VLAN Edges",
       "namedStructures": "Named Structures",
@@ -227,12 +228,30 @@
     "acl": {
       "unreachable": "Unreachable",
       "noData": "No ACL/filter analysis data available",
+      "noHealthData": "No ACL health data available",
       "summary": "Filter Analysis: {{count}} unreachable lines across {{nodeCount}} nodes",
+      "detailsSummary": "{{filterCount}} ACL groups with {{lineCount}} normalized lines",
       "currentNodeFilters": "Current Node Filters",
       "otherNodeFilters": "Other Nodes' Filters",
       "filterCount": "{{filterCount}} filters, {{lineCount}} unreachable lines",
+      "lineCount": "{{count}} lines",
       "appliedTo": "Applied To",
       "notApplied": "Not applied to any interface",
+      "views": {
+        "details": "ACL Details",
+        "health": "ACL Health"
+      },
+      "sections": {
+        "definitions": "ACL Definitions",
+        "namedAccessLists": "Named Access Lists",
+        "securityRules": "Security Rules",
+        "derivedFilters": "Derived Filters"
+      },
+      "kinds": {
+        "namedAccessList": "Named ACL",
+        "securityRule": "Security Rule",
+        "derivedFilter": "Derived Filter"
+      },
       "direction": {
         "inbound": "Inbound",
         "outbound": "Outbound"
@@ -243,7 +262,10 @@
       "noAddresses": "No IP addresses found in rule",
       "unknownSource": "Unknown filter source",
       "blockedBy": "Blocked By",
+      "detailsSearchPlaceholder": "Search by ACL name, interface, action, rule, or source line...",
       "searchPlaceholder": "Search by node or filter name...",
+      "noDetailsData": "No ACL definition data available",
+      "noDetailsSearchResults": "No ACL definitions match the search criteria",
       "noSearchResults": "No filters matching search criteria",
       "collapsePreview": "{{count}} unreachable ({{deny}} DENY, {{permit}} PERMIT)",
       "severity": {
@@ -255,9 +277,11 @@
       "fields": {
         "line": "Line",
         "action": "Action",
+        "rule": "Rule",
         "reason": "Reason",
         "blockedByLines": "Blocked by lines",
         "sources": "Sources",
+        "sourceLines": "Source Lines",
         "destinations": "Destinations",
         "node": "Node",
         "zone": "Zone",
@@ -271,8 +295,11 @@
       }
     },
     "vlan": {
+      "searchPlaceholder": "Search by interface, mode, VLAN, native VLAN, allowed VLANs, or encapsulation VLAN...",
+      "noSearchResults": "No VLAN interfaces match the search criteria",
       "fields": {
         "vlanPrefix": "VLAN",
+        "encapsulationVlan": "Encapsulation VLAN",
         "vni": "VNI",
         "interfaces": "Interfaces",
         "interfaceVlans": "Interface VLANs"

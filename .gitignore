@@ -10,6 +10,8 @@ backend/.env
 # Claude Code個人設定
 .claude/*
 ai/*
+.codex
+codex-docs/*
 
 # 認証情報・証明書
 backend/security/*.key

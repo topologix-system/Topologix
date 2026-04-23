@@ -33,7 +33,7 @@ import type { SwitchedVlanProperties } from '../../types/vlan'
 import type { IPOwner } from '../../types/ip'
 import type { DefinedStructure, ReferencedStructure, NamedStructure } from '../../types/structures'
 import type { FileParseStatus, InitIssue, ParseWarning } from '../../types/validation'
-import type { FilterLineReachability, FilterApplication, AddressOwnership, EnrichedFilterEntry, FilterGroup } from '../../types/reachability'
+import type { FilterLineReachability, FilterApplication, AddressOwnership, EnrichedFilterEntry } from '../../types/reachability'
 import type { AAAAuthenticationLogin } from '../../types/policy'
 import type { BGPEdge, EIGRPEdge, ISISEdge, VXLANEdge } from '../../types/edges'
 import type { AllNetworkData } from '../../types/api'
@@ -44,10 +44,7 @@ import {
   Activity,
   Router,
   AlertCircle,
-  Globe,
   Cpu,
-  Database,
-  Lock,
   GitBranch,
   Filter,
   Layers,
@@ -122,14 +119,14 @@ export const NodeDetailsPanel = memo(function NodeDetailsPanel() {
   const nodeOspfInterfaces = useMemo(() => {
     if (!selectedNodeId || !data?.ospf_interface_configuration) return []
     return data.ospf_interface_configuration.filter(
-      (i) => i.node === selectedNodeId
+      (i) => i.interface?.startsWith(`${selectedNodeId}[`)
     )
   }, [data?.ospf_interface_configuration, selectedNodeId])
 
   const nodeOspfSessions = useMemo(() => {
     if (!selectedNodeId || !data?.ospf_session_compatibility) return []
     return data.ospf_session_compatibility.filter(
-      (s) => s.node === selectedNodeId
+      (s) => s.interface?.startsWith(`${selectedNodeId}[`)
     )
   }, [data?.ospf_session_compatibility, selectedNodeId])
 
@@ -139,13 +136,6 @@ export const NodeDetailsPanel = memo(function NodeDetailsPanel() {
       (a) => a.node === selectedNodeId
     )
   }, [data?.aaa_authentication_login, selectedNodeId])
-
-  const nodeVlans = useMemo(() => {
-    if (!selectedNodeId || !data?.switched_vlan_properties) return []
-    return data.switched_vlan_properties.filter(
-      (v) => v.node === selectedNodeId
-    )
-  }, [data?.switched_vlan_properties, selectedNodeId])
 
   const nodeIpOwners = useMemo(() => {
     if (!selectedNodeId || !data?.ip_owners) return []
@@ -266,18 +256,18 @@ export const NodeDetailsPanel = memo(function NodeDetailsPanel() {
   const tabs = [
     { id: 'basic', label: t('nodeDetails.tabs.basic'), icon: <Cpu className="w-4 h-4" /> },
     { id: 'interfaces', label: t('common.interfaces'), icon: <Network className="w-4 h-4" /> },
+    { id: 'vlan', label: t('nodeDetails.tabs.vlan'), icon: <Layers className="w-4 h-4" /> },
     { id: 'routing', label: t('nodeDetails.tabs.routing'), icon: <Router className="w-4 h-4" /> },
     { id: 'ospf', label: t('nodeDetails.tabs.ospf'), icon: <Activity className="w-4 h-4" /> },
-    { id: 'services', label: t('nodeDetails.tabs.services'), icon: <Server className="w-4 h-4" /> },
-    { id: 'security', label: t('nodeDetails.tabs.security'), icon: <Shield className="w-4 h-4" /> },
-    { id: 'validation', label: t('validation.title'), icon: <AlertCircle className="w-4 h-4" /> },
     { id: 'bgp', label: t('nodeDetails.tabs.bgp'), icon: <GitBranch className="w-4 h-4" /> },
-    { id: 'acl', label: t('nodeDetails.tabs.acl'), icon: <Filter className="w-4 h-4" /> },
-    { id: 'vlan', label: t('nodeDetails.tabs.vlan'), icon: <Layers className="w-4 h-4" /> },
-    { id: 'config', label: t('nodeDetails.tabs.configuration'), icon: <FileText className="w-4 h-4" /> },
     { id: 'eigrp', label: t('nodeDetails.tabs.eigrp'), icon: <Share2 className="w-4 h-4" /> },
     { id: 'isis', label: t('nodeDetails.tabs.isis'), icon: <Circle className="w-4 h-4" /> },
     { id: 'vxlan', label: t('nodeDetails.tabs.vxlan'), icon: <Cloud className="w-4 h-4" /> },
+    { id: 'services', label: t('nodeDetails.tabs.services'), icon: <Server className="w-4 h-4" /> },
+    { id: 'security', label: t('nodeDetails.tabs.security'), icon: <Shield className="w-4 h-4" /> },
+    { id: 'acl', label: t('nodeDetails.tabs.acl'), icon: <Filter className="w-4 h-4" /> },
+    { id: 'config', label: t('nodeDetails.tabs.configuration'), icon: <FileText className="w-4 h-4" /> },
+    { id: 'validation', label: t('validation.title'), icon: <AlertCircle className="w-4 h-4" /> },
   ]
 
   return (
@@ -321,6 +311,13 @@ export const NodeDetailsPanel = memo(function NodeDetailsPanel() {
       >
         {activeTab === 'basic' && <BasicTab node={node} />}
         {activeTab === 'interfaces' && <InterfacesTab node={node} interfaces={nodeInterfaces} />}
+        {activeTab === 'vlan' && (
+          <VlanTab
+            node={node}
+            interfaces={nodeInterfaces}
+            vlans={nodeSwitchedVlanProperties}
+          />
+        )}
         {activeTab === 'routing' && <RoutingTab routes={nodeRoutes} />}
         {activeTab === 'ospf' && (
           <OspfTab
@@ -330,12 +327,8 @@ export const NodeDetailsPanel = memo(function NodeDetailsPanel() {
             sessions={nodeOspfSessions}
           />
         )}
-        {activeTab === 'services' && <ServicesTab node={node} aaa={nodeAaaAuth} />}
-        {activeTab === 'security' && <SecurityTab node={node} ipOwners={nodeIpOwners} />}
-        {activeTab === 'validation' && <ValidationTab node={node} data={data} />}
         {activeTab === 'bgp' && (
           <BgpTab
-            node={node}
             edges={nodeBgpData.edges}
             peerConfig={nodeBgpData.peerConfig}
             processConfig={nodeBgpData.processConfig}
@@ -344,46 +337,42 @@ export const NodeDetailsPanel = memo(function NodeDetailsPanel() {
             rib={nodeBgpData.rib}
           />
         )}
-        {activeTab === 'acl' && (
-          <AclTab
-            node={node}
-            filterReachability={allFilterReachability}
-            allInterfaces={data?.interface_properties || []}
-            allIpOwners={data?.ip_owners || []}
-          />
-        )}
-        {activeTab === 'vlan' && (
-          <VlanTab
-            node={node}
-            vlans={nodeSwitchedVlanProperties}
-          />
-        )}
-        {activeTab === 'config' && (
-          <ConfigurationTab
-            node={node}
-            definedStructures={nodeDefinedStructures}
-            referencedStructures={nodeReferencedStructures}
-            namedStructures={nodeNamedStructures}
-          />
-        )}
         {activeTab === 'eigrp' && (
           <EigrpTab
-            node={node}
             edges={nodeEigrpEdges}
           />
         )}
         {activeTab === 'isis' && (
           <IsisTab
-            node={node}
             edges={nodeIsisEdges}
           />
         )}
         {activeTab === 'vxlan' && (
           <VxlanTab
-            node={node}
             edges={nodeVxlanEdges}
           />
         )}
+        {activeTab === 'services' && <ServicesTab node={node} aaa={nodeAaaAuth} />}
+        {activeTab === 'security' && <SecurityTab node={node} ipOwners={nodeIpOwners} />}
+        {activeTab === 'acl' && (
+          <AclTab
+            node={node}
+            filterReachability={allFilterReachability}
+            nodeInterfaces={nodeInterfaces}
+            allInterfaces={data?.interface_properties || []}
+            allIpOwners={data?.ip_owners || []}
+            namedStructures={nodeNamedStructures}
+            definedStructures={nodeDefinedStructures}
+          />
+        )}
+        {activeTab === 'config' && (
+          <ConfigurationTab
+            definedStructures={nodeDefinedStructures}
+            referencedStructures={nodeReferencedStructures}
+            namedStructures={nodeNamedStructures}
+          />
+        )}
+        {activeTab === 'validation' && <ValidationTab node={node} data={data} />}
       </div>
     </div>
   )
@@ -1183,8 +1172,7 @@ function ValidationTab({ node, data }: { node: NodeProperties; data: AllNetworkD
 }
 
 // BGP Tab
-function BgpTab({ node, edges, peerConfig, processConfig, sessionStatus, sessionCompat, rib }: {
-  node: NodeProperties
+function BgpTab({ edges, peerConfig, processConfig, sessionStatus, sessionCompat, rib }: {
   edges: BGPEdge[]
   peerConfig: BGPPeerConfiguration[]
   processConfig: BGPProcessConfiguration[]
@@ -1236,12 +1224,6 @@ function BgpTab({ node, edges, peerConfig, processConfig, sessionStatus, session
                       <span className="text-gray-700">{t('nodeDetails.fields.routerId')}:</span>
                       <p className="font-medium">{proc.router_id || t('common.notAvailable')}</p>
                     </div>
-                    {proc.local_as && (
-                      <div>
-                        <span className="text-gray-700">{t('nodeDetails.fields.localAs')}:</span>
-                        <p className="font-medium">{proc.local_as}</p>
-                      </div>
-                    )}
                     {proc.confederation_id && (
                       <div>
                         <span className="text-gray-700">{t('nodeDetails.fields.confederationId')}:</span>
@@ -1288,7 +1270,7 @@ function BgpTab({ node, edges, peerConfig, processConfig, sessionStatus, session
                     </div>
                     <div>
                       <span className="text-gray-700">{t('nodeDetails.fields.remoteAs')}:</span>
-                      <p className="font-medium">{edge.remote_as || t('common.notAvailable')}</p>
+                      <p className="font-medium">{edge.remote_asn || t('common.notAvailable')}</p>
                     </div>
                     <div>
                       <span className="text-gray-700">{t('nodeDetails.fields.localIp')}:</span>
@@ -1300,11 +1282,11 @@ function BgpTab({ node, edges, peerConfig, processConfig, sessionStatus, session
                     </div>
                     <div>
                       <span className="text-gray-700">{t('nodeDetails.fields.localInterface')}:</span>
-                      <p className="font-medium">{edge.local_interface || t('common.notAvailable')}</p>
+                      <p className="font-medium">{edge.interface || t('common.notAvailable')}</p>
                     </div>
                     <div>
-                      <span className="text-gray-700">{t('nodeDetails.fields.vrf')}:</span>
-                      <p className="font-medium">{edge.vrf || t('common.default')}</p>
+                      <span className="text-gray-700">{t('nodeDetails.fields.localAs')}:</span>
+                      <p className="font-medium">{edge.local_asn || t('common.notAvailable')}</p>
                     </div>
                   </div>
                 </div>
@@ -1334,7 +1316,7 @@ function BgpTab({ node, edges, peerConfig, processConfig, sessionStatus, session
                   <div className="grid grid-cols-2 gap-2">
                     <div>
                       <span className="text-gray-700">{t('nodeDetails.fields.peerAddress')}:</span>
-                      <p className="font-medium">{peer.peer_address || t('common.notAvailable')}</p>
+                      <p className="font-medium">{peer.remote_ip || t('common.notAvailable')}</p>
                     </div>
                     <div>
                       <span className="text-gray-700">{t('nodeDetails.fields.remoteAs')}:</span>
@@ -1364,13 +1346,13 @@ function BgpTab({ node, edges, peerConfig, processConfig, sessionStatus, session
                   {peer.import_policy && (
                     <div className="mt-2">
                       <span className="text-gray-700">{t('nodeDetails.fields.importPolicy')}:</span>
-                      <p className="text-xs text-gray-600">{peer.import_policy}</p>
+                      <p className="text-xs text-gray-600">{peer.import_policy.join(', ') || t('common.notAvailable')}</p>
                     </div>
                   )}
                   {peer.export_policy && (
                     <div className="mt-1">
                       <span className="text-gray-700">{t('nodeDetails.fields.exportPolicy')}:</span>
-                      <p className="text-xs text-gray-600">{peer.export_policy}</p>
+                      <p className="text-xs text-gray-600">{peer.export_policy.join(', ') || t('common.notAvailable')}</p>
                     </div>
                   )}
                 </div>
@@ -1395,18 +1377,20 @@ function BgpTab({ node, edges, peerConfig, processConfig, sessionStatus, session
 
           {expandedSection === 'status' && (
             <div className="space-y-2">
-              {sessionStatus.map((session, index) => (
+              {sessionStatus.map((session, index) => {
+                const isEstablished = session.established_status === 'ESTABLISHED'
+                return (
                 <div key={index} className="bg-white p-3 rounded text-sm border border-gray-200">
                   <div className="flex items-center justify-between mb-2">
                     <span className="font-medium text-gray-900">
                       {session.remote_ip || session.remote_node || t('common.unknown')}
                     </span>
                     <span className={`px-2 py-0.5 rounded text-xs font-medium ${
-                      session.established
+                      isEstablished
                         ? 'bg-green-100 text-green-800'
                         : 'bg-red-100 text-red-800'
                     }`}>
-                      {session.established ? t('common.status.established') : t('common.status.down')}
+                      {isEstablished ? t('common.status.established') : t('common.status.down')}
                     </span>
                   </div>
                   <div className="grid grid-cols-2 gap-2 text-xs">
@@ -1417,7 +1401,8 @@ function BgpTab({ node, edges, peerConfig, processConfig, sessionStatus, session
                     <div className="text-gray-700">{t('nodeDetails.fields.vrf')}: {session.vrf || t('common.default')}</div>
                   </div>
                 </div>
-              ))}
+                )
+              })}
             </div>
           )}
         </div>
@@ -1438,40 +1423,30 @@ function BgpTab({ node, edges, peerConfig, processConfig, sessionStatus, session
 
           {expandedSection === 'compat' && (
             <div className="space-y-2">
-              {sessionCompat.map((compat, index) => (
+              {sessionCompat.map((compat, index) => {
+                const isCompatible = compat.configured_status === 'UNIQUE_MATCH'
+                return (
                 <div key={index} className="bg-white p-3 rounded text-sm border border-gray-200">
                   <div className="flex items-center justify-between mb-2">
                     <span className="font-medium text-gray-900">
                       {compat.remote_node || compat.remote_ip || t('common.unknown')}
                     </span>
                     <span className={`px-2 py-0.5 rounded text-xs font-medium ${
-                      compat.compatible || compat.configured_status === 'UNIQUE_MATCH'
+                      isCompatible
                         ? 'bg-green-100 text-green-800'
                         : 'bg-yellow-100 text-yellow-800'
                     }`}>
-                      {compat.configured_status || (compat.compatible ? t('nodeDetails.bgp.status.compatible') : t('nodeDetails.bgp.status.checkConfig'))}
+                      {compat.configured_status || (isCompatible ? t('nodeDetails.bgp.status.compatible') : t('nodeDetails.bgp.status.checkConfig'))}
                     </span>
                   </div>
                   <div className="grid grid-cols-2 gap-2 text-xs text-gray-700">
                     <div>{t('nodeDetails.fields.localIp')}: {compat.local_ip || t('common.notAvailable')}</div>
                     <div>{t('nodeDetails.fields.remoteIp')}: {compat.remote_ip || t('common.notAvailable')}</div>
                     <div>{t('nodeDetails.fields.vrf')}: {compat.vrf || t('common.default')}</div>
-                    {compat.remote_interface && (
-                      <div>{t('nodeDetails.fields.remoteInterface')}: {compat.remote_interface}</div>
-                    )}
                   </div>
-                  {compat.issues && compat.issues.length > 0 && (
-                    <div className="mt-2 text-xs">
-                      <span className="text-red-600 font-medium">{t('nodeDetails.fields.issues')}:</span>
-                      <ul className="ml-4 list-disc text-red-600">
-                        {compat.issues.map((issue: string, i: number) => (
-                          <li key={i}>{issue}</li>
-                        ))}
-                      </ul>
-                    </div>
-                  )}
                 </div>
-              ))}
+                )
+              })}
             </div>
           )}
         </div>
@@ -1499,7 +1474,6 @@ function BgpTab({ node, edges, peerConfig, processConfig, sessionStatus, session
                     <th className="text-left py-1 px-2 text-gray-700">{t('nodeDetails.fields.nextHop')}</th>
                     <th className="text-left py-1 px-2 text-gray-700">{t('nodeDetails.fields.protocol')}</th>
                     <th className="text-left py-1 px-2 text-gray-700">{t('nodeDetails.fields.origin')}</th>
-                    <th className="text-left py-1 px-2 text-gray-700">{t('nodeDetails.fields.best')}</th>
                   </tr>
                 </thead>
                 <tbody>
@@ -1509,11 +1483,6 @@ function BgpTab({ node, edges, peerConfig, processConfig, sessionStatus, session
                       <td className="py-1 px-2 text-gray-700">{route.next_hop_ip || t('common.notAvailable')}</td>
                       <td className="py-1 px-2 text-gray-700">{route.protocol || t('common.protocol.bgp')}</td>
                       <td className="py-1 px-2 text-gray-700">{route.origin_type || t('common.notAvailable')}</td>
-                      <td className="py-1 px-2">
-                        {route.best_path && (
-                          <span className="text-xs bg-blue-100 text-blue-800 px-1 rounded">{t('nodeDetails.fields.best')}</span>
-                        )}
-                      </td>
                     </tr>
                   ))}
                 </tbody>
@@ -1670,17 +1639,287 @@ function aclGroupId(node: string, filterName: string, index: number): string {
   return `acl-group-${toSafeId(node)}-${toSafeId(filterName)}-${index}`
 }
 
+type AclViewMode = 'details' | 'health'
+type AclDefinitionKind = 'namedAccessList'
+
+interface AclDefinitionLine {
+  id: string
+  action: string
+  raw_text: string
+  summary: string
+  source_refs: string[]
+}
+
+interface AclDefinitionGroup {
+  id: string
+  filter_name: string
+  kind: AclDefinitionKind
+  applied_to: FilterApplication[]
+  lines: AclDefinitionLine[]
+}
+
+type EnrichedHealthFilterEntry = EnrichedFilterEntry & { source_refs: string[] }
+
+interface HealthFilterGroup {
+  filter_name: string
+  node: string
+  applied_to: FilterApplication[]
+  severity: 'low' | 'high'
+  action_breakdown: { deny: number; permit: number; other: number }
+  entries: EnrichedHealthFilterEntry[]
+}
+
+interface AclMatchAccumulator {
+  srcIps: Set<string>
+  dstIps: Set<string>
+  protocols: Set<string>
+  srcPorts: Set<string>
+  dstPorts: Set<string>
+  srcInterfaces: Set<string>
+}
+
+function isAclNamedStructure(structure: NamedStructure): boolean {
+  return structure.structure_type.toUpperCase() === 'IP_ACCESS_LIST'
+}
+
+function isAclLineStructure(structureType: string): boolean {
+  return structureType.toLowerCase().includes('access-list line')
+}
+
+function collectStringValues(target: Set<string>, value: unknown) {
+  if (value == null) return
+  if (Array.isArray(value)) {
+    value.forEach((item) => collectStringValues(target, item))
+    return
+  }
+  target.add(String(value))
+}
+
+function extractIpSpaceValue(value: unknown): string | null {
+  if (!value || typeof value !== 'object') return typeof value === 'string' ? value : null
+
+  const candidate = value as Record<string, unknown>
+  if (typeof candidate.ipWildcard === 'string') return candidate.ipWildcard
+  if (typeof candidate.prefix === 'string') return candidate.prefix
+  if (typeof candidate.ip === 'string') return candidate.ip
+  if (candidate.class === 'org.batfish.datamodel.UniverseIpSpace') return 'any'
+  return null
+}
+
+function collectAclMatchData(value: unknown, accumulator: AclMatchAccumulator) {
+  if (!value) return
+
+  if (Array.isArray(value)) {
+    value.forEach((entry) => collectAclMatchData(entry, accumulator))
+    return
+  }
+
+  if (typeof value !== 'object') return
+  const candidate = value as Record<string, any>
+  const className = typeof candidate.class === 'string' ? candidate.class : ''
+
+  if (className.includes('MatchHeaderSpace') && candidate.headerSpace) {
+    const headerSpace = candidate.headerSpace as Record<string, unknown>
+    const srcIps = extractIpSpaceValue(headerSpace.srcIps)
+    const dstIps = extractIpSpaceValue(headerSpace.dstIps)
+
+    if (srcIps) accumulator.srcIps.add(srcIps)
+    if (dstIps) accumulator.dstIps.add(dstIps)
+    collectStringValues(accumulator.protocols, headerSpace.ipProtocols)
+    collectStringValues(accumulator.srcPorts, headerSpace.srcPorts)
+    collectStringValues(accumulator.dstPorts, headerSpace.dstPorts)
+  }
+
+  if (className.includes('MatchDestinationPort')) {
+    collectStringValues(accumulator.dstPorts, candidate.ports)
+  }
+
+  if (className.includes('MatchSourcePort')) {
+    collectStringValues(accumulator.srcPorts, candidate.ports)
+  }
+
+  if (className.includes('MatchSrcInterface')) {
+    collectStringValues(accumulator.srcInterfaces, candidate.srcInterfaces)
+  }
+
+  if (candidate.matchCondition) {
+    collectAclMatchData(candidate.matchCondition, accumulator)
+  }
+
+  if (candidate.conjuncts) {
+    collectAclMatchData(candidate.conjuncts, accumulator)
+  }
+
+  if (candidate.disjuncts) {
+    collectAclMatchData(candidate.disjuncts, accumulator)
+  }
+}
+
+function formatAclMatchSummary(line: Record<string, any>): string {
+  const accumulator: AclMatchAccumulator = {
+    srcIps: new Set<string>(),
+    dstIps: new Set<string>(),
+    protocols: new Set<string>(),
+    srcPorts: new Set<string>(),
+    dstPorts: new Set<string>(),
+    srcInterfaces: new Set<string>(),
+  }
+
+  collectAclMatchData(line.matchCondition, accumulator)
+
+  const src = accumulator.srcIps.size > 0 ? Array.from(accumulator.srcIps).join(', ') : 'any'
+  const dst = accumulator.dstIps.size > 0 ? Array.from(accumulator.dstIps).join(', ') : 'any'
+  const protocols = accumulator.protocols.size > 0 ? Array.from(accumulator.protocols).join(', ') : ''
+  const srcPorts = accumulator.srcPorts.size > 0 ? `sport ${Array.from(accumulator.srcPorts).join(', ')}` : ''
+  const dstPorts = accumulator.dstPorts.size > 0 ? `dport ${Array.from(accumulator.dstPorts).join(', ')}` : ''
+  const srcInterfaces = accumulator.srcInterfaces.size > 0 ? `src-if ${Array.from(accumulator.srcInterfaces).join(', ')}` : ''
+
+  const parts = [`${src} -> ${dst}`]
+  if (protocols) parts.push(protocols)
+  if (srcPorts) parts.push(srcPorts)
+  if (dstPorts) parts.push(dstPorts)
+  if (srcInterfaces) parts.push(srcInterfaces)
+
+  return parts.join(' | ')
+}
+
+function extractVendorStructureId(line: Record<string, any>): { filename: string; structureName: string; structureType: string } {
+  const directVendor = line.vendorStructureId as Record<string, unknown> | undefined
+  if (directVendor) {
+    return {
+      filename: typeof directVendor.filename === 'string' ? directVendor.filename : '',
+      structureName: typeof directVendor.structureName === 'string' ? directVendor.structureName : '',
+      structureType: typeof directVendor.structureType === 'string' ? directVendor.structureType : '',
+    }
+  }
+
+  const fragments = line.traceElement?.fragments
+  if (Array.isArray(fragments)) {
+    for (const fragment of fragments) {
+      const vendor = fragment?.vendorStructureId as Record<string, unknown> | undefined
+      if (vendor) {
+        return {
+          filename: typeof vendor.filename === 'string' ? vendor.filename : '',
+          structureName: typeof vendor.structureName === 'string' ? vendor.structureName : '',
+          structureType: typeof vendor.structureType === 'string' ? vendor.structureType : '',
+        }
+      }
+    }
+  }
+
+  return { filename: '', structureName: '', structureType: '' }
+}
+
+function extractAclRuleText(line: Record<string, any>): string {
+  if (typeof line.name === 'string' && line.name.trim()) {
+    return line.name.trim()
+  }
+
+  const vendor = extractVendorStructureId(line)
+  if (vendor.structureName.includes(':')) {
+    return vendor.structureName.split(':').slice(1).join(':').trim()
+  }
+
+  return vendor.structureName || ''
+}
+
+function getSourceFilename(sourceRef: string): string {
+  const separatorIndex = sourceRef.indexOf(':')
+  return separatorIndex >= 0 ? sourceRef.slice(0, separatorIndex) : sourceRef
+}
+
+function getIndexedSourceRefs(
+  index: Map<string, Map<string, string[]>>,
+  structureName: string,
+  options?: { filename?: string; nodeName?: string }
+): string[] {
+  const groupedRefs = index.get(structureName)
+  if (!groupedRefs) return []
+
+  const exactFilename = options?.filename
+  if (exactFilename) {
+    const exactRefs = groupedRefs.get(exactFilename)
+    if (exactRefs && exactRefs.length > 0) {
+      return exactRefs
+    }
+  }
+
+  const allRefs = Array.from(groupedRefs.values()).flat()
+  if (!options?.nodeName) return allRefs
+
+  const normalizedNodeName = options.nodeName.toLowerCase()
+  const nodeScopedRefs = allRefs.filter((sourceRef) =>
+    getSourceFilename(sourceRef).toLowerCase().includes(normalizedNodeName)
+  )
+
+  return nodeScopedRefs.length > 0 ? nodeScopedRefs : allRefs
+}
+
+function getFilterApplications(filterName: string, interfaces: InterfaceProperties[]): FilterApplication[] {
+  const applications: FilterApplication[] = []
+
+  for (const iface of interfaces) {
+    if (iface.incoming_filter_name === filterName) {
+      applications.push({
+        interface_name: iface.interface,
+        direction: 'inbound',
+        zone: iface.zone || null,
+        primary_address: iface.primary_address || null,
+      })
+    }
+
+    if (iface.outgoing_filter_name === filterName) {
+      applications.push({
+        interface_name: iface.interface,
+        direction: 'outbound',
+        zone: iface.zone || null,
+        primary_address: iface.primary_address || null,
+      })
+    }
+  }
+
+  return applications
+}
+
+function formatSourceRefs(sourceRefs: string[]): string {
+  if (sourceRefs.length === 0) return ''
+  return sourceRefs.join(', ')
+}
+
+function hasVlanData(iface: InterfaceProperties): boolean {
+  return Boolean(
+    iface.switchport ||
+    iface.switchport_mode ||
+    iface.access_vlan != null ||
+    iface.native_vlan != null ||
+    iface.vlan != null ||
+    iface.encapsulation_vlan != null ||
+    (Array.isArray(iface.allowed_vlans) ? iface.allowed_vlans.length > 0 : iface.allowed_vlans)
+  )
+}
+
+function formatInterfaceValue(value: unknown): string {
+  if (value == null || value === '') return ''
+  if (Array.isArray(value)) return value.join(', ')
+  return String(value)
+}
+
 // ACL/Filters Tab
-function AclTab({ node, filterReachability, allInterfaces, allIpOwners }: {
+function AclTab({ node, filterReachability, nodeInterfaces, allInterfaces, allIpOwners, namedStructures, definedStructures }: {
   node: NodeProperties
   filterReachability: FilterLineReachability[]
+  nodeInterfaces: InterfaceProperties[]
   allInterfaces: InterfaceProperties[]
   allIpOwners: IPOwner[]
+  namedStructures: NamedStructure[]
+  definedStructures: DefinedStructure[]
 }) {
   const { t } = useTranslation()
-  const setSelectedNodeId = useUIStore((s) => s.setSelectedNodeId)
+  const setSelectedNode = useUIStore((s) => s.setSelectedNode)
+  const [activeView, setActiveView] = useState<AclViewMode>('details')
   const [expandedGroups, setExpandedGroups] = useState<Set<string>>(new Set())
-  const [searchQuery, setSearchQuery] = useState('')
+  const [detailsSearchQuery, setDetailsSearchQuery] = useState('')
+  const [healthSearchQuery, setHealthSearchQuery] = useState('')
 
   const toggleGroup = useCallback((gid: string) => {
     setExpandedGroups((prev) => {
@@ -1691,7 +1930,25 @@ function AclTab({ node, filterReachability, allInterfaces, allIpOwners }: {
     })
   }, [])
 
-  // Step 0: Pre-indexed lookup structures
+  const aclLineSourceIndex = useMemo(() => {
+    const map = new Map<string, Map<string, string[]>>()
+    for (const structure of definedStructures) {
+      if (!isAclLineStructure(structure.structure_type)) continue
+      const sourceLines = structure.source_lines || []
+      const groupedRefs = map.get(structure.structure_name) || new Map<string, string[]>()
+
+      for (const sourceLine of sourceLines) {
+        const filename = getSourceFilename(sourceLine)
+        const refs = groupedRefs.get(filename) || []
+        refs.push(sourceLine)
+        groupedRefs.set(filename, refs)
+      }
+
+      map.set(structure.structure_name, groupedRefs)
+    }
+    return map
+  }, [definedStructures])
+
   const interfacesByHost = useMemo(() => {
     const map = new Map<string, InterfaceProperties[]>()
     for (const iface of allInterfaces) {
@@ -1719,33 +1976,86 @@ function AclTab({ node, filterReachability, allInterfaces, allIpOwners }: {
     return { exactMap, cidrEntries }
   }, [allIpOwners])
 
-  // Step 1-3: Enrichment
-  const enrichedFilters = useMemo((): EnrichedFilterEntry[] => {
+  const aclDefinitionGroups = useMemo((): AclDefinitionGroup[] => {
+    return namedStructures
+      .filter(isAclNamedStructure)
+      .map((structure) => {
+        const lines = Array.isArray(structure.structure_definition?.lines)
+          ? structure.structure_definition.lines
+          : []
+        const kind: AclDefinitionKind = 'namedAccessList'
+        const applications = getFilterApplications(structure.structure_name, nodeInterfaces)
+        const normalizedLines = lines.map((line, index) => {
+          const rawText = extractAclRuleText(line)
+          const summary = formatAclMatchSummary(line)
+          const vendor = extractVendorStructureId(line)
+          const sourceRefs = vendor.structureName
+            ? getIndexedSourceRefs(aclLineSourceIndex, vendor.structureName, {
+                filename: vendor.filename,
+                nodeName: node.node,
+              })
+            : (vendor.filename ? [vendor.filename] : [])
+
+          return {
+            id: `${structure.structure_name}-${vendor.structureName || rawText || index}`,
+            action: String(line.action || '').toUpperCase(),
+            raw_text: rawText,
+            summary,
+            source_refs: sourceRefs,
+          }
+        })
+
+        return {
+          id: `acl-definition-${toSafeId(structure.structure_name)}`,
+          filter_name: structure.structure_name,
+          kind,
+          applied_to: applications,
+          lines: normalizedLines,
+        }
+      })
+      .filter((group) => group.lines.length > 0)
+      .sort((left, right) => left.filter_name.localeCompare(right.filter_name))
+  }, [aclLineSourceIndex, namedStructures, node.node, nodeInterfaces])
+
+  const filteredAclDefinitionGroups = useMemo(() => {
+    if (!detailsSearchQuery.trim()) return aclDefinitionGroups
+    const query = detailsSearchQuery.toLowerCase()
+
+    return aclDefinitionGroups.filter((group) => {
+      const groupMatch = group.filter_name.toLowerCase().includes(query)
+        || group.applied_to.some((application) => (
+          application.interface_name.toLowerCase().includes(query)
+          || application.direction.toLowerCase().includes(query)
+        ))
+
+      if (groupMatch) return true
+
+      return group.lines.some((line) => (
+        line.action.toLowerCase().includes(query)
+        || line.raw_text.toLowerCase().includes(query)
+        || line.summary.toLowerCase().includes(query)
+        || line.source_refs.some((sourceRef) => sourceRef.toLowerCase().includes(query))
+      ))
+    })
+  }, [aclDefinitionGroups, detailsSearchQuery])
+
+  const totalDefinitionLines = useMemo(() => (
+    aclDefinitionGroups.reduce((sum, group) => sum + group.lines.length, 0)
+  ), [aclDefinitionGroups])
+
+  const enrichedFilters = useMemo((): EnrichedHealthFilterEntry[] => {
     if (!filterReachability.length) return []
     return filterReachability.map((filter) => {
       const { node: nodeName, filterName } = parseNodeFilter(filter)
-      const appliedTo: FilterApplication[] = []
       const hostInterfaces = interfacesByHost.get(nodeName) || []
-      for (const iface of hostInterfaces) {
-        if (iface.incoming_filter_name === filterName) {
-          appliedTo.push({
-            interface_name: iface.interface,
-            direction: 'inbound',
-            zone: iface.zone || null,
-            primary_address: iface.primary_address || null,
-          })
-        }
-        if (iface.outgoing_filter_name === filterName) {
-          appliedTo.push({
-            interface_name: iface.interface,
-            direction: 'outbound',
-            zone: iface.zone || null,
-            primary_address: iface.primary_address || null,
-          })
-        }
-      }
+      const appliedTo = getFilterApplications(filterName, hostInterfaces)
       const referencedAddresses = extractAddresses(filter.unreachable_line, filter.blocking_lines)
       const addressOwners = findAddressOwners(referencedAddresses, ipOwnerIndex)
+      const sourceRefs = getIndexedSourceRefs(
+        aclLineSourceIndex,
+        `${filterName}: ${filter.unreachable_line}`,
+        { nodeName }
+      )
       return {
         ...filter,
         node: nodeName,
@@ -1753,15 +2063,15 @@ function AclTab({ node, filterReachability, allInterfaces, allIpOwners }: {
         applied_to: appliedTo,
         referenced_addresses: referencedAddresses,
         address_owners: addressOwners,
+        source_refs: sourceRefs,
       }
     })
-  }, [filterReachability, interfacesByHost, ipOwnerIndex])
+  }, [aclLineSourceIndex, filterReachability, interfacesByHost, ipOwnerIndex])
 
-  // Grouping
   const { currentNodeGroups, otherNodeGroups, totalNodes } = useMemo(() => {
-    const currentGroups: FilterGroup[] = []
-    const otherGroups: FilterGroup[] = []
-    const groupMap = new Map<string, EnrichedFilterEntry[]>()
+    const currentGroups: HealthFilterGroup[] = []
+    const otherGroups: HealthFilterGroup[] = []
+    const groupMap = new Map<string, EnrichedHealthFilterEntry[]>()
     const nodeSet = new Set<string>()
 
     let unknownIdx = 0
@@ -1780,13 +2090,12 @@ function AclTab({ node, filterReachability, allInterfaces, allIpOwners }: {
     }
 
     for (const [, entries] of groupMap) {
-      // Use actual entry values (not the grouping key, which may be synthetic for unknown entries)
       const nodeName = entries[0]?.node || ''
       const filterName = entries[0]?.filter || ''
       const deny = entries.filter((e) => e.action?.toUpperCase() === 'DENY').length
       const permit = entries.filter((e) => e.action?.toUpperCase() === 'PERMIT').length
       const other = entries.length - deny - permit
-      const group: FilterGroup = {
+      const group: HealthFilterGroup = {
         filter_name: filterName || t('nodeDetails.acl.defaults.unnamedFilter'),
         node: nodeName,
         applied_to: entries[0]?.applied_to || [],
@@ -1804,18 +2113,16 @@ function AclTab({ node, filterReachability, allInterfaces, allIpOwners }: {
     return { currentNodeGroups: currentGroups, otherNodeGroups: otherGroups, totalNodes: nodeSet.size }
   }, [enrichedFilters, node.node, t])
 
-  // Search filter for other nodes
   const filteredOtherGroups = useMemo(() => {
-    if (!searchQuery.trim()) return otherNodeGroups
-    const q = searchQuery.toLowerCase()
+    if (!healthSearchQuery.trim()) return otherNodeGroups
+    const q = healthSearchQuery.toLowerCase()
     return otherNodeGroups.filter(
       (g) => g.node.toLowerCase().includes(q) || g.filter_name.toLowerCase().includes(q)
     )
-  }, [otherNodeGroups, searchQuery])
+  }, [healthSearchQuery, otherNodeGroups])
 
-  // Group other node groups by node name
   const otherNodeGroupsByNode = useMemo(() => {
-    const map = new Map<string, FilterGroup[]>()
+    const map = new Map<string, HealthFilterGroup[]>()
     for (const g of filteredOtherGroups) {
       const list = map.get(g.node) || []
       list.push(g)
@@ -1827,7 +2134,6 @@ function AclTab({ node, filterReachability, allInterfaces, allIpOwners }: {
   const totalCurrentLines = currentNodeGroups.reduce((sum, g) => sum + g.entries.length, 0)
   const totalOtherLines = otherNodeGroups.reduce((sum, g) => sum + g.entries.length, 0)
 
-  // Render helpers
   const renderActionBadge = (action: string) => {
     const upper = action?.toUpperCase() || ''
     if (upper === 'DENY') return <span className="text-red-600 font-semibold">{upper}</span>
@@ -1866,7 +2172,7 @@ function AclTab({ node, filterReachability, allInterfaces, allIpOwners }: {
     )
   }
 
-  const renderAddressOwners = (entry: EnrichedFilterEntry) => {
+  const renderAddressOwners = (entry: EnrichedHealthFilterEntry) => {
     if (entry.referenced_addresses.length === 0) {
       return <p className="text-xs text-gray-400 italic">{t('nodeDetails.acl.noAddresses')}</p>
     }
@@ -1896,7 +2202,7 @@ function AclTab({ node, filterReachability, allInterfaces, allIpOwners }: {
                 {oi === 0 && <td className="font-mono py-1 pr-2" rowSpan={owners.length}>{addr}</td>}
                 <td className="py-1 pr-2">
                   <button
-                    onClick={() => setSelectedNodeId(owner.owner_node)}
+                    onClick={() => setSelectedNode(owner.owner_node)}
                     className="text-primary-600 hover:underline text-xs focus:outline-none focus:ring-2 focus:ring-primary-500 focus:ring-offset-1 rounded"
                     aria-label={t('nodeDetails.acl.navigateToNode', { node: owner.owner_node })}
                   >
@@ -1916,7 +2222,7 @@ function AclTab({ node, filterReachability, allInterfaces, allIpOwners }: {
     )
   }
 
-  const renderEntryCard = (entry: EnrichedFilterEntry, idx: number, borderColor: string) => (
+  const renderEntryCard = (entry: EnrichedHealthFilterEntry, idx: number, borderColor: string) => (
     <div key={idx} className={`bg-white p-4 rounded-lg text-sm border-l-4 ${borderColor} shadow-sm border border-gray-200`}>
       <div className="flex items-center gap-2 mb-2">
         {entry.line != null && (
@@ -1964,10 +2270,19 @@ function AclTab({ node, filterReachability, allInterfaces, allIpOwners }: {
           <p className="text-xs text-gray-600">{entry.reason}</p>
         </div>
       )}
+
+      {entry.source_refs.length > 0 && (
+        <div className="mt-3 pt-3 border-t border-gray-100">
+          <h5 className="text-xs font-semibold text-gray-500 uppercase tracking-wide mb-1">
+            {t('nodeDetails.acl.fields.sourceLines')}
+          </h5>
+          <p className="text-xs font-mono text-gray-600 break-all">{formatSourceRefs(entry.source_refs)}</p>
+        </div>
+      )}
     </div>
   )
 
-  const renderFilterGroup = (group: FilterGroup, idx: number, borderColor: string) => {
+  const renderFilterGroup = (group: HealthFilterGroup, idx: number, borderColor: string) => {
     const gid = aclGroupId(group.node, group.filter_name, idx)
     return (
       <div key={gid}>
@@ -2033,150 +2348,369 @@ function AclTab({ node, filterReachability, allInterfaces, allIpOwners }: {
     )
   }
 
-  if (filterReachability.length === 0) {
+  const renderDefinitionSection = (title: string, groups: AclDefinitionGroup[]) => {
+    if (groups.length === 0) return null
+
     return (
-      <div className="space-y-4">
-        <p className="text-sm text-gray-700">{t('nodeDetails.acl.noData')}</p>
+      <div className="space-y-3">
+        <h3 className="font-medium text-gray-900">{title}</h3>
+        {groups.map((group) => (
+          <div key={group.id} className="bg-white rounded-lg border border-gray-200 shadow-sm">
+            <div className="px-4 py-3 border-b border-gray-200">
+              <div className="flex flex-wrap items-start justify-between gap-3">
+                <div>
+                  <div className="flex items-center gap-2 flex-wrap">
+                    <h4 className="font-medium text-gray-900">{group.filter_name}</h4>
+                    <span className="px-2 py-0.5 rounded-full text-xs font-medium bg-gray-100 text-gray-700">
+                      {t(`nodeDetails.acl.kinds.${group.kind}`)}
+                    </span>
+                    <span className="text-xs text-gray-500">
+                      {t('nodeDetails.acl.lineCount', { count: group.lines.length })}
+                    </span>
+                  </div>
+                  <div className="mt-2">
+                    {renderAppliedTo(group.applied_to)}
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            <div className="overflow-x-auto">
+              <table className="min-w-full text-sm">
+                <thead className="bg-gray-50">
+                  <tr className="text-left text-xs font-semibold uppercase tracking-wide text-gray-500">
+                    <th className="px-4 py-2">{t('nodeDetails.acl.fields.action')}</th>
+                    <th className="px-4 py-2">{t('nodeDetails.acl.fields.rule')}</th>
+                    <th className="px-4 py-2">{t('nodeDetails.acl.fields.sourceLines')}</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-gray-200">
+                  {group.lines.map((line) => (
+                    <tr key={line.id} className="align-top">
+                      <td className="px-4 py-3">{renderActionBadge(line.action)}</td>
+                      <td className="px-4 py-3">
+                        <div className="font-mono text-xs text-gray-900 break-all">
+                          {line.raw_text || t('common.notAvailable')}
+                        </div>
+                        {line.summary && line.summary !== line.raw_text && (
+                          <div className="mt-1 text-xs text-gray-500">
+                            {line.summary}
+                          </div>
+                        )}
+                      </td>
+                      <td className="px-4 py-3 text-xs font-mono text-gray-600 break-all">
+                        {line.source_refs.length > 0 ? formatSourceRefs(line.source_refs) : t('common.notAvailable')}
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          </div>
+        ))}
       </div>
     )
   }
 
   return (
     <div className="space-y-4">
-      {/* Summary Bar */}
-      <div className="bg-gray-100 rounded-lg px-4 py-3 text-sm text-gray-700" role="status">
-        {t('nodeDetails.acl.summary', { count: filterReachability.length, nodeCount: totalNodes })}
+      <div className="inline-flex rounded-lg bg-gray-100 p-1">
+        <button
+          type="button"
+          onClick={() => setActiveView('details')}
+          className={`rounded-md px-3 py-1.5 text-sm font-medium transition-colors ${
+            activeView === 'details'
+              ? 'bg-white text-gray-900 shadow-sm'
+              : 'text-gray-600 hover:text-gray-900'
+          }`}
+        >
+          {t('nodeDetails.acl.views.details')} ({aclDefinitionGroups.length}/{totalDefinitionLines})
+        </button>
+        <button
+          type="button"
+          onClick={() => setActiveView('health')}
+          className={`rounded-md px-3 py-1.5 text-sm font-medium transition-colors ${
+            activeView === 'health'
+              ? 'bg-white text-gray-900 shadow-sm'
+              : 'text-gray-600 hover:text-gray-900'
+          }`}
+        >
+          {t('nodeDetails.acl.views.health')} ({filterReachability.length})
+        </button>
       </div>
 
-      {/* Current Node Filters */}
-      {currentNodeGroups.length > 0 && (
-        <div className="bg-white rounded-lg">
-          <h3 className="font-medium text-gray-900 px-4 pt-4 pb-2">
-            {t('nodeDetails.acl.currentNodeFilters')} ({t('nodeDetails.acl.filterCount', {
-              filterCount: currentNodeGroups.length,
-              lineCount: totalCurrentLines,
-            })})
-          </h3>
-          <div className="space-y-1">
-            {currentNodeGroups.map((group, idx) => renderFilterGroup(group, idx, 'border-red-400'))}
+      {activeView === 'details' && (
+        <>
+          <div className="bg-gray-100 rounded-lg px-4 py-3 text-sm text-gray-700" role="status">
+            {t('nodeDetails.acl.detailsSummary', {
+              filterCount: aclDefinitionGroups.length,
+              lineCount: totalDefinitionLines,
+            })}
           </div>
-        </div>
-      )}
 
-      {/* Other Nodes' Filters */}
-      {otherNodeGroups.length > 0 && (
-        <div className="bg-gray-50 rounded-lg">
-          <h3 className="font-medium text-gray-900 px-4 pt-4 pb-2">
-            {t('nodeDetails.acl.otherNodeFilters')} ({t('nodeDetails.acl.filterCount', {
-              filterCount: otherNodeGroups.length,
-              lineCount: totalOtherLines,
-            })})
-          </h3>
-
-          <div className="px-4 pb-3">
+          <div className="bg-gray-50 rounded-lg p-4">
             <div className="relative">
               <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400" aria-hidden="true" />
               <input
                 type="text"
-                value={searchQuery}
-                onChange={(e) => setSearchQuery(e.target.value)}
-                placeholder={t('nodeDetails.acl.searchPlaceholder')}
-                aria-label={t('nodeDetails.acl.searchPlaceholder')}
+                value={detailsSearchQuery}
+                onChange={(e) => setDetailsSearchQuery(e.target.value)}
+                placeholder={t('nodeDetails.acl.detailsSearchPlaceholder')}
+                aria-label={t('nodeDetails.acl.detailsSearchPlaceholder')}
                 className="w-full pl-9 pr-3 py-2 text-sm border border-gray-300 rounded-md
                            focus:outline-none focus:ring-2 focus:ring-primary-600"
               />
             </div>
           </div>
 
-          {filteredOtherGroups.length === 0 && searchQuery.trim() && (
-            <p className="text-xs text-gray-400 italic px-4 pb-4">{t('nodeDetails.acl.noSearchResults')}</p>
+          {aclDefinitionGroups.length === 0 && (
+            <p className="text-sm text-gray-700">{t('nodeDetails.acl.noDetailsData')}</p>
           )}
 
-          <div className="space-y-1 max-h-[600px] overflow-y-auto">
-            {Array.from(otherNodeGroupsByNode.entries()).map(([nodeName, groups], nodeIdx) => {
-              const nodeGid = `acl-node-${nodeName ? toSafeId(nodeName) : `unknown-${nodeIdx}`}`
-              const displayName = nodeName || t('nodeDetails.acl.unknownSource')
-              return (
-                <div key={nodeGid}>
-                  <button
-                    id={`${nodeGid}-button`}
-                    onClick={() => toggleGroup(nodeGid)}
-                    aria-expanded={expandedGroups.has(nodeGid)}
-                    aria-controls={`${nodeGid}-content`}
-                    className="w-full flex items-center gap-2 p-3 hover:bg-gray-100 transition-colors
-                               focus:outline-none focus:ring-2 focus:ring-primary-600 focus:ring-inset rounded-lg font-medium text-gray-900"
-                  >
-                    {expandedGroups.has(nodeGid)
-                      ? <ChevronDown className="w-4 h-4 text-gray-500" aria-hidden="true" />
-                      : <ChevronRight className="w-4 h-4 text-gray-500" aria-hidden="true" />}
-                    <span className={!nodeName ? 'text-gray-400 italic' : ''}>{displayName}</span>
-                    <span className="text-xs text-gray-500 font-normal">
-                      ({t('nodeDetails.acl.filterCount', {
-                        filterCount: groups.length,
-                        lineCount: groups.reduce((s, g) => s + g.entries.length, 0),
-                      })})
-                    </span>
-                  </button>
+          {aclDefinitionGroups.length > 0 && filteredAclDefinitionGroups.length === 0 && detailsSearchQuery.trim() && (
+            <p className="text-sm text-gray-700">{t('nodeDetails.acl.noDetailsSearchResults')}</p>
+          )}
 
-                  {expandedGroups.has(nodeGid) && (
-                    <div
-                      id={`${nodeGid}-content`}
-                      role="region"
-                      aria-labelledby={`${nodeGid}-button`}
-                      className="pl-4"
-                    >
-                      {groups.map((group, idx) => renderFilterGroup(group, idx, 'border-yellow-400'))}
-                    </div>
-                  )}
+          {filteredAclDefinitionGroups.length > 0 && (
+            <div className="space-y-5">
+              {renderDefinitionSection(
+                t('nodeDetails.acl.sections.definitions'),
+                filteredAclDefinitionGroups
+              )}
+            </div>
+          )}
+        </>
+      )}
+
+      {activeView === 'health' && (
+        <>
+          {filterReachability.length === 0 && (
+            <p className="text-sm text-gray-700">{t('nodeDetails.acl.noHealthData')}</p>
+          )}
+
+          {filterReachability.length > 0 && (
+            <>
+              <div className="bg-gray-100 rounded-lg px-4 py-3 text-sm text-gray-700" role="status">
+                {t('nodeDetails.acl.summary', { count: filterReachability.length, nodeCount: totalNodes })}
+              </div>
+
+              {currentNodeGroups.length > 0 && (
+                <div className="bg-white rounded-lg">
+                  <h3 className="font-medium text-gray-900 px-4 pt-4 pb-2">
+                    {t('nodeDetails.acl.currentNodeFilters')} ({t('nodeDetails.acl.filterCount', {
+                      filterCount: currentNodeGroups.length,
+                      lineCount: totalCurrentLines,
+                    })})
+                  </h3>
+                  <div className="space-y-1">
+                    {currentNodeGroups.map((group, idx) => renderFilterGroup(group, idx, 'border-red-400'))}
+                  </div>
                 </div>
-              )
-            })}
-          </div>
-        </div>
+              )}
+
+              {otherNodeGroups.length > 0 && (
+                <div className="bg-gray-50 rounded-lg">
+                  <h3 className="font-medium text-gray-900 px-4 pt-4 pb-2">
+                    {t('nodeDetails.acl.otherNodeFilters')} ({t('nodeDetails.acl.filterCount', {
+                      filterCount: otherNodeGroups.length,
+                      lineCount: totalOtherLines,
+                    })})
+                  </h3>
+
+                  <div className="px-4 pb-3">
+                    <div className="relative">
+                      <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400" aria-hidden="true" />
+                      <input
+                        type="text"
+                        value={healthSearchQuery}
+                        onChange={(e) => setHealthSearchQuery(e.target.value)}
+                        placeholder={t('nodeDetails.acl.searchPlaceholder')}
+                        aria-label={t('nodeDetails.acl.searchPlaceholder')}
+                        className="w-full pl-9 pr-3 py-2 text-sm border border-gray-300 rounded-md
+                                   focus:outline-none focus:ring-2 focus:ring-primary-600"
+                      />
+                    </div>
+                  </div>
+
+                  {filteredOtherGroups.length === 0 && healthSearchQuery.trim() && (
+                    <p className="text-xs text-gray-400 italic px-4 pb-4">{t('nodeDetails.acl.noSearchResults')}</p>
+                  )}
+
+                  <div className="space-y-1 max-h-[600px] overflow-y-auto">
+                    {Array.from(otherNodeGroupsByNode.entries()).map(([nodeName, groups], nodeIdx) => {
+                      const nodeGid = `acl-node-${nodeName ? toSafeId(nodeName) : `unknown-${nodeIdx}`}`
+                      const displayName = nodeName || t('nodeDetails.acl.unknownSource')
+                      return (
+                        <div key={nodeGid}>
+                          <button
+                            id={`${nodeGid}-button`}
+                            onClick={() => toggleGroup(nodeGid)}
+                            aria-expanded={expandedGroups.has(nodeGid)}
+                            aria-controls={`${nodeGid}-content`}
+                            className="w-full flex items-center gap-2 p-3 hover:bg-gray-100 transition-colors
+                                       focus:outline-none focus:ring-2 focus:ring-primary-600 focus:ring-inset rounded-lg font-medium text-gray-900"
+                          >
+                            {expandedGroups.has(nodeGid)
+                              ? <ChevronDown className="w-4 h-4 text-gray-500" aria-hidden="true" />
+                              : <ChevronRight className="w-4 h-4 text-gray-500" aria-hidden="true" />}
+                            <span className={!nodeName ? 'text-gray-400 italic' : ''}>{displayName}</span>
+                            <span className="text-xs text-gray-500 font-normal">
+                              ({t('nodeDetails.acl.filterCount', {
+                                filterCount: groups.length,
+                                lineCount: groups.reduce((sum, group) => sum + group.entries.length, 0),
+                              })})
+                            </span>
+                          </button>
+
+                          {expandedGroups.has(nodeGid) && (
+                            <div
+                              id={`${nodeGid}-content`}
+                              role="region"
+                              aria-labelledby={`${nodeGid}-button`}
+                              className="pl-4"
+                            >
+                              {groups.map((group, idx) => renderFilterGroup(group, idx, 'border-yellow-400'))}
+                            </div>
+                          )}
+                        </div>
+                      )
+                    })}
+                  </div>
+                </div>
+              )}
+            </>
+          )}
+        </>
       )}
     </div>
   )
 }
 
 // VLAN Tab
-function VlanTab({ node, vlans }: { node: NodeProperties; vlans: SwitchedVlanProperties[] }) {
+function VlanTab({ node, interfaces, vlans }: { node: NodeProperties; interfaces: InterfaceWithHostname[]; vlans: SwitchedVlanProperties[] }) {
   const { t } = useTranslation()
+  const [searchQuery, setSearchQuery] = useState('')
+
+  const vlanInterfaces = useMemo(() => {
+    return interfaces
+      .filter(hasVlanData)
+      .sort((left, right) => left.interface.localeCompare(right.interface))
+  }, [interfaces])
+
+  const filteredVlanInterfaces = useMemo(() => {
+    if (!searchQuery.trim()) return vlanInterfaces
+    const query = searchQuery.toLowerCase()
+
+    return vlanInterfaces.filter((iface) => {
+      const values = [
+        iface.interface,
+        iface.switchport_mode,
+        formatInterfaceValue(iface.access_vlan),
+        formatInterfaceValue(iface.native_vlan),
+        formatInterfaceValue(iface.allowed_vlans),
+        formatInterfaceValue(iface.vlan),
+        formatInterfaceValue(iface.encapsulation_vlan),
+      ]
+
+      return values.some((value) => value.toLowerCase().includes(query))
+    })
+  }, [searchQuery, vlanInterfaces])
+
   return (
     <div className="space-y-4">
-      {/* VLAN Properties */}
-      {vlans.length > 0 && (
-        <div className="bg-gray-50 rounded-lg p-4">
-          <h3 className="font-medium text-gray-900 mb-3">
-            {t('nodeDetails.sections.vlanProperties')} ({vlans.length})
-          </h3>
-          <div className="space-y-2">
-            {vlans.map((vlan, index) => (
-              <div key={index} className="bg-white p-3 rounded text-sm border border-gray-200">
-                <div className="flex items-center justify-between mb-2">
-                  <span className="font-medium text-gray-900">{t('nodeDetails.vlan.fields.vlanPrefix')} {vlan.vlan_id}</span>
-                  {vlan.vxlan_vni && (
-                    <span className="px-2 py-0.5 rounded text-xs font-medium bg-blue-100 text-blue-800">
-                      {t('nodeDetails.vlan.fields.vni')}: {vlan.vxlan_vni}
-                    </span>
-                  )}
-                </div>
-                <div className="grid grid-cols-1 gap-2 text-xs">
-                  <div className="text-gray-700">
-                    {t('nodeDetails.vlan.fields.interfaces')}: {vlan.interfaces?.join(', ') || t('common.none')}
-                  </div>
-                  {vlan.interface_vlans && vlan.interface_vlans.length > 0 && (
-                    <div className="text-gray-700">
-                      {t('nodeDetails.vlan.fields.interfaceVlans')}: {vlan.interface_vlans.join(', ')}
-                    </div>
-                  )}
-                </div>
+      {(vlanInterfaces.length > 0 || vlans.length > 0) && (
+        <div className="bg-gray-50 rounded-lg p-4 space-y-4">
+          <div>
+            <h3 className="font-medium text-gray-900 mb-3">
+              {t('nodeDetails.sections.vlanInterfaces')} ({filteredVlanInterfaces.length}/{vlanInterfaces.length})
+            </h3>
+            <div className="relative mb-3">
+              <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400" aria-hidden="true" />
+              <input
+                type="text"
+                value={searchQuery}
+                onChange={(event) => setSearchQuery(event.target.value)}
+                placeholder={t('nodeDetails.vlan.searchPlaceholder')}
+                aria-label={t('nodeDetails.vlan.searchPlaceholder')}
+                className="w-full pl-9 pr-3 py-2 text-sm border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-primary-600"
+              />
+            </div>
+
+            {vlanInterfaces.length === 0 && (
+              <p className="text-sm text-gray-700">{t('nodeDetails.noVlanData')}</p>
+            )}
+
+            {vlanInterfaces.length > 0 && filteredVlanInterfaces.length === 0 && searchQuery.trim() && (
+              <p className="text-sm text-gray-700">{t('nodeDetails.vlan.noSearchResults')}</p>
+            )}
+
+            {filteredVlanInterfaces.length > 0 && (
+              <div className="overflow-x-auto">
+                <table className="min-w-full text-sm">
+                  <thead className="bg-white">
+                    <tr className="text-left text-xs font-semibold uppercase tracking-wide text-gray-500">
+                      <th className="px-3 py-2">{t('nodeDetails.acl.fields.interface')}</th>
+                      <th className="px-3 py-2">{t('nodeDetails.interface.fields.switchportMode')}</th>
+                      <th className="px-3 py-2">{t('nodeDetails.interface.fields.accessVlan')}</th>
+                      <th className="px-3 py-2">{t('nodeDetails.interface.fields.nativeVlan')}</th>
+                      <th className="px-3 py-2">{t('nodeDetails.interface.fields.allowedVlans')}</th>
+                      <th className="px-3 py-2">{t('nodeDetails.vlan.fields.vlanPrefix')}</th>
+                      <th className="px-3 py-2">{t('nodeDetails.vlan.fields.encapsulationVlan')}</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-gray-200 bg-white">
+                    {filteredVlanInterfaces.map((iface) => (
+                      <tr key={`${node.node}-${iface.interface}`} className="align-top">
+                        <td className="px-3 py-2 font-mono text-xs text-gray-900">{iface.interface}</td>
+                        <td className="px-3 py-2 text-xs text-gray-700">{formatInterfaceValue(iface.switchport_mode) || t('common.notAvailable')}</td>
+                        <td className="px-3 py-2 text-xs text-gray-700">{formatInterfaceValue(iface.access_vlan) || t('common.notAvailable')}</td>
+                        <td className="px-3 py-2 text-xs text-gray-700">{formatInterfaceValue(iface.native_vlan) || t('common.notAvailable')}</td>
+                        <td className="px-3 py-2 text-xs text-gray-700">{formatInterfaceValue(iface.allowed_vlans) || t('common.notAvailable')}</td>
+                        <td className="px-3 py-2 text-xs text-gray-700">{formatInterfaceValue(iface.vlan) || t('common.notAvailable')}</td>
+                        <td className="px-3 py-2 text-xs text-gray-700">{formatInterfaceValue(iface.encapsulation_vlan) || t('common.notAvailable')}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
               </div>
-            ))}
+            )}
           </div>
+
+          {vlans.length > 0 && (
+            <div>
+              <h3 className="font-medium text-gray-900 mb-3">
+                {t('nodeDetails.sections.vlanProperties')} ({vlans.length})
+              </h3>
+              <div className="space-y-2">
+                {vlans.map((vlan) => (
+                  <div key={`${node.node}-${vlan.vlan_id}`} className="bg-white p-3 rounded text-sm border border-gray-200">
+                    <div className="flex items-center justify-between mb-2">
+                      <span className="font-medium text-gray-900">{t('nodeDetails.vlan.fields.vlanPrefix')} {vlan.vlan_id}</span>
+                      {vlan.vxlan_vni && (
+                        <span className="px-2 py-0.5 rounded text-xs font-medium bg-blue-100 text-blue-800">
+                          {t('nodeDetails.vlan.fields.vni')}: {vlan.vxlan_vni}
+                        </span>
+                      )}
+                    </div>
+                    <div className="grid grid-cols-1 gap-2 text-xs">
+                      <div className="text-gray-700">
+                        {t('nodeDetails.vlan.fields.interfaces')}: {vlan.interfaces?.join(', ') || t('common.none')}
+                      </div>
+                      {vlan.interface_vlans && vlan.interface_vlans.length > 0 && (
+                        <div className="text-gray-700">
+                          {t('nodeDetails.vlan.fields.interfaceVlans')}: {vlan.interface_vlans.join(', ')}
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
         </div>
       )}
 
-      {vlans.length === 0 && (
+      {vlanInterfaces.length === 0 && vlans.length === 0 && (
         <p className="text-sm text-gray-700">{t('nodeDetails.noVlanData')}</p>
       )}
     </div>
@@ -2184,8 +2718,7 @@ function VlanTab({ node, vlans }: { node: NodeProperties; vlans: SwitchedVlanPro
 }
 
 // Configuration Structures Tab
-function ConfigurationTab({ node, definedStructures, referencedStructures, namedStructures }: {
-  node: NodeProperties
+function ConfigurationTab({ definedStructures, referencedStructures, namedStructures }: {
   definedStructures: DefinedStructure[]
   referencedStructures: ReferencedStructure[]
   namedStructures: NamedStructure[]
@@ -2308,7 +2841,7 @@ function ConfigurationTab({ node, definedStructures, referencedStructures, named
 }
 
 // EIGRP Tab
-function EigrpTab({ node, edges }: { node: NodeProperties; edges: EIGRPEdge[] }) {
+function EigrpTab({ edges }: { edges: EIGRPEdge[] }) {
   const { t } = useTranslation()
   return (
     <div className="space-y-4">
@@ -2341,7 +2874,7 @@ function EigrpTab({ node, edges }: { node: NodeProperties; edges: EIGRPEdge[] })
 }
 
 // IS-IS Tab
-function IsisTab({ node, edges }: { node: NodeProperties; edges: ISISEdge[] }) {
+function IsisTab({ edges }: { edges: ISISEdge[] }) {
   const { t } = useTranslation()
   return (
     <div className="space-y-4">
@@ -2373,7 +2906,7 @@ function IsisTab({ node, edges }: { node: NodeProperties; edges: ISISEdge[] }) {
 }
 
 // VXLAN Tab
-function VxlanTab({ node, edges }: { node: NodeProperties; edges: VXLANEdge[] }) {
+function VxlanTab({ edges }: { edges: VXLANEdge[] }) {
   const { t } = useTranslation()
   return (
     <div className="space-y-4">

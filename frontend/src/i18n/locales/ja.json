@@ -148,6 +148,7 @@
       "bgpRoutingTable": "BGPルーティングテーブル",
       "unreachableFilters": "このノードの到達不可能なフィルタ行",
       "unreachableFiltersOther": "他のノードの到達不可能なフィルタ行",
+      "vlanInterfaces": "VLANインターフェース",
       "vlanProperties": "VLANプロパティ",
       "vlanEdges": "VLANエッジ",
       "namedStructures": "名前付き構造",
@@ -227,12 +228,30 @@
     "acl": {
       "unreachable": "到達不可能",
       "noData": "ACL/フィルタ分析データがありません",
+      "noHealthData": "ACLヘルスデータがありません",
       "summary": "フィルタ分析: {{nodeCount}}ノードにわたる{{count}}件の到達不可能行",
+      "detailsSummary": "{{filterCount}} 件のACLグループ、正規化済み {{lineCount}} 行",
       "currentNodeFilters": "現在のノードのフィルタ",
       "otherNodeFilters": "他ノードのフィルタ",
       "filterCount": "{{filterCount}}フィルタ、{{lineCount}}件の到達不可能行",
+      "lineCount": "{{count}} 行",
       "appliedTo": "適用先",
       "notApplied": "どのインターフェースにも適用されていません",
+      "views": {
+        "details": "ACL詳細",
+        "health": "ACLヘルス"
+      },
+      "sections": {
+        "definitions": "ACL定義",
+        "namedAccessLists": "名前付きアクセスリスト",
+        "securityRules": "セキュリティルール",
+        "derivedFilters": "派生フィルタ"
+      },
+      "kinds": {
+        "namedAccessList": "名前付きACL",
+        "securityRule": "セキュリティルール",
+        "derivedFilter": "派生フィルタ"
+      },
       "direction": {
         "inbound": "インバウンド",
         "outbound": "アウトバウンド"
@@ -243,7 +262,10 @@
       "noAddresses": "ルールにIPアドレスが見つかりません",
       "unknownSource": "フィルタソース不明",
       "blockedBy": "ブロック元",
+      "detailsSearchPlaceholder": "ACL名、インターフェース、アクション、ルール、ソース行で検索...",
       "searchPlaceholder": "ノード名またはフィルタ名で検索...",
+      "noDetailsData": "ACL定義データがありません",
+      "noDetailsSearchResults": "検索条件に一致するACL定義がありません",
       "noSearchResults": "検索条件に一致するフィルタがありません",
       "collapsePreview": "{{count}}件の到達不可能 ({{deny}} DENY, {{permit}} PERMIT)",
       "severity": {
@@ -255,9 +277,11 @@
       "fields": {
         "line": "行",
         "action": "アクション",
+        "rule": "ルール",
         "reason": "理由",
         "blockedByLines": "ブロック行",
         "sources": "送信元",
+        "sourceLines": "ソース行",
         "destinations": "宛先",
         "node": "ノード",
         "zone": "ゾーン",
@@ -271,8 +295,11 @@
       }
     },
     "vlan": {
+      "searchPlaceholder": "インターフェース、モード、VLAN、ネイティブVLAN、許可VLAN、カプセル化VLANで検索...",
+      "noSearchResults": "検索条件に一致するVLANインターフェースがありません",
       "fields": {
         "vlanPrefix": "VLAN",
+        "encapsulationVlan": "カプセル化VLAN",
         "vni": "VNI",
         "interfaces": "インターフェース",
         "interfaceVlans": "インターフェースVLAN"

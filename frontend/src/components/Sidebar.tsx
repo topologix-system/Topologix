@@ -22,6 +22,10 @@ export function Sidebar() {
   const sidebarTab = useUIStore((state) => state.sidebarTab)
   const setSidebarTab = useUIStore((state) => state.setSidebarTab)
   const sidebarWidth = useUIStore((state) => state.sidebarWidth)
+  const selectedNodeId = useUIStore((state) => state.selectedNodeId)
+  const selectedEdgeId = useUIStore((state) => state.selectedEdgeId)
+  const supportedTabs: SidebarTab[] = ['overview', 'node-details', 'edge-details', 'analysis', 'traceroute', 'validation']
+  const activeTab = supportedTabs.includes(sidebarTab) ? sidebarTab : 'overview'
 
   /**
    * Opens sidebar in a centered popout window
@@ -33,13 +37,18 @@ export function Sidebar() {
     const height = 600
     const left = window.screenX + (window.outerWidth - width) / 2
     const top = window.screenY + (window.outerHeight - height) / 2
+    const params = new URLSearchParams()
+
+    params.set('tab', activeTab)
+    if (selectedNodeId) params.set('node', selectedNodeId)
+    if (selectedEdgeId) params.set('edge', selectedEdgeId)
 
     window.open(
-      '/sidebar-popout',
+      `/sidebar-popout?${params.toString()}`,
       'Topologix Sidebar',
       `width=${width},height=${height},left=${left},top=${top},resizable=yes,scrollbars=yes`
     )
-  }, [])
+  }, [activeTab, selectedEdgeId, selectedNodeId])
 
   /**
    * Sidebar tab configuration array
@@ -50,9 +59,9 @@ export function Sidebar() {
     { id: 'overview', label: t('sidebar.tabs.overview'), icon: <Info className="w-4 h-4" /> },
     { id: 'node-details', label: t('sidebar.tabs.nodeDetails'), icon: <Router className="w-4 h-4" /> },
     { id: 'edge-details', label: t('sidebar.tabs.edgeDetails'), icon: <Link className="w-4 h-4" /> },
-    { id: 'validation', label: t('sidebar.tabs.validation'), icon: <AlertCircle className="w-4 h-4" /> },
     { id: 'analysis', label: t('sidebar.tabs.analysis'), icon: <Search className="w-4 h-4" /> },
     { id: 'traceroute', label: t('sidebar.tabs.traceroute'), icon: <Network className="w-4 h-4" /> },
+    { id: 'validation', label: t('sidebar.tabs.validation'), icon: <AlertCircle className="w-4 h-4" /> },
   ]
 
   return (
@@ -88,12 +97,12 @@ export function Sidebar() {
             key={tab.id}
             onClick={() => setSidebarTab(tab.id)}
             role="tab"
-            aria-selected={sidebarTab === tab.id}
+            aria-selected={activeTab === tab.id}
             aria-controls={`tabpanel-${tab.id}`}
             id={`tab-${tab.id}`}
-            tabIndex={sidebarTab === tab.id ? 0 : -1}
+            tabIndex={activeTab === tab.id ? 0 : -1}
             className={`flex items-center gap-2 px-4 py-3 text-sm font-medium transition-colors whitespace-nowrap focus:outline-none focus:ring-2 focus:ring-primary-600 focus:ring-inset ${
-              sidebarTab === tab.id
+              activeTab === tab.id
                 ? 'text-primary-600 border-b-2 border-primary-600 bg-primary-50'
                 : 'text-gray-600 hover:text-gray-900 hover:bg-gray-50'
             }`}
@@ -108,8 +117,8 @@ export function Sidebar() {
       <div
         className="flex-1 overflow-y-auto p-4"
         role="tabpanel"
-        id={`tabpanel-${sidebarTab}`}
-        aria-labelledby={`tab-${sidebarTab}`}
+        id={`tabpanel-${activeTab}`}
+        aria-labelledby={`tab-${activeTab}`}
         tabIndex={0}
       >
         {/* Conditionally render panel based on active tab
@@ -120,12 +129,12 @@ export function Sidebar() {
             <span className="sr-only">{t('common.loading')}</span>
           </div>
         }>
-          {sidebarTab === 'overview' && <OverviewPanel />}
-          {sidebarTab === 'node-details' && <NodeDetailsPanel />}
-          {sidebarTab === 'edge-details' && <EdgeDetailsPanel />}
-          {sidebarTab === 'validation' && <ValidationPanel />}
-          {sidebarTab === 'analysis' && <NetworkAnalysisPanel />}
-          {sidebarTab === 'traceroute' && <TraceroutePanel />}
+          {activeTab === 'overview' && <OverviewPanel />}
+          {activeTab === 'node-details' && <NodeDetailsPanel />}
+          {activeTab === 'edge-details' && <EdgeDetailsPanel />}
+          {activeTab === 'analysis' && <NetworkAnalysisPanel />}
+          {activeTab === 'traceroute' && <TraceroutePanel />}
+          {activeTab === 'validation' && <ValidationPanel />}
         </Suspense>
       </div>
     </aside>
