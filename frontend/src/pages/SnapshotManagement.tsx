@@ -15,6 +15,8 @@ import {
   Trash2,
   CheckCircle,
   FolderOpen,
+  ChevronDown,
+  ChevronRight,
   ArrowLeft,
   X,
   Loader2,
@@ -33,8 +35,29 @@ import {
 } from '../hooks'
 import { useSnapshotStore } from '../store'
 import { ConfirmDialog } from '../components/ConfirmDialog'
+import { SnapshotFolderCombobox } from '../components/SnapshotFolderCombobox'
 import type { Snapshot } from '../types'
 import { extractErrorMessage } from '../types/errors'
+
+const UNGROUPED_GROUP_KEY = 'ungrouped'
+
+const encodeGroupKeySegment = (value: string) =>
+  Array.from(value)
+    .map((char) => char.codePointAt(0)?.toString(36) ?? '0')
+    .join('-')
+
+const getSnapshotGroupKey = (folderName: string | null) =>
+  folderName ? `folder:${encodeGroupKeySegment(folderName)}` : UNGROUPED_GROUP_KEY
+
+const getFolderGroupPanelId = (groupKey: string) =>
+  `snapshot-folder-group-${encodeGroupKeySegment(groupKey)}`
+
+interface SnapshotGroup {
+  key: string
+  label: string
+  isUngrouped: boolean
+  snapshots: Snapshot[]
+}
 
 export function SnapshotManagement() {
   const { t } = useTranslation()
@@ -49,6 +72,7 @@ export function SnapshotManagement() {
   const [snapshotToDelete, setSnapshotToDelete] = useState<string | null>(null)
   const [folderDraft, setFolderDraft] = useState('')
   const [uploadError, setUploadError] = useState('')
+  const [collapsedFolderKeys, setCollapsedFolderKeys] = useState<Set<string>>(() => new Set())
 
   /**
    * Global Zustand state for active snapshot tracking
@@ -83,33 +107,63 @@ export function SnapshotManagement() {
     [selectedSnapshot, snapshots]
   )
 
-  const groupedSnapshots = useMemo(() => {
-    const groups = new Map<string, Snapshot[]>()
+  const folderOptions = useMemo(() => {
+    const folders = new Set<string>()
 
     for (const snapshot of snapshots ?? []) {
-      const key = snapshot.folder_name?.trim() || '__ungrouped__'
-      const existing = groups.get(key) ?? []
-      existing.push(snapshot)
-      groups.set(key, existing)
+      const folderName = snapshot.folder_name?.trim()
+      if (folderName) {
+        folders.add(folderName)
+      }
     }
 
-    return Array.from(groups.entries())
-      .sort(([left], [right]) => {
-        if (left === '__ungrouped__') return 1
-        if (right === '__ungrouped__') return -1
-        return left.localeCompare(right)
+    return Array.from(folders).sort((left, right) => left.localeCompare(right))
+  }, [snapshots])
+
+  const groupedSnapshots = useMemo<SnapshotGroup[]>(() => {
+    const groups = new Map<string, SnapshotGroup>()
+
+    for (const snapshot of snapshots ?? []) {
+      const folderName = snapshot.folder_name?.trim() || null
+      const key = getSnapshotGroupKey(folderName)
+      const existing = groups.get(key)
+
+      if (existing) {
+        existing.snapshots.push(snapshot)
+      } else {
+        groups.set(key, {
+          key,
+          label: folderName || t('snapshots.ungroupedFolder'),
+          isUngrouped: !folderName,
+          snapshots: [snapshot],
+        })
+      }
+    }
+
+    return Array.from(groups.values())
+      .sort((left, right) => {
+        if (left.isUngrouped) return 1
+        if (right.isUngrouped) return -1
+        return left.label.localeCompare(right.label)
       })
-      .map(([groupKey, groupSnapshots]) => ({
-        key: groupKey,
-        label: groupKey === '__ungrouped__' ? t('snapshots.ungroupedFolder') : groupKey,
-        snapshots: groupSnapshots,
-      }))
   }, [snapshots, t])
 
   const getFolderDisplayName = useCallback(
     (folderName?: string | null) => folderName || t('snapshots.ungroupedFolder'),
     [t]
   )
+
+  const toggleFolderGroup = useCallback((groupKey: string) => {
+    setCollapsedFolderKeys((current) => {
+      const next = new Set(current)
+      if (next.has(groupKey)) {
+        next.delete(groupKey)
+      } else {
+        next.add(groupKey)
+      }
+      return next
+    })
+  }, [])
 
   /**
    * Handle snapshot creation with validation
@@ -140,6 +194,11 @@ export function SnapshotManagement() {
       { name: trimmedName, folder_name: trimmedFolder || null },
       {
         onSuccess: (snapshot) => {
+          if (!snapshot) {
+            setValidationError('Failed to create snapshot')
+            return
+          }
+
           setShowCreateDialog(false)
           setNewSnapshotName('')
           setNewSnapshotFolder('')
@@ -169,6 +228,11 @@ export function SnapshotManagement() {
       },
       {
         onSuccess: (snapshot) => {
+          if (!snapshot) {
+            setFolderValidationError('Failed to update snapshot folder')
+            return
+          }
+
           setFolderDraft(snapshot.folder_name || '')
           setFolderValidationError('')
         },
@@ -383,81 +447,120 @@ export function SnapshotManagement() {
               </div>
             ) : (
               <div className="space-y-4" role="list" aria-label="Available snapshots">
-                {groupedSnapshots.map((group) => (
-                  <section key={group.key} className="space-y-2" aria-label={group.label}>
-                    <div className="flex items-center gap-2 px-1">
-                      <FolderOpen className="w-4 h-4 text-gray-500" aria-hidden="true" />
-                      <h3 className="text-sm font-semibold text-gray-700">{group.label}</h3>
-                    </div>
-                    {group.snapshots.map((snapshot: Snapshot) => (
-                      <div
-                        key={snapshot.name}
-                        role="button"
-                        className={`p-4 rounded-lg border-2 cursor-pointer transition-colors focus-within:ring-2 focus-within:ring-primary-600 ${
-                          currentSnapshotName === snapshot.name
-                            ? 'border-green-500 bg-green-50'
-                            : activateMutation.isPending && activateMutation.variables === snapshot.name
-                            ? 'border-blue-400 bg-blue-50 opacity-75'
-                            : selectedSnapshot === snapshot.name
-                            ? 'border-blue-500 bg-blue-50'
-                            : 'border-gray-200 hover:border-gray-300 hover:shadow-sm'
-                        }`}
-                        onClick={() => handleSnapshotSelection(snapshot)}
-                        tabIndex={0}
-                        aria-pressed={selectedSnapshot === snapshot.name}
-                        aria-label={`Snapshot ${snapshot.name} in folder ${getFolderDisplayName(snapshot.folder_name)} with ${snapshot.file_count} files${
-                          currentSnapshotName === snapshot.name
-                            ? ' - currently active'
-                            : activateMutation.isPending && activateMutation.variables === snapshot.name
-                            ? ' - activating...'
-                            : ''
-                        }. Click to activate and view files`}
-                        onKeyDown={(e) => {
-                          if (e.key === 'Enter' || e.key === ' ') {
-                            e.preventDefault()
-                            handleSnapshotSelection(snapshot)
-                          }
-                        }}
+                {groupedSnapshots.map((group) => {
+                  const groupHasSelectedOrCurrent = group.snapshots.some(
+                    (snapshot) => snapshot.name === selectedSnapshot || snapshot.name === currentSnapshotName
+                  )
+                  const isGroupOpen = groupHasSelectedOrCurrent || !collapsedFolderKeys.has(group.key)
+                  const folderPanelId = getFolderGroupPanelId(group.key)
+                  const folderHeadingId = `${folderPanelId}-heading`
+                  const folderToggleLabel = groupHasSelectedOrCurrent
+                    ? t('snapshots.folderKeptOpen', { folder: group.label })
+                    : t(isGroupOpen ? 'snapshots.collapseFolder' : 'snapshots.expandFolder', {
+                        folder: group.label,
+                      })
+
+                  return (
+                    <section key={group.key} role="listitem" className="space-y-2" aria-labelledby={folderHeadingId}>
+                      <button
+                        type="button"
+                        onClick={() => toggleFolderGroup(group.key)}
+                        disabled={groupHasSelectedOrCurrent}
+                        className="w-full flex items-center gap-2 px-1 py-1 text-left rounded focus:outline-none focus:ring-2 focus:ring-primary-600 disabled:cursor-default"
+                        aria-expanded={isGroupOpen}
+                        aria-controls={folderPanelId}
+                        aria-label={folderToggleLabel}
+                        title={folderToggleLabel}
                       >
-                        <div className="flex items-start justify-between mb-2 gap-3">
-                          <div className="min-w-0">
-                            <p className="text-xs font-medium uppercase tracking-wide text-gray-500">
-                              {getFolderDisplayName(snapshot.folder_name)}
-                            </p>
-                            <h4 className="font-semibold text-gray-900 truncate">{snapshot.name}</h4>
-                          </div>
-                          {currentSnapshotName === snapshot.name ? (
-                            <CheckCircle className="w-5 h-5 text-green-600 flex-shrink-0" aria-hidden="true" />
-                          ) : activateMutation.isPending && activateMutation.variables === snapshot.name ? (
-                            <Loader2 className="w-5 h-5 text-blue-600 flex-shrink-0 animate-spin" aria-hidden="true" />
-                          ) : null}
-                        </div>
-                        <div className="text-sm text-gray-800 space-y-1 font-medium">
-                          <p>{t('snapshots.fileCount', { count: snapshot.file_count })}</p>
-                          <p>{formatBytes(snapshot.size_bytes)}</p>
-                          <p className="text-xs text-gray-700 font-normal">
-                            {new Date(snapshot.created_at).toLocaleString()}
-                          </p>
-                        </div>
-                        <div className="flex justify-end mt-3">
-                          <button
-                            onClick={(e) => {
-                              e.stopPropagation()
-                              handleDelete(snapshot.name)
+                        {isGroupOpen ? (
+                          <ChevronDown className="w-4 h-4 text-gray-500 flex-shrink-0" aria-hidden="true" />
+                        ) : (
+                          <ChevronRight className="w-4 h-4 text-gray-500 flex-shrink-0" aria-hidden="true" />
+                        )}
+                        <FolderOpen className="w-4 h-4 text-gray-500 flex-shrink-0" aria-hidden="true" />
+                        <span id={folderHeadingId} className="text-sm font-semibold text-gray-700 truncate">
+                          {group.label}
+                        </span>
+                        <span
+                          className="ml-auto inline-flex min-w-6 justify-center rounded-full bg-gray-100 px-2 py-0.5 text-xs font-medium text-gray-700"
+                          aria-label={t('snapshots.folderSnapshotCount', { count: group.snapshots.length })}
+                        >
+                          {group.snapshots.length}
+                        </span>
+                      </button>
+
+                      <div id={folderPanelId} role="group" aria-labelledby={folderHeadingId} hidden={!isGroupOpen} className="space-y-2">
+                        {group.snapshots.map((snapshot: Snapshot) => (
+                          <div
+                            key={snapshot.name}
+                            role="button"
+                            className={`p-4 rounded-lg border-2 cursor-pointer transition-colors focus-within:ring-2 focus-within:ring-primary-600 ${
+                              currentSnapshotName === snapshot.name
+                                ? 'border-green-500 bg-green-50'
+                                : activateMutation.isPending && activateMutation.variables === snapshot.name
+                                ? 'border-blue-400 bg-blue-50 opacity-75'
+                                : selectedSnapshot === snapshot.name
+                                ? 'border-blue-500 bg-blue-50'
+                                : 'border-gray-200 hover:border-gray-300 hover:shadow-sm'
+                            }`}
+                            onClick={() => handleSnapshotSelection(snapshot)}
+                            tabIndex={0}
+                            aria-pressed={selectedSnapshot === snapshot.name}
+                            aria-label={`Snapshot ${snapshot.name} in folder ${getFolderDisplayName(snapshot.folder_name)} with ${snapshot.file_count} files${
+                              currentSnapshotName === snapshot.name
+                                ? ' - currently active'
+                                : activateMutation.isPending && activateMutation.variables === snapshot.name
+                                ? ' - activating...'
+                                : ''
+                            }. Click to activate and view files`}
+                            onKeyDown={(e) => {
+                              if (e.key === 'Enter' || e.key === ' ') {
+                                e.preventDefault()
+                                handleSnapshotSelection(snapshot)
+                              }
                             }}
-                            disabled={deleteMutation.isPending}
-                            className="px-3 py-1.5 text-sm bg-red-600 text-white rounded hover:bg-red-700 disabled:opacity-50 disabled:cursor-not-allowed transition-colors focus:outline-none focus:ring-2 focus:ring-red-600 focus:ring-offset-1"
-                            aria-label={`Delete snapshot ${snapshot.name}`}
-                            aria-busy={deleteMutation.isPending}
                           >
-                            <Trash2 className="w-4 h-4" aria-hidden="true" />
-                            <span className="sr-only">Delete</span>
-                          </button>
-                        </div>
+                            <div className="flex items-start justify-between mb-2 gap-3">
+                              <div className="min-w-0">
+                                <p className="text-xs font-medium uppercase tracking-wide text-gray-500">
+                                  {getFolderDisplayName(snapshot.folder_name)}
+                                </p>
+                                <h4 className="font-semibold text-gray-900 truncate">{snapshot.name}</h4>
+                              </div>
+                              {currentSnapshotName === snapshot.name ? (
+                                <CheckCircle className="w-5 h-5 text-green-600 flex-shrink-0" aria-hidden="true" />
+                              ) : activateMutation.isPending && activateMutation.variables === snapshot.name ? (
+                                <Loader2 className="w-5 h-5 text-blue-600 flex-shrink-0 animate-spin" aria-hidden="true" />
+                              ) : null}
+                            </div>
+                            <div className="text-sm text-gray-800 space-y-1 font-medium">
+                              <p>{t('snapshots.fileCount', { count: snapshot.file_count })}</p>
+                              <p>{formatBytes(snapshot.size_bytes)}</p>
+                              <p className="text-xs text-gray-700 font-normal">
+                                {new Date(snapshot.created_at).toLocaleString()}
+                              </p>
+                            </div>
+                            <div className="flex justify-end mt-3">
+                              <button
+                                onClick={(e) => {
+                                  e.stopPropagation()
+                                  handleDelete(snapshot.name)
+                                }}
+                                disabled={deleteMutation.isPending}
+                                className="px-3 py-1.5 text-sm bg-red-600 text-white rounded hover:bg-red-700 disabled:opacity-50 disabled:cursor-not-allowed transition-colors focus:outline-none focus:ring-2 focus:ring-red-600 focus:ring-offset-1"
+                                aria-label={`Delete snapshot ${snapshot.name}`}
+                                aria-busy={deleteMutation.isPending}
+                              >
+                                <Trash2 className="w-4 h-4" aria-hidden="true" />
+                                <span className="sr-only">Delete</span>
+                              </button>
+                            </div>
+                          </div>
+                        ))}
                       </div>
-                    ))}
-                  </section>
-                ))}
+                    </section>
+                  )
+                })}
               </div>
             )}
           </div>
@@ -491,24 +594,21 @@ export function SnapshotManagement() {
                     <label htmlFor="snapshot-folder-input" className="block text-sm font-medium text-gray-800 mb-1">
                       {t('snapshots.folderLabel')}
                     </label>
-                    <input
+                    <SnapshotFolderCombobox
                       id="snapshot-folder-input"
-                      type="text"
                       value={folderDraft}
-                      onChange={(e) => {
-                        setFolderDraft(e.target.value)
+                      onChange={(value) => {
+                        setFolderDraft(value)
                         setFolderValidationError('')
                       }}
+                      options={folderOptions}
                       placeholder={t('snapshots.folderPlaceholder')}
-                      className={`w-full px-3 py-2 border rounded-lg focus:outline-none focus:ring-2 transition-colors ${
-                        folderValidationError
-                          ? 'border-red-500 focus:ring-red-500 bg-red-50'
-                          : 'border-gray-300 focus:ring-primary-600'
-                      }`}
+                      hasError={!!folderValidationError}
+                      ariaDescribedBy={`snapshot-folder-help${folderValidationError ? ' snapshot-folder-error' : ''}`}
                     />
-                    <p className="mt-2 text-xs text-gray-600">{t('snapshots.folderHelp')}</p>
+                    <p id="snapshot-folder-help" className="mt-2 text-xs text-gray-600">{t('snapshots.folderHelp')}</p>
                     {folderValidationError && (
-                      <p className="mt-2 text-sm text-red-600 font-medium" role="alert">
+                      <p id="snapshot-folder-error" className="mt-2 text-sm text-red-600 font-medium" role="alert">
                         {folderValidationError}
                       </p>
                     )}
@@ -696,16 +796,15 @@ export function SnapshotManagement() {
                 <label htmlFor="snapshot-folder-create-input" className="block text-sm font-medium text-gray-800 mb-1">
                   {t('snapshots.createDialog.folderLabel')}
                 </label>
-                <input
+                <SnapshotFolderCombobox
                   id="snapshot-folder-create-input"
-                  type="text"
                   value={newSnapshotFolder}
-                  onChange={(e) => setNewSnapshotFolder(e.target.value)}
-                  onKeyDown={(e) => e.key === 'Enter' && handleCreate()}
+                  onChange={setNewSnapshotFolder}
+                  options={folderOptions}
                   placeholder={t('snapshots.folderPlaceholder')}
-                  className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-primary-600 transition-colors"
+                  ariaDescribedBy="snapshot-folder-create-help"
                 />
-                <p className="mt-2 text-xs text-gray-600">{t('snapshots.folderHelp')}</p>
+                <p id="snapshot-folder-create-help" className="mt-2 text-xs text-gray-600">{t('snapshots.folderHelp')}</p>
               </div>
 
               <div className="flex gap-3 justify-end">
