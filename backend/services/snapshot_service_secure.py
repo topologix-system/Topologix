@@ -33,7 +33,7 @@ from security.validation import (
 logger = logging.getLogger(__name__)
 
 # Security constants
-ALLOWED_EXTENSIONS = {'.cfg', '.conf', '.txt'}
+ALLOWED_EXTENSIONS = {'.cfg', '.conf', '.txt', '.log'}
 MAX_FILE_SIZE = 10 * 1024 * 1024  # 10MB
 MAX_FILES_PER_SNAPSHOT = 100
 MAX_SNAPSHOT_SIZE = 100 * 1024 * 1024  # 100MB total per snapshot

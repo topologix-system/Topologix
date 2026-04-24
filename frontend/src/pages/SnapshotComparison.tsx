@@ -119,7 +119,7 @@ export function SnapshotComparison() {
                 <option value="">-- Select Base Snapshot --</option>
                 {snapshots?.map((snapshot) => (
                   <option key={snapshot.name} value={snapshot.name}>
-                    {snapshot.name}
+                    {snapshot.folder_name ? `${snapshot.folder_name} / ` : ''}{snapshot.name}
                   </option>
                 ))}
               </select>
@@ -141,7 +141,7 @@ export function SnapshotComparison() {
                 <option value="">-- Select Comparison Snapshot --</option>
                 {snapshots?.map((snapshot) => (
                   <option key={snapshot.name} value={snapshot.name}>
-                    {snapshot.name}
+                    {snapshot.folder_name ? `${snapshot.folder_name} / ` : ''}{snapshot.name}
                   </option>
                 ))}
               </select>

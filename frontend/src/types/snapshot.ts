@@ -8,6 +8,9 @@ export interface Snapshot {
   file_count: number
   created_at: string
   size_bytes: number
+  folder_name?: string | null
+  owner_username?: string | null
+  legacy_unowned?: boolean
 }
 
 export interface SnapshotFile {
@@ -18,10 +21,15 @@ export interface SnapshotFile {
 
 export interface CreateSnapshotRequest {
   name: string
+  folder_name?: string | null
 }
 
 export interface ActivateSnapshotRequest {
   name: string
+}
+
+export interface UpdateSnapshotRequest {
+  folder_name: string | null
 }
 
 export interface UploadFileRequest {

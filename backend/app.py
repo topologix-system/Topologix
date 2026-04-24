@@ -13,6 +13,7 @@ from typing import Any
 from datetime import datetime, timedelta
 import hashlib
 import json
+from threading import RLock
 
 from flask import Flask, jsonify, request, make_response, session
 from flask_cors import CORS
@@ -233,6 +234,140 @@ if config.AUTH_ENABLED:
 # Initialize services
 batfish_service = BatfishService()
 snapshot_service = SnapshotService()
+batfish_request_lock = RLock()
+
+SNAPSHOT_QUERY_PREFIXES = (
+    '/api/network/',
+    '/api/ospf/',
+    '/api/edges/',
+    '/api/config/',
+    '/api/validation/',
+    '/api/analysis/',
+    '/api/security/',
+    '/api/bgp/',
+    '/api/acl/',
+    '/api/path/',
+    '/api/ha/',
+    '/api/protocols/',
+    '/api/topology/',
+    '/api/advanced/',
+)
+
+
+def get_batfish_request_network_name() -> str:
+    """Return the Batfish network namespace for the current request."""
+    if not config.AUTH_ENABLED:
+        return config.BATFISH_NETWORK
+
+    requester_user_id = getattr(request, 'user_id', None)
+    if requester_user_id is None:
+        return config.BATFISH_NETWORK
+
+    return f"{config.BATFISH_NETWORK}_user_{int(requester_user_id)}"
+
+
+def request_uses_batfish() -> bool:
+    """Check whether the current request needs exclusive Batfish access."""
+    path = request.path
+
+    if path.startswith(SNAPSHOT_QUERY_PREFIXES):
+        return True
+
+    if path == '/api/network/initialize':
+        return True
+
+    if path == '/api/snapshots/compare':
+        return True
+
+    if path.endswith('/activate') and path.startswith('/api/snapshots/'):
+        return True
+
+    if path.endswith('/interfaces') and path.startswith('/api/snapshots/'):
+        return True
+
+    if path.endswith('/layer1-topology') and path.startswith('/api/snapshots/') and request.method in {'PUT', 'DELETE'}:
+        return True
+
+    return False
+
+
+@app.before_request
+def prepare_batfish_request_context():
+    """Serialize Batfish operations and switch to the request-specific network namespace."""
+    if request.method == 'OPTIONS' or not request_uses_batfish():
+        return None
+
+    batfish_request_lock.acquire()
+    request._batfish_lock_acquired = True
+    batfish_service.set_network_context(get_batfish_request_network_name())
+    return None
+
+
+@app.after_request
+def release_batfish_request_lock(response):
+    """Release Batfish lock after a response is produced."""
+    if getattr(request, '_batfish_lock_acquired', False):
+        batfish_request_lock.release()
+        request._batfish_lock_acquired = False
+    return response
+
+
+@app.teardown_request
+def cleanup_batfish_request_lock(error):
+    """Ensure Batfish lock is released on error paths."""
+    if getattr(request, '_batfish_lock_acquired', False):
+        batfish_request_lock.release()
+        request._batfish_lock_acquired = False
+    return None
+
+if config.AUTH_ENABLED:
+    @app.before_request
+    def ensure_authenticated_snapshot_context():
+        """Restore the active snapshot for the authenticated browser session."""
+        if request.method == 'OPTIONS':
+            return None
+
+        if request.path == '/api/network/initialize':
+            return None
+
+        if not request.path.startswith(SNAPSHOT_QUERY_PREFIXES):
+            return None
+
+        active_snapshot_name = session.get('current_snapshot_name')
+        if not active_snapshot_name:
+            return None
+
+        try:
+            snapshot_path = snapshot_service.get_snapshot_path(
+                active_snapshot_name,
+                **get_snapshot_request_context(),
+            )
+
+            if batfish_service.current_snapshot_name != active_snapshot_name:
+                batfish_service.initialize_network(str(snapshot_path), snapshot_name=active_snapshot_name)
+                logger.info(
+                    "Synchronized Batfish snapshot for user=%s snapshot=%s",
+                    getattr(request, 'username', 'unknown'),
+                    active_snapshot_name,
+                )
+        except PermissionError:
+            session.pop('current_snapshot_name', None)
+            logger.warning(
+                "Cleared unauthorized active snapshot for user=%s snapshot=%s",
+                getattr(request, 'username', 'unknown'),
+                active_snapshot_name,
+            )
+            return error_response("Active snapshot access denied", 403)
+        except FileNotFoundError:
+            session.pop('current_snapshot_name', None)
+            logger.warning(
+                "Cleared missing active snapshot for user=%s snapshot=%s",
+                getattr(request, 'username', 'unknown'),
+                active_snapshot_name,
+            )
+            return error_response("Active snapshot not found", 404)
+
+        return None
 
 
 # ========== Error Handlers ==========
@@ -264,7 +399,7 @@ def add_cache_headers(response, cache_time: int = 300, private: bool = False):
     cache_control.append('must-revalidate')
 
     response.headers['Cache-Control'] = ', '.join(cache_control)
-    response.headers['Vary'] = 'Accept-Encoding'
+    response.headers['Vary'] = 'Accept-Encoding, Authorization, Cookie' if private else 'Accept-Encoding'
 
     # Add expires header for older proxies
     expires = datetime.utcnow() + timedelta(seconds=cache_time)
@@ -300,7 +435,7 @@ def success_response(data: Any, message: str = "Success", cache_time: int = 0, u
 
     # Add cache headers if cache_time > 0
     if cache_time > 0:
-        add_cache_headers(response, cache_time)
+        add_cache_headers(response, cache_time, private=config.AUTH_ENABLED)
 
     return response
 
@@ -308,6 +443,36 @@ def success_response(data: Any, message: str = "Success", cache_time: int = 0, u
 def error_response(message: str, status_code: int = 400) -> tuple:
     """Create error response"""
     return jsonify({"status": "error", "message": message}), status_code
+
+
+def get_snapshot_request_context() -> dict[str, Any]:
+    """Build per-request snapshot authorization context."""
+    return {
+        'requester_user_id': getattr(request, 'user_id', None),
+        'auth_enabled': config.AUTH_ENABLED,
+    }
+
+
+def get_snapshot_creation_context() -> dict[str, Any]:
+    """Build snapshot creation context including owner metadata."""
+    return {
+        'owner_user_id': getattr(request, 'user_id', None),
+        'owner_username': getattr(request, 'username', None),
+        'auth_enabled': config.AUTH_ENABLED,
+    }
+
+
+def reload_active_snapshot_after_layer1_change(name: str) -> None:
+    """Reload Batfish when Layer1 changes affect the active snapshot context."""
+    if config.AUTH_ENABLED:
+        if session.get('current_snapshot_name') != name:
+            return
+    elif batfish_service.current_snapshot_name != name:
+        return
+
+    snapshot_path = snapshot_service.get_snapshot_path(name, **get_snapshot_request_context())
+    batfish_service.initialize_network(str(snapshot_path), snapshot_name=name)
+    logger.info("Reloaded Batfish snapshot after Layer1 change: snapshot=%s", name)
 
 
 # ========== User Management Validation Functions ==========
@@ -1375,23 +1540,36 @@ def initialize_network():
     """
     try:
         data = request.get_json()
-        if not data or 'snapshot_dir' not in data:
-            return error_response("Missing 'snapshot_dir' in request body", 400)
+        if not data or ('snapshot_dir' not in data and 'snapshot_name' not in data):
+            return error_response("Missing 'snapshot_dir' or 'snapshot_name' in request body", 400)
 
-        snapshot_dir = data['snapshot_dir']
+        snapshot_dir = data.get('snapshot_dir', '')
         snapshot_name = data.get('snapshot_name')
 
-        # Validate snapshot directory path against allowed base path
-        try:
-            safe_path = validate_path(config.ALLOWED_SNAPSHOT_PATH, snapshot_dir)
-        except ValueError as e:
-            return error_response(f"Invalid snapshot directory: {e}", 400)
+        if config.AUTH_ENABLED:
+            resolved_snapshot_name = snapshot_name or Path(str(snapshot_dir)).name
+            safe_path = snapshot_service.get_snapshot_path(
+                resolved_snapshot_name,
+                **get_snapshot_request_context(),
+            )
+            snapshot_name = resolved_snapshot_name
+        else:
+            # Validate snapshot directory path against allowed base path
+            try:
+                safe_path = validate_path(config.ALLOWED_SNAPSHOT_PATH, snapshot_dir)
+            except ValueError as e:
+                return error_response(f"Invalid snapshot directory: {e}", 400)
 
         # Initialize network
         result = batfish_service.initialize_network(str(safe_path), snapshot_name)
 
+        if config.AUTH_ENABLED:
+            session['current_snapshot_name'] = result.get('snapshot')
+
         return success_response(result, "Network initialized successfully")
 
+    except PermissionError as e:
+        return error_response(str(e), 403)
     except FileNotFoundError as e:
         return error_response(str(e), 404)
     except Exception as e:
@@ -2810,8 +2988,10 @@ def reduce_reachability():
 def list_snapshots():
     """List all available snapshots"""
     try:
-        snapshots = snapshot_service.list_snapshots()
+        snapshots = snapshot_service.list_snapshots(**get_snapshot_request_context())
         return success_response(snapshots)
+    except PermissionError as e:
+        return error_response(str(e), 403)
     except Exception as e:
         logger.error(f"Failed to list snapshots: {e}")
         return error_response(str(e), 500)
@@ -2833,10 +3013,17 @@ def create_snapshot():
             return error_response("Missing 'name' in request body", 400)
 
         name = data['name']
-        snapshot = snapshot_service.create_snapshot(name)
+        folder_name = data.get('folder_name')
+        snapshot = snapshot_service.create_snapshot(
+            name,
+            folder_name=folder_name,
+            **get_snapshot_creation_context(),
+        )
 
         return success_response(snapshot, "Snapshot created successfully")
 
+    except PermissionError as e:
+        return error_response(str(e), 403)
     except ValueError as e:
         return error_response(str(e), 400)
     except Exception as e:
@@ -2844,13 +3031,46 @@ def create_snapshot():
         return error_response(str(e), 500)
 
 
+@app.route('/api/snapshots/<name>', methods=['PATCH'])
+def update_snapshot(name: str):
+    """Update snapshot metadata such as folder classification."""
+    try:
+        data = request.get_json()
+        if data is None or 'folder_name' not in data:
+            return error_response("Missing 'folder_name' in request body", 400)
+
+        snapshot = snapshot_service.update_snapshot_metadata(
+            name,
+            folder_name=data.get('folder_name'),
+            **get_snapshot_request_context(),
+        )
+
+        return success_response(snapshot, "Snapshot updated successfully")
+
+    except PermissionError as e:
+        return error_response(str(e), 403)
+    except FileNotFoundError as e:
+        return error_response(str(e), 404)
+    except ValueError as e:
+        return error_response(str(e), 400)
+    except Exception as e:
+        logger.error(f"Failed to update snapshot: {e}")
+        return error_response(str(e), 500)
+
+
 @app.route('/api/snapshots/<name>', methods=['DELETE'])
 def delete_snapshot(name: str):
     """Delete a snapshot"""
     try:
-        snapshot_service.delete_snapshot(name)
+        snapshot_service.delete_snapshot(name, **get_snapshot_request_context())
+
+        if config.AUTH_ENABLED and session.get('current_snapshot_name') == name:
+            session.pop('current_snapshot_name', None)
+
         return success_response({"name": name}, "Snapshot deleted successfully")
 
+    except PermissionError as e:
+        return error_response(str(e), 403)
     except ValueError as e:
         # Protected snapshot
         return error_response(str(e), 403)
@@ -2865,9 +3085,11 @@ def delete_snapshot(name: str):
 def get_snapshot_files(name: str):
     """Get list of files in a snapshot"""
     try:
-        files = snapshot_service.get_snapshot_files(name)
+        files = snapshot_service.get_snapshot_files(name, **get_snapshot_request_context())
         return success_response(files)
 
+    except PermissionError as e:
+        return error_response(str(e), 403)
     except FileNotFoundError as e:
         return error_response(str(e), 404)
     except Exception as e:
@@ -2890,10 +3112,16 @@ def upload_snapshot_file(name: str):
         if file.filename == '':
             return error_response("No file selected", 400)
 
-        file_info = snapshot_service.upload_file(name, file)
+        file_info = snapshot_service.upload_file(
+            name,
+            file,
+            **get_snapshot_request_context(),
+        )
 
         return success_response(file_info, "File uploaded successfully")
 
+    except PermissionError as e:
+        return error_response(str(e), 403)
     except FileNotFoundError as e:
         return error_response(str(e), 404)
     except ValueError as e:
@@ -2909,11 +3137,16 @@ def activate_snapshot(name: str):
     Activate a snapshot (initialize Batfish with this snapshot)
     """
     try:
-        snapshot_path = snapshot_service.get_snapshot_path(name)
+        snapshot_path = snapshot_service.get_snapshot_path(name, **get_snapshot_request_context())
         result = batfish_service.initialize_network(str(snapshot_path), name)
+
+        if config.AUTH_ENABLED:
+            session['current_snapshot_name'] = name
 
         return success_response(result, f"Snapshot '{name}' activated successfully")
 
+    except PermissionError as e:
+        return error_response(str(e), 403)
     except FileNotFoundError as e:
         return error_response(str(e), 404)
     except Exception as e:
@@ -2950,11 +3183,22 @@ def compare_snapshots():
         if not base_snapshot or not comparison_snapshot:
             return error_response("Both 'base_snapshot' and 'comparison_snapshot' are required", 400)
 
+        snapshot_context = get_snapshot_request_context()
+        base_snapshot_path = snapshot_service.get_snapshot_path(base_snapshot, **snapshot_context)
+        comparison_snapshot_path = snapshot_service.get_snapshot_path(comparison_snapshot, **snapshot_context)
+
         # Use existing compare_snapshots method from batfish_service
-        result = batfish_service.compare_snapshots(base_snapshot, comparison_snapshot)
+        result = batfish_service.compare_snapshots(
+            base_snapshot,
+            comparison_snapshot,
+            base_snapshot_path=base_snapshot_path,
+            comparison_snapshot_path=comparison_snapshot_path,
+        )
 
         return success_response(result, "Snapshots compared successfully")
 
+    except PermissionError as e:
+        return error_response(str(e), 403)
     except FileNotFoundError as e:
         return error_response(str(e), 404)
     except ValueError as e:
@@ -2976,8 +3220,10 @@ def get_snapshot_layer1_topology(name: str):
         Layer1 topology data with edges array
     """
     try:
-        topology = snapshot_service.get_layer1_topology(name)
+        topology = snapshot_service.get_layer1_topology(name, **get_snapshot_request_context())
         return success_response(topology, "Layer1 topology retrieved successfully")
+    except PermissionError as e:
+        return error_response(str(e), 403)
     except FileNotFoundError as e:
         return error_response(str(e), 404)
     except Exception as e:
@@ -3012,19 +3258,18 @@ def save_snapshot_layer1_topology(name: str):
         if 'edges' not in topology_data:
             return error_response("'edges' field is required in request body", 400)
 
-        result = snapshot_service.save_layer1_topology(name, topology_data)
+        result = snapshot_service.save_layer1_topology(
+            name,
+            topology_data,
+            **get_snapshot_request_context(),
+        )
 
-        # Auto-reload Batfish snapshot to reflect Layer1 topology changes
-        try:
-            snapshot_path = snapshot_service.get_snapshot_path(name)
-            batfish_service.initialize_network(str(snapshot_path), snapshot_name=name)
-            logger.info(f"Automatically reloaded Batfish snapshot '{name}' after Layer1 topology save")
-        except Exception as e:
-            logger.warning(f"Failed to auto-reload Batfish snapshot after Layer1 save: {e}")
-            # Continue with success response even if reload fails
+        reload_active_snapshot_after_layer1_change(name)
 
         return success_response(result, "Layer1 topology saved successfully")
 
+    except PermissionError as e:
+        return error_response(str(e), 403)
     except FileNotFoundError as e:
         return error_response(str(e), 404)
     except ValueError as e:
@@ -3045,8 +3290,11 @@ def delete_snapshot_layer1_topology(name: str):
         Success message
     """
     try:
-        snapshot_service.delete_layer1_topology(name)
+        snapshot_service.delete_layer1_topology(name, **get_snapshot_request_context())
+        reload_active_snapshot_after_layer1_change(name)
         return success_response({"snapshot": name}, "Layer1 topology deleted successfully")
+    except PermissionError as e:
+        return error_response(str(e), 403)
     except FileNotFoundError as e:
         return error_response(str(e), 404)
     except Exception as e:
@@ -3063,8 +3311,14 @@ def get_snapshot_interfaces(name: str):
         Dictionary mapping hostnames to interface lists
     """
     try:
-        interfaces = snapshot_service.get_snapshot_interfaces(name, batfish_service)
+        interfaces = snapshot_service.get_snapshot_interfaces(
+            name,
+            batfish_service,
+            **get_snapshot_request_context(),
+        )
         return success_response(interfaces, "Snapshot interfaces retrieved successfully")
+    except PermissionError as e:
+        return error_response(str(e), 403)
     except FileNotFoundError as e:
         return error_response(str(e), 404)
     except Exception as e:

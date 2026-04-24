@@ -40,6 +40,11 @@ interface AuthStore {
   clearError: () => void
 }
 
+function clearSnapshotClientState() {
+  localStorage.removeItem('topologix-snapshot-storage')
+  localStorage.removeItem('topologix-position-storage')
+}
+
 /**
  * Zustand authentication store
  * Provides user authentication state and actions throughout the application
@@ -78,6 +83,7 @@ export const useAuthStore = create<AuthStore>((set, get) => ({
     set({ isLoading: true, error: null })
     try {
       const data = await authAPI.login(username, password)
+      clearSnapshotClientState()
       set({
         user: data.user,
         isAuthenticated: true,
@@ -98,6 +104,7 @@ export const useAuthStore = create<AuthStore>((set, get) => ({
     set({ isLoading: true })
     try {
       await authAPI.logout()
+      clearSnapshotClientState()
       set({
         user: null,
         isAuthenticated: false,
@@ -105,6 +112,7 @@ export const useAuthStore = create<AuthStore>((set, get) => ({
         error: null,
       })
     } catch (_error: unknown) {
+      clearSnapshotClientState()
       set({
         user: null,
         isAuthenticated: false,

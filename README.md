@@ -140,8 +140,8 @@ For all variables and detailed explanations, see [.env.example](.env.example).
 Place your network configuration files in the `snapshots` directory:
 
 ```bash
-mkdir -p snapshots/my-network
-# Copy your config files (.cfg, .conf) to snapshots/my-network/
+mkdir -p snapshots/my-network/configs
+# Copy your text-based network artifacts (.cfg, .conf, .txt, .log) to snapshots/my-network/configs/
 ```
 
 ## Basic Commands

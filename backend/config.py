@@ -125,7 +125,7 @@ class Config:
 
     # Security - File Upload
     MAX_CONTENT_LENGTH: int = 10 * 1024 * 1024  # 10MB
-    ALLOWED_EXTENSIONS: set = {'.cfg', '.conf', '.txt'}
+    ALLOWED_EXTENSIONS: set = {'.cfg', '.conf', '.txt', '.log'}
     UPLOAD_FOLDER: str = os.getenv('UPLOAD_FOLDER', './uploads')
 
     # Security - Rate Limiting

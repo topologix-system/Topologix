@@ -12,7 +12,7 @@ Comprehensive input validation and sanitization
 - Content scanning for malicious patterns (scripts, code injection)
 - Network config keyword validation (interface, hostname, router, etc.)
 - Maximum file size: 10MB per file
-- Allowed extensions: .cfg, .conf, .txt
+- Allowed extensions: .cfg, .conf, .txt, .log
 """
 import logging
 import re
@@ -36,7 +36,7 @@ CIDR_PATTERN = re.compile(
 )
 
 # File validation constants
-ALLOWED_EXTENSIONS = {'.cfg', '.conf', '.txt'}
+ALLOWED_EXTENSIONS = {'.cfg', '.conf', '.txt', '.log'}
 ALLOWED_MIME_TYPES = {
     'text/plain',
     'text/x-cisco-ios',
@@ -202,17 +202,26 @@ def validate_file_upload(file_storage: Any) -> dict:
     content = file_storage.read(MAX_FILE_SIZE)
     file_storage.seek(0)
 
+    if b'\x00' in content:
+        raise ValueError("Binary files are not allowed")
+
+    try:
+        content.decode('utf-8')
+    except UnicodeDecodeError as exc:
+        raise ValueError("Uploaded file must be valid UTF-8 text") from exc
+
     # Check MIME type using python-magic
+    mime = None
     try:
         mime = magic.from_buffer(content, mime=True)
-        if mime not in ALLOWED_MIME_TYPES:
-            logger.warning(f"Rejected file with MIME type: {mime}")
-            # Allow text files even if MIME detection is uncertain
-            if not mime.startswith('text/'):
-                raise ValueError(f"File type not allowed: {mime}")
     except Exception as e:
         logger.error(f"Error checking file MIME type: {e}")
-        # Continue with other validations
+
+    if mime and mime not in ALLOWED_MIME_TYPES:
+        logger.warning(f"Rejected file with MIME type: {mime}")
+        # Allow text files even if MIME detection is uncertain
+        if not mime.startswith('text/'):
+            raise ValueError(f"File type not allowed: {mime}")
 
     # Check for malicious patterns
     for pattern in DANGEROUS_PATTERNS:
@@ -220,9 +229,9 @@ def validate_file_upload(file_storage: Any) -> dict:
             logger.warning(f"Dangerous pattern detected in uploaded file: {filename}")
             raise ValueError("File contains potentially malicious content")
 
-    # Check if file appears to be a valid configuration
-    if not _is_valid_config_content(content):
-        raise ValueError("File does not appear to be a valid network configuration")
+    # Check if file appears to be a valid network configuration or operational log
+    if not _is_valid_network_text_content(content, file_ext):
+        raise ValueError("File does not appear to be a valid network configuration or log")
 
     logger.info(f"File validation successful for: {filename}")
 
@@ -234,11 +243,12 @@ def validate_file_upload(file_storage: Any) -> dict:
     }
 
 
-def _is_valid_config_content(content: bytes) -> bool:
-    """Check if content appears to be valid network configuration
+def _is_valid_network_text_content(content: bytes, file_ext: str) -> bool:
+    """Check if content appears to be valid network configuration or operational log
 
     Args:
         content: File content as bytes
+        file_ext: File extension including leading dot
 
     Returns:
         True if content appears valid
@@ -246,6 +256,14 @@ def _is_valid_config_content(content: bytes) -> bool:
     try:
         # Convert to string for analysis
         text = content.decode('utf-8', errors='ignore')
+        text_lower = text.lower()
+
+        if file_ext == '.log':
+            log_indicators = [
+                '%', 'link-', 'line protocol', 'ospf-', 'bgp-', 'adjacency',
+                'error', 'warning', 'notice', 'info', 'up', 'down', 'changed state'
+            ]
+            return any(indicator in text_lower for indicator in log_indicators) or len(text.strip()) > 0
 
         # Check for common network configuration keywords
         config_keywords = [
@@ -257,13 +275,13 @@ def _is_valid_config_content(content: bytes) -> bool:
 
         # Count how many keywords are present
         keyword_count = sum(1 for keyword in config_keywords
-                          if keyword.lower() in text.lower())
+                          if keyword.lower() in text_lower)
 
         # Require at least 2 configuration keywords
         return keyword_count >= 2
 
     except Exception as e:
-        logger.error(f"Error validating config content: {e}")
+        logger.error(f"Error validating network text content: {e}")
         return False
 
 

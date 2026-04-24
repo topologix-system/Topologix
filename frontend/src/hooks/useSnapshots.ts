@@ -4,7 +4,7 @@
  */
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { snapshotAPI } from '../services/api'
-import type { CreateSnapshotRequest } from '../types'
+import type { CreateSnapshotRequest, UpdateSnapshotRequest } from '../types'
 
 /**
  * Query key factory for snapshot-related React Query caches
@@ -80,8 +80,24 @@ export function useDeleteSnapshot() {
 }
 
 /**
+ * Mutation to update snapshot metadata such as folder classification
+ * Invalidates snapshot list so grouping stays in sync across the UI
+ */
+export function useUpdateSnapshot() {
+  const queryClient = useQueryClient()
+
+  return useMutation({
+    mutationFn: ({ name, request }: { name: string; request: UpdateSnapshotRequest }) =>
+      snapshotAPI.update(name, request),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: snapshotKeys.list() })
+    },
+  })
+}
+
+/**
  * Mutation to upload configuration file to snapshot
- * Accepts network device config files (.cfg, .conf, .txt)
+ * Accepts network device config and log files (.cfg, .conf, .txt, .log)
  * Invalidates both file list and snapshot list (file count changed)
  * Used in SnapshotManagement page drag-and-drop and file picker
  */

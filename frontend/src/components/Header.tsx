@@ -247,7 +247,7 @@ export function Header() {
               <option value="">{t('header.selectSnapshot')}</option>
               {snapshots?.map((snapshot) => (
                 <option key={snapshot.name} value={snapshot.name}>
-                  {snapshot.name} ({t('header.filesCount', { count: snapshot.file_count })})
+                  {snapshot.folder_name ? `${snapshot.folder_name} / ` : ''}{snapshot.name} ({t('header.filesCount', { count: snapshot.file_count })})
                 </option>
               ))}
             </select>

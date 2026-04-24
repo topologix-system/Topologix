@@ -1110,11 +1110,17 @@
     "createToStart": "Create one to get started",
     "fileCount": "{{count}} files",
     "filesIn": "Files in {{name}}",
+    "ungroupedFolder": "Ungrouped",
+    "folderLabel": "Folder",
+    "folderPlaceholder": "customer-a/site-01",
+    "folderHelp": "Use '/' to create nested folder labels without changing the on-disk snapshot path.",
+    "saveFolder": "Save Folder",
+    "savingFolder": "Saving...",
     "editLayer1": "Edit Layer 1 Topology",
-    "dropFiles": "Drop configuration files here",
+    "dropFiles": "Drop configuration or log files here",
     "chooseFiles": "Choose Files",
-    "chooseFilesAria": "Choose configuration files to upload",
-    "supportedFormats": "Supported: .cfg, .conf, .txt (max 10MB)",
+    "chooseFilesAria": "Choose configuration or log files to upload",
+    "supportedFormats": "Supported: .cfg, .conf, .txt, .log (max 10MB)",
     "uploading": "Uploading files...",
     "table": {
       "filename": "Filename",
@@ -1122,11 +1128,12 @@
       "modified": "Modified"
     },
     "noFiles": "No files uploaded yet",
-    "uploadToStart": "Upload configuration files to get started",
+    "uploadToStart": "Upload configuration or log files to get started",
     "selectSnapshot": "Select a snapshot to manage files",
     "createDialog": {
       "title": "Create New Snapshot",
       "nameLabel": "Snapshot Name",
+      "folderLabel": "Folder",
       "creating": "Creating..."
     },
     "deleteConfirm": {

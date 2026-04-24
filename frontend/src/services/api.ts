@@ -46,6 +46,7 @@ import type {
   Snapshot,
   SnapshotFile,
   CreateSnapshotRequest,
+  UpdateSnapshotRequest,
   IPSecSessionStatus,
   IPSecEdge,
   IPSecPeerConfiguration,
@@ -683,6 +684,11 @@ export const snapshotAPI = {
 
   async delete(name: string) {
     const response = await apiClient.delete<APIResponse<{ name: string }>>(`/snapshots/${name}`)
+    return response.data.data
+  },
+
+  async update(name: string, request: UpdateSnapshotRequest) {
+    const response = await apiClient.patch<APIResponse<Snapshot>>(`/snapshots/${name}`, request)
     return response.data.data
   },
 

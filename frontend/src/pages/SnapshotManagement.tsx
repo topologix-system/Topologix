@@ -1,12 +1,12 @@
 /**
  * Snapshot CRUD management page
- * - Create, delete, upload configuration files, and activate snapshots for Batfish analysis
+ * - Create, delete, upload configuration or log files, and activate snapshots for Batfish analysis
  * - Drag-and-drop file upload with progress tracking and validation
  * - Form validation and React Query mutations for optimistic UI updates
  * - Zustand store integration for current snapshot state synchronization
  * - Handles multiple file uploads and snapshot lifecycle management
  */
-import { useState, useCallback } from 'react'
+import { useState, useCallback, useMemo } from 'react'
 import { Link } from 'react-router-dom'
 import { useTranslation } from 'react-i18next'
 import {
@@ -27,22 +27,28 @@ import {
   useSnapshotFiles,
   useCreateSnapshot,
   useDeleteSnapshot,
+  useUpdateSnapshot,
   useUploadFile,
   useActivateSnapshot,
 } from '../hooks'
 import { useSnapshotStore } from '../store'
 import { ConfirmDialog } from '../components/ConfirmDialog'
 import type { Snapshot } from '../types'
+import { extractErrorMessage } from '../types/errors'
 
 export function SnapshotManagement() {
   const { t } = useTranslation()
   const [selectedSnapshot, setSelectedSnapshot] = useState<string | null>(null)
   const [showCreateDialog, setShowCreateDialog] = useState(false)
   const [newSnapshotName, setNewSnapshotName] = useState('')
+  const [newSnapshotFolder, setNewSnapshotFolder] = useState('')
   const [dragOver, setDragOver] = useState(false)
   const [validationError, setValidationError] = useState('')
+  const [folderValidationError, setFolderValidationError] = useState('')
   const [deleteConfirmOpen, setDeleteConfirmOpen] = useState(false)
   const [snapshotToDelete, setSnapshotToDelete] = useState<string | null>(null)
+  const [folderDraft, setFolderDraft] = useState('')
+  const [uploadError, setUploadError] = useState('')
 
   /**
    * Global Zustand state for active snapshot tracking
@@ -68,8 +74,42 @@ export function SnapshotManagement() {
    */
   const createMutation = useCreateSnapshot()
   const deleteMutation = useDeleteSnapshot()
+  const updateMutation = useUpdateSnapshot()
   const uploadMutation = useUploadFile()
   const activateMutation = useActivateSnapshot()
+
+  const selectedSnapshotDetails = useMemo(
+    () => snapshots?.find((snapshot) => snapshot.name === selectedSnapshot) ?? null,
+    [selectedSnapshot, snapshots]
+  )
+
+  const groupedSnapshots = useMemo(() => {
+    const groups = new Map<string, Snapshot[]>()
+
+    for (const snapshot of snapshots ?? []) {
+      const key = snapshot.folder_name?.trim() || '__ungrouped__'
+      const existing = groups.get(key) ?? []
+      existing.push(snapshot)
+      groups.set(key, existing)
+    }
+
+    return Array.from(groups.entries())
+      .sort(([left], [right]) => {
+        if (left === '__ungrouped__') return 1
+        if (right === '__ungrouped__') return -1
+        return left.localeCompare(right)
+      })
+      .map(([groupKey, groupSnapshots]) => ({
+        key: groupKey,
+        label: groupKey === '__ungrouped__' ? t('snapshots.ungroupedFolder') : groupKey,
+        snapshots: groupSnapshots,
+      }))
+  }, [snapshots, t])
+
+  const getFolderDisplayName = useCallback(
+    (folderName?: string | null) => folderName || t('snapshots.ungroupedFolder'),
+    [t]
+  )
 
   /**
    * Handle snapshot creation with validation
@@ -78,6 +118,7 @@ export function SnapshotManagement() {
    */
   const handleCreate = useCallback(() => {
     const trimmedName = newSnapshotName.trim()
+    const trimmedFolder = newSnapshotFolder.trim()
 
     if (!trimmedName) {
       setValidationError('Snapshot name is required')
@@ -96,20 +137,47 @@ export function SnapshotManagement() {
 
     setValidationError('')
     createMutation.mutate(
-      { name: trimmedName },
+      { name: trimmedName, folder_name: trimmedFolder || null },
       {
         onSuccess: (snapshot) => {
           setShowCreateDialog(false)
           setNewSnapshotName('')
+          setNewSnapshotFolder('')
           setValidationError('')
           setSelectedSnapshot(snapshot.name)
+          setFolderDraft(snapshot.folder_name || '')
         },
-        onError: (error: any) => {
-          setValidationError(error.message || 'Failed to create snapshot')
+        onError: (error: unknown) => {
+          setValidationError(extractErrorMessage(error, 'Failed to create snapshot'))
         },
       }
     )
-  }, [newSnapshotName, createMutation])
+  }, [newSnapshotName, newSnapshotFolder, createMutation])
+
+  /**
+   * Persist folder classification for the selected snapshot
+   */
+  const handleFolderSave = useCallback(() => {
+    if (!selectedSnapshot) return
+
+    updateMutation.mutate(
+      {
+        name: selectedSnapshot,
+        request: {
+          folder_name: folderDraft.trim() || null,
+        },
+      },
+      {
+        onSuccess: (snapshot) => {
+          setFolderDraft(snapshot.folder_name || '')
+          setFolderValidationError('')
+        },
+        onError: (error: unknown) => {
+          setFolderValidationError(extractErrorMessage(error, 'Failed to update snapshot folder'))
+        },
+      }
+    )
+  }, [folderDraft, selectedSnapshot, updateMutation])
 
   /**
    * Handle snapshot deletion with confirmation dialog
@@ -134,6 +202,10 @@ export function SnapshotManagement() {
         }
         if (currentSnapshotName === snapshotToDelete) {
           setCurrentSnapshotName(null)
+        }
+        if (selectedSnapshot === snapshotToDelete) {
+          setFolderDraft('')
+          setFolderValidationError('')
         }
         setDeleteConfirmOpen(false)
         setSnapshotToDelete(null)
@@ -161,11 +233,21 @@ export function SnapshotManagement() {
     (files: FileList | null) => {
       if (!files || !selectedSnapshot) return
 
+      setUploadError('')
       Array.from(files).forEach((file) => {
-        uploadMutation.mutate({
-          name: selectedSnapshot,
-          file,
-        })
+        uploadMutation.mutate(
+          {
+            name: selectedSnapshot,
+            file,
+          },
+          {
+            onError: (error: unknown) => {
+              setUploadError((currentError) => (
+                currentError || extractErrorMessage(error, `Failed to upload file '${file.name}'`)
+              ))
+            },
+          }
+        )
       })
     },
     [selectedSnapshot, uploadMutation]
@@ -212,6 +294,22 @@ export function SnapshotManagement() {
   )
 
   /**
+   * Handle snapshot selection and synchronize editable folder state
+   */
+  const handleSnapshotSelection = useCallback(
+    (snapshot: Snapshot) => {
+      setSelectedSnapshot(snapshot.name)
+      setFolderDraft(snapshot.folder_name || '')
+      setFolderValidationError('')
+
+      if (currentSnapshotName !== snapshot.name) {
+        handleActivate(snapshot.name)
+      }
+    },
+    [currentSnapshotName, handleActivate]
+  )
+
+  /**
    * Format byte size to human-readable string
    * Converts raw bytes to appropriate unit (B, KB, MB, GB) with 2 decimal places
    * @param bytes - Raw byte count to format
@@ -224,6 +322,9 @@ export function SnapshotManagement() {
     const i = Math.floor(Math.log(bytes) / Math.log(k))
     return `${(bytes / Math.pow(k, i)).toFixed(2)} ${sizes[i]}`
   }
+
+  const currentFolderValue = selectedSnapshotDetails?.folder_name || ''
+  const isFolderDirty = currentFolderValue !== (folderDraft.trim() || '')
 
   return (
     <div className="flex flex-col h-screen bg-gray-50">
@@ -281,76 +382,81 @@ export function SnapshotManagement() {
                 <p className="text-sm mt-2 text-gray-700">{t('snapshots.createToStart')}</p>
               </div>
             ) : (
-              <div className="space-y-2" role="list" aria-label="Available snapshots">
-                {snapshots.map((snapshot: Snapshot) => (
-                  <div
-                    key={snapshot.name}
-                    role="button"
-                    className={`p-4 rounded-lg border-2 cursor-pointer transition-colors focus-within:ring-2 focus-within:ring-primary-600 ${
-                      currentSnapshotName === snapshot.name
-                        ? 'border-green-500 bg-green-50'
-                        : activateMutation.isPending && activateMutation.variables === snapshot.name
-                        ? 'border-blue-400 bg-blue-50 opacity-75'
-                        : selectedSnapshot === snapshot.name
-                        ? 'border-blue-500 bg-blue-50'
-                        : 'border-gray-200 hover:border-gray-300 hover:shadow-sm'
-                    }`}
-                    onClick={() => {
-                      setSelectedSnapshot(snapshot.name)
-                      if (currentSnapshotName !== snapshot.name) {
-                        handleActivate(snapshot.name)
-                      }
-                    }}
-                    tabIndex={0}
-                    aria-pressed={selectedSnapshot === snapshot.name}
-                    aria-label={`Snapshot ${snapshot.name} with ${snapshot.file_count} files${
-                      currentSnapshotName === snapshot.name
-                        ? ' - currently active'
-                        : activateMutation.isPending && activateMutation.variables === snapshot.name
-                        ? ' - activating...'
-                        : ''
-                    }. Click to activate and view files`}
-                    onKeyDown={(e) => {
-                      if (e.key === 'Enter' || e.key === ' ') {
-                        e.preventDefault()
-                        setSelectedSnapshot(snapshot.name)
-                        if (currentSnapshotName !== snapshot.name) {
-                          handleActivate(snapshot.name)
-                        }
-                      }
-                    }}
-                  >
-                    <div className="flex items-start justify-between mb-2">
-                      <h3 className="font-semibold text-gray-900">{snapshot.name}</h3>
-                      {currentSnapshotName === snapshot.name ? (
-                        <CheckCircle className="w-5 h-5 text-green-600 flex-shrink-0" aria-hidden="true" />
-                      ) : activateMutation.isPending && activateMutation.variables === snapshot.name ? (
-                        <Loader2 className="w-5 h-5 text-blue-600 flex-shrink-0 animate-spin" aria-hidden="true" />
-                      ) : null}
+              <div className="space-y-4" role="list" aria-label="Available snapshots">
+                {groupedSnapshots.map((group) => (
+                  <section key={group.key} className="space-y-2" aria-label={group.label}>
+                    <div className="flex items-center gap-2 px-1">
+                      <FolderOpen className="w-4 h-4 text-gray-500" aria-hidden="true" />
+                      <h3 className="text-sm font-semibold text-gray-700">{group.label}</h3>
                     </div>
-                    <div className="text-sm text-gray-800 space-y-1 font-medium">
-                      <p>{t('snapshots.fileCount', { count: snapshot.file_count })}</p>
-                      <p>{formatBytes(snapshot.size_bytes)}</p>
-                      <p className="text-xs text-gray-700 font-normal">
-                        {new Date(snapshot.created_at).toLocaleString()}
-                      </p>
-                    </div>
-                    <div className="flex justify-end mt-3">
-                      <button
-                        onClick={(e) => {
-                          e.stopPropagation()
-                          handleDelete(snapshot.name)
+                    {group.snapshots.map((snapshot: Snapshot) => (
+                      <div
+                        key={snapshot.name}
+                        role="button"
+                        className={`p-4 rounded-lg border-2 cursor-pointer transition-colors focus-within:ring-2 focus-within:ring-primary-600 ${
+                          currentSnapshotName === snapshot.name
+                            ? 'border-green-500 bg-green-50'
+                            : activateMutation.isPending && activateMutation.variables === snapshot.name
+                            ? 'border-blue-400 bg-blue-50 opacity-75'
+                            : selectedSnapshot === snapshot.name
+                            ? 'border-blue-500 bg-blue-50'
+                            : 'border-gray-200 hover:border-gray-300 hover:shadow-sm'
+                        }`}
+                        onClick={() => handleSnapshotSelection(snapshot)}
+                        tabIndex={0}
+                        aria-pressed={selectedSnapshot === snapshot.name}
+                        aria-label={`Snapshot ${snapshot.name} in folder ${getFolderDisplayName(snapshot.folder_name)} with ${snapshot.file_count} files${
+                          currentSnapshotName === snapshot.name
+                            ? ' - currently active'
+                            : activateMutation.isPending && activateMutation.variables === snapshot.name
+                            ? ' - activating...'
+                            : ''
+                        }. Click to activate and view files`}
+                        onKeyDown={(e) => {
+                          if (e.key === 'Enter' || e.key === ' ') {
+                            e.preventDefault()
+                            handleSnapshotSelection(snapshot)
+                          }
                         }}
-                        disabled={deleteMutation.isPending}
-                        className="px-3 py-1.5 text-sm bg-red-600 text-white rounded hover:bg-red-700 disabled:opacity-50 disabled:cursor-not-allowed transition-colors focus:outline-none focus:ring-2 focus:ring-red-600 focus:ring-offset-1"
-                        aria-label={`Delete snapshot ${snapshot.name}`}
-                        aria-busy={deleteMutation.isPending}
                       >
-                        <Trash2 className="w-4 h-4" aria-hidden="true" />
-                        <span className="sr-only">Delete</span>
-                      </button>
-                    </div>
-                  </div>
+                        <div className="flex items-start justify-between mb-2 gap-3">
+                          <div className="min-w-0">
+                            <p className="text-xs font-medium uppercase tracking-wide text-gray-500">
+                              {getFolderDisplayName(snapshot.folder_name)}
+                            </p>
+                            <h4 className="font-semibold text-gray-900 truncate">{snapshot.name}</h4>
+                          </div>
+                          {currentSnapshotName === snapshot.name ? (
+                            <CheckCircle className="w-5 h-5 text-green-600 flex-shrink-0" aria-hidden="true" />
+                          ) : activateMutation.isPending && activateMutation.variables === snapshot.name ? (
+                            <Loader2 className="w-5 h-5 text-blue-600 flex-shrink-0 animate-spin" aria-hidden="true" />
+                          ) : null}
+                        </div>
+                        <div className="text-sm text-gray-800 space-y-1 font-medium">
+                          <p>{t('snapshots.fileCount', { count: snapshot.file_count })}</p>
+                          <p>{formatBytes(snapshot.size_bytes)}</p>
+                          <p className="text-xs text-gray-700 font-normal">
+                            {new Date(snapshot.created_at).toLocaleString()}
+                          </p>
+                        </div>
+                        <div className="flex justify-end mt-3">
+                          <button
+                            onClick={(e) => {
+                              e.stopPropagation()
+                              handleDelete(snapshot.name)
+                            }}
+                            disabled={deleteMutation.isPending}
+                            className="px-3 py-1.5 text-sm bg-red-600 text-white rounded hover:bg-red-700 disabled:opacity-50 disabled:cursor-not-allowed transition-colors focus:outline-none focus:ring-2 focus:ring-red-600 focus:ring-offset-1"
+                            aria-label={`Delete snapshot ${snapshot.name}`}
+                            aria-busy={deleteMutation.isPending}
+                          >
+                            <Trash2 className="w-4 h-4" aria-hidden="true" />
+                            <span className="sr-only">Delete</span>
+                          </button>
+                        </div>
+                      </div>
+                    ))}
+                  </section>
                 ))}
               </div>
             )}
@@ -362,9 +468,14 @@ export function SnapshotManagement() {
           {selectedSnapshot ? (
             <>
               <div className="flex items-center justify-between mb-4">
-                <h2 className="text-xl font-semibold text-gray-900">
-                  {t('snapshots.filesIn', { name: selectedSnapshot })}
-                </h2>
+                <div>
+                  <p className="text-sm font-medium text-gray-500">
+                    {getFolderDisplayName(selectedSnapshotDetails?.folder_name)}
+                  </p>
+                  <h2 className="text-xl font-semibold text-gray-900">
+                    {t('snapshots.filesIn', { name: selectedSnapshot })}
+                  </h2>
+                </div>
                 <Link
                   to={`/snapshots/${selectedSnapshot}/layer1-editor`}
                   className="inline-flex items-center gap-2 px-4 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 transition-colors"
@@ -372,6 +483,44 @@ export function SnapshotManagement() {
                   <Cable className="w-4 h-4" />
                   {t('snapshots.editLayer1')}
                 </Link>
+              </div>
+
+              <div className="bg-white border border-gray-200 rounded-lg p-4 mb-6">
+                <div className="flex flex-col gap-4 md:flex-row md:items-end">
+                  <div className="flex-1">
+                    <label htmlFor="snapshot-folder-input" className="block text-sm font-medium text-gray-800 mb-1">
+                      {t('snapshots.folderLabel')}
+                    </label>
+                    <input
+                      id="snapshot-folder-input"
+                      type="text"
+                      value={folderDraft}
+                      onChange={(e) => {
+                        setFolderDraft(e.target.value)
+                        setFolderValidationError('')
+                      }}
+                      placeholder={t('snapshots.folderPlaceholder')}
+                      className={`w-full px-3 py-2 border rounded-lg focus:outline-none focus:ring-2 transition-colors ${
+                        folderValidationError
+                          ? 'border-red-500 focus:ring-red-500 bg-red-50'
+                          : 'border-gray-300 focus:ring-primary-600'
+                      }`}
+                    />
+                    <p className="mt-2 text-xs text-gray-600">{t('snapshots.folderHelp')}</p>
+                    {folderValidationError && (
+                      <p className="mt-2 text-sm text-red-600 font-medium" role="alert">
+                        {folderValidationError}
+                      </p>
+                    )}
+                  </div>
+                  <button
+                    onClick={handleFolderSave}
+                    disabled={updateMutation.isPending || !isFolderDirty}
+                    className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed transition-colors font-medium"
+                  >
+                    {updateMutation.isPending ? t('snapshots.savingFolder') : t('snapshots.saveFolder')}
+                  </button>
+                </div>
               </div>
 
               {/* Upload area */}
@@ -399,7 +548,7 @@ export function SnapshotManagement() {
                   <input
                     type="file"
                     multiple
-                    accept=".cfg,.conf,.txt"
+                    accept=".cfg,.conf,.txt,.log"
                     className="hidden"
                     onChange={(e) => handleFileUpload(e.target.files)}
                     aria-label={t('snapshots.chooseFilesAria')}
@@ -413,6 +562,11 @@ export function SnapshotManagement() {
                   <div role="status" aria-live="polite" className="mt-4">
                     <span className="text-sm text-blue-600">{t('snapshots.uploading')}</span>
                   </div>
+                )}
+                {uploadError && (
+                  <p className="mt-4 text-sm text-red-600 font-medium" role="alert">
+                    {uploadError}
+                  </p>
                 )}
               </div>
 
@@ -475,7 +629,12 @@ export function SnapshotManagement() {
           role="dialog"
           aria-modal="true"
           aria-labelledby="create-dialog-title"
-          onClick={() => setShowCreateDialog(false)}
+          onClick={() => {
+            setShowCreateDialog(false)
+            setValidationError('')
+            setNewSnapshotName('')
+            setNewSnapshotFolder('')
+          }}
         >
           <div
             className="bg-white rounded-lg shadow-xl p-6 w-full max-w-md"
@@ -486,7 +645,12 @@ export function SnapshotManagement() {
                 {t('snapshots.createDialog.title')}
               </h3>
               <button
-                onClick={() => setShowCreateDialog(false)}
+                onClick={() => {
+                  setShowCreateDialog(false)
+                  setValidationError('')
+                  setNewSnapshotName('')
+                  setNewSnapshotFolder('')
+                }}
                 className="p-1 hover:bg-gray-100 rounded focus:outline-none focus:ring-2 focus:ring-primary-600"
                 aria-label={t('common.closeDialog')}
               >
@@ -528,12 +692,29 @@ export function SnapshotManagement() {
                 )}
               </div>
 
+              <div>
+                <label htmlFor="snapshot-folder-create-input" className="block text-sm font-medium text-gray-800 mb-1">
+                  {t('snapshots.createDialog.folderLabel')}
+                </label>
+                <input
+                  id="snapshot-folder-create-input"
+                  type="text"
+                  value={newSnapshotFolder}
+                  onChange={(e) => setNewSnapshotFolder(e.target.value)}
+                  onKeyDown={(e) => e.key === 'Enter' && handleCreate()}
+                  placeholder={t('snapshots.folderPlaceholder')}
+                  className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-primary-600 transition-colors"
+                />
+                <p className="mt-2 text-xs text-gray-600">{t('snapshots.folderHelp')}</p>
+              </div>
+
               <div className="flex gap-3 justify-end">
                 <button
                   onClick={() => {
                     setShowCreateDialog(false)
                     setValidationError('')
                     setNewSnapshotName('')
+                    setNewSnapshotFolder('')
                   }}
                   className="px-4 py-2 text-gray-800 hover:bg-gray-100 rounded-lg transition-colors font-medium focus:outline-none focus:ring-2 focus:ring-primary-600 focus:ring-offset-1"
                 >

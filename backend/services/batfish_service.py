@@ -45,6 +45,17 @@ class BatfishService:
         self.reference_snapshot_name: str | None = None
         self._initialized = False
 
+    def set_network_context(self, network_name: str) -> None:
+        """Switch Batfish network namespace for the current request context."""
+        if self.network_name == network_name:
+            return
+
+        logger.info("Switching Batfish network context: %s -> %s", self.network_name, network_name)
+        self.network_name = network_name
+        self.current_snapshot_name = None
+        self.reference_snapshot_name = None
+        self._initialized = False
+
     def initialize_network(self, snapshot_dir: str | Path, snapshot_name: str | None = None) -> dict[str, Any]:
         """
         Initialize Batfish network and snapshot
@@ -2396,7 +2407,9 @@ class BatfishService:
     def compare_snapshots(
         self,
         base_snapshot: str,
-        comparison_snapshot: str
+        comparison_snapshot: str,
+        base_snapshot_path: str | Path | None = None,
+        comparison_snapshot_path: str | Path | None = None,
     ) -> dict[str, Any]:
         """
         Compare two snapshots comprehensively
@@ -2416,7 +2429,7 @@ class BatfishService:
 
             # Initialize base snapshot and get initial data
             logger.debug(f"Initializing base snapshot: {base_snapshot}")
-            snapshot_path = Path(config.SNAPSHOTS_DIR) / base_snapshot
+            snapshot_path = Path(base_snapshot_path) if base_snapshot_path is not None else Path(config.SNAPSHOTS_DIR) / base_snapshot
             self.initialize_network(str(snapshot_path), snapshot_name=base_snapshot)
 
             base_nodes = {node["node"]: node for node in self.get_node_properties()}
@@ -2425,7 +2438,11 @@ class BatfishService:
 
             # Initialize comparison snapshot
             logger.debug(f"Initializing comparison snapshot: {comparison_snapshot}")
-            snapshot_path = Path(config.SNAPSHOTS_DIR) / comparison_snapshot
+            snapshot_path = (
+                Path(comparison_snapshot_path)
+                if comparison_snapshot_path is not None
+                else Path(config.SNAPSHOTS_DIR) / comparison_snapshot
+            )
             self.initialize_network(str(snapshot_path), snapshot_name=comparison_snapshot)
 
             comparison_nodes = {node["node"]: node for node in self.get_node_properties()}

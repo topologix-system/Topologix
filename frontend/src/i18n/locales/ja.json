@@ -1110,11 +1110,17 @@
     "createToStart": "開始するには作成してください",
     "fileCount": "{{count}} ファイル",
     "filesIn": "{{name}} のファイル",
+    "ungroupedFolder": "未分類",
+    "folderLabel": "フォルダー",
+    "folderPlaceholder": "customer-a/site-01",
+    "folderHelp": "実ディスク上の snapshot path を変えずに、'/' で階層的な分類ラベルを付けられます。",
+    "saveFolder": "フォルダーを保存",
+    "savingFolder": "保存中...",
     "editLayer1": "レイヤー1トポロジーを編集",
-    "dropFiles": "設定ファイルをここにドロップ",
+    "dropFiles": "設定ファイルまたはログファイルをここにドロップ",
     "chooseFiles": "ファイルを選択",
-    "chooseFilesAria": "アップロードする設定ファイルを選択",
-    "supportedFormats": "対応形式: .cfg, .conf, .txt (最大10MB)",
+    "chooseFilesAria": "アップロードする設定ファイルまたはログファイルを選択",
+    "supportedFormats": "対応形式: .cfg, .conf, .txt, .log (最大10MB)",
     "uploading": "ファイルをアップロード中...",
     "table": {
       "filename": "ファイル名",
@@ -1122,11 +1128,12 @@
       "modified": "更新日時"
     },
     "noFiles": "まだファイルがアップロードされていません",
-    "uploadToStart": "開始するには設定ファイルをアップロードしてください",
+    "uploadToStart": "開始するには設定ファイルまたはログファイルをアップロードしてください",
     "selectSnapshot": "ファイルを管理するにはスナップショットを選択",
     "createDialog": {
       "title": "新規スナップショット作成",
       "nameLabel": "スナップショット名",
+      "folderLabel": "フォルダー",
       "creating": "作成中..."
     },
     "deleteConfirm": {
