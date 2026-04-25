@@ -6,7 +6,7 @@
  * - Zustand store integration for current snapshot state synchronization
  * - Handles multiple file uploads and snapshot lifecycle management
  */
-import { useState, useCallback, useMemo } from 'react'
+import { useState, useCallback, useMemo, useRef } from 'react'
 import { Link } from 'react-router-dom'
 import { useTranslation } from 'react-i18next'
 import {
@@ -31,15 +31,30 @@ import {
   useDeleteSnapshot,
   useUpdateSnapshot,
   useUploadFile,
+  useUpdateSnapshotFileFormat,
+  useDeleteSnapshotFile,
   useActivateSnapshot,
 } from '../hooks'
 import { useSnapshotStore } from '../store'
 import { ConfirmDialog } from '../components/ConfirmDialog'
 import { SnapshotFolderCombobox } from '../components/SnapshotFolderCombobox'
-import type { Snapshot } from '../types'
+import type { Snapshot, SnapshotFile } from '../types'
 import { extractErrorMessage } from '../types/errors'
 
 const UNGROUPED_GROUP_KEY = 'ungrouped'
+const AUTO_FORMAT_VALUE = 'auto'
+const UNSUPPORTED_FORMAT_PREFIX = 'unsupported:'
+const RANCID_FORMAT_OPTIONS = [
+  { value: 'arista', labelKey: 'snapshots.format.options.arista' },
+  { value: 'bigip', labelKey: 'snapshots.format.options.bigip' },
+  { value: 'cisco-nx', labelKey: 'snapshots.format.options.ciscoNx' },
+  { value: 'cisco-xr', labelKey: 'snapshots.format.options.ciscoXr' },
+  { value: 'force10', labelKey: 'snapshots.format.options.force10' },
+  { value: 'foundry', labelKey: 'snapshots.format.options.foundry' },
+  { value: 'juniper', labelKey: 'snapshots.format.options.juniper' },
+  { value: 'mrv', labelKey: 'snapshots.format.options.mrv' },
+  { value: 'paloalto', labelKey: 'snapshots.format.options.paloAlto' },
+] as const
 
 const encodeGroupKeySegment = (value: string) =>
   Array.from(value)
@@ -51,6 +66,20 @@ const getSnapshotGroupKey = (folderName: string | null) =>
 
 const getFolderGroupPanelId = (groupKey: string) =>
   `snapshot-folder-group-${encodeGroupKeySegment(groupKey)}`
+
+const getFileFormatControlId = (snapshotName: string, fileName: string) =>
+  `snapshot-file-format-${encodeGroupKeySegment(snapshotName)}-${encodeGroupKeySegment(fileName)}`
+
+const getFileFormatSelectValue = (file: SnapshotFile) => {
+  if (
+    file.unsupported_configuration_format_override !== null &&
+    file.unsupported_configuration_format_override !== undefined
+  ) {
+    return `${UNSUPPORTED_FORMAT_PREFIX}${file.unsupported_configuration_format_override}`
+  }
+
+  return file.configuration_format_override || AUTO_FORMAT_VALUE
+}
 
 interface SnapshotGroup {
   key: string
@@ -72,6 +101,13 @@ export function SnapshotManagement() {
   const [snapshotToDelete, setSnapshotToDelete] = useState<string | null>(null)
   const [folderDraft, setFolderDraft] = useState('')
   const [uploadError, setUploadError] = useState('')
+  const [fileFormatError, setFileFormatError] = useState('')
+  const [fileDeleteError, setFileDeleteError] = useState('')
+  const [fileReinitializeError, setFileReinitializeError] = useState('')
+  const [fileDeleteConfirmOpen, setFileDeleteConfirmOpen] = useState(false)
+  const [fileToDelete, setFileToDelete] = useState<{ snapshotName: string; file: SnapshotFile } | null>(null)
+  const [fileChangeInProgressSnapshot, setFileChangeInProgressSnapshot] = useState<string | null>(null)
+  const fileChangeInProgressRef = useRef<string | null>(null)
   const [collapsedFolderKeys, setCollapsedFolderKeys] = useState<Set<string>>(() => new Set())
 
   /**
@@ -100,6 +136,8 @@ export function SnapshotManagement() {
   const deleteMutation = useDeleteSnapshot()
   const updateMutation = useUpdateSnapshot()
   const uploadMutation = useUploadFile()
+  const updateFileFormatMutation = useUpdateSnapshotFileFormat()
+  const deleteFileMutation = useDeleteSnapshotFile()
   const activateMutation = useActivateSnapshot()
 
   const selectedSnapshotDetails = useMemo(
@@ -357,14 +395,188 @@ export function SnapshotManagement() {
     [activateMutation, setCurrentSnapshotName]
   )
 
+  const startFileChangeOperation = useCallback((snapshotName: string) => {
+    if (fileChangeInProgressRef.current !== null) {
+      return false
+    }
+
+    fileChangeInProgressRef.current = snapshotName
+    setFileChangeInProgressSnapshot(snapshotName)
+    return true
+  }, [])
+
+  const finishFileChangeOperation = useCallback((snapshotName: string) => {
+    if (fileChangeInProgressRef.current !== snapshotName) {
+      return
+    }
+
+    fileChangeInProgressRef.current = null
+    setFileChangeInProgressSnapshot(null)
+  }, [])
+
+  /**
+   * Re-activate the current snapshot after file content changes so Batfish cache is refreshed.
+   */
+  const reactivateCurrentSnapshotAfterFileChange = useCallback(
+    (snapshotName: string, onSettled?: () => void) => {
+      if (useSnapshotStore.getState().currentSnapshotName !== snapshotName) {
+        onSettled?.()
+        return
+      }
+
+      activateMutation.mutate(snapshotName, {
+        onSuccess: () => {
+          setCurrentSnapshotName(snapshotName)
+          setFileReinitializeError('')
+        },
+        onError: (error: unknown) => {
+          setFileReinitializeError(
+            extractErrorMessage(error, t('snapshots.reinitializeFailedAfterFileChange'))
+          )
+        },
+        onSettled: () => {
+          onSettled?.()
+        },
+      })
+    },
+    [activateMutation, setCurrentSnapshotName, t]
+  )
+
+  /**
+   * Persist Batfish vendor format override for a single uploaded file.
+   */
+  const handleFileFormatChange = useCallback(
+    (file: SnapshotFile, value: string) => {
+      if (!selectedSnapshot || value.startsWith(UNSUPPORTED_FORMAT_PREFIX)) return
+      if (activateMutation.isPending) return
+      if (!startFileChangeOperation(selectedSnapshot)) return
+
+      setFileFormatError('')
+      setFileReinitializeError('')
+
+      const changedSnapshotName = selectedSnapshot
+      const configurationFormatOverride = value === AUTO_FORMAT_VALUE ? null : value
+      updateFileFormatMutation.mutate(
+        {
+          name: changedSnapshotName,
+          filename: file.name,
+          configurationFormatOverride,
+        },
+        {
+          onSuccess: (response) => {
+            if (response?.requires_reinitialize) {
+              reactivateCurrentSnapshotAfterFileChange(changedSnapshotName, () =>
+                finishFileChangeOperation(changedSnapshotName)
+              )
+              return
+            }
+
+            finishFileChangeOperation(changedSnapshotName)
+          },
+          onError: (error: unknown) => {
+            setFileFormatError(extractErrorMessage(error, t('snapshots.format.updateFailed')))
+            finishFileChangeOperation(changedSnapshotName)
+          },
+        }
+      )
+    },
+    [
+      activateMutation.isPending,
+      finishFileChangeOperation,
+      reactivateCurrentSnapshotAfterFileChange,
+      selectedSnapshot,
+      startFileChangeOperation,
+      t,
+      updateFileFormatMutation,
+    ]
+  )
+
+  /**
+   * Open file delete confirmation for one uploaded file.
+   */
+  const handleFileDelete = useCallback(
+    (file: SnapshotFile) => {
+      if (!selectedSnapshot) return
+      if (activateMutation.isPending) return
+      if (fileChangeInProgressRef.current !== null) return
+
+      setFileDeleteError('')
+      setFileReinitializeError('')
+      setFileToDelete({ snapshotName: selectedSnapshot, file })
+      setFileDeleteConfirmOpen(true)
+    },
+    [activateMutation.isPending, selectedSnapshot]
+  )
+
+  /**
+   * Confirm and execute uploaded file deletion.
+   */
+  const confirmFileDelete = useCallback(() => {
+    if (!fileToDelete) return
+    if (activateMutation.isPending) return
+    if (!startFileChangeOperation(fileToDelete.snapshotName)) return
+
+    const changedSnapshotName = fileToDelete.snapshotName
+    deleteFileMutation.mutate(
+      {
+        name: changedSnapshotName,
+        filename: fileToDelete.file.name,
+      },
+      {
+        onSuccess: (response) => {
+          setFileDeleteConfirmOpen(false)
+          setFileToDelete(null)
+
+          if (response?.requires_reinitialize) {
+            reactivateCurrentSnapshotAfterFileChange(changedSnapshotName, () =>
+              finishFileChangeOperation(changedSnapshotName)
+            )
+            return
+          }
+
+          finishFileChangeOperation(changedSnapshotName)
+        },
+        onError: (error: unknown) => {
+          setFileDeleteError(extractErrorMessage(error, t('snapshots.deleteFileFailed')))
+          setFileDeleteConfirmOpen(false)
+          setFileToDelete(null)
+          finishFileChangeOperation(changedSnapshotName)
+        },
+      }
+    )
+  }, [
+    activateMutation.isPending,
+    deleteFileMutation,
+    fileToDelete,
+    finishFileChangeOperation,
+    reactivateCurrentSnapshotAfterFileChange,
+    startFileChangeOperation,
+    t,
+  ])
+
+  /**
+   * Cancel uploaded file deletion.
+   */
+  const cancelFileDelete = useCallback(() => {
+    setFileDeleteConfirmOpen(false)
+    setFileToDelete(null)
+  }, [])
+
   /**
    * Handle snapshot selection and synchronize editable folder state
    */
   const handleSnapshotSelection = useCallback(
     (snapshot: Snapshot) => {
+      if (fileChangeInProgressRef.current !== null) return
+
       setSelectedSnapshot(snapshot.name)
       setFolderDraft(snapshot.folder_name || '')
       setFolderValidationError('')
+      setFileFormatError('')
+      setFileDeleteError('')
+      setFileReinitializeError('')
+      setFileDeleteConfirmOpen(false)
+      setFileToDelete(null)
 
       if (currentSnapshotName !== snapshot.name) {
         handleActivate(snapshot.name)
@@ -389,6 +601,15 @@ export function SnapshotManagement() {
 
   const currentFolderValue = selectedSnapshotDetails?.folder_name || ''
   const isFolderDirty = currentFolderValue !== (folderDraft.trim() || '')
+  const isSnapshotActivationPending = activateMutation.isPending
+  const isFileChangeInProgress = fileChangeInProgressSnapshot !== null
+  const isFileDeleteDialogOpenForSelectedSnapshot = !!(
+    selectedSnapshot &&
+    fileDeleteConfirmOpen &&
+    fileToDelete?.snapshotName === selectedSnapshot
+  )
+  const isSelectedSnapshotFileActionBlocked =
+    isSnapshotActivationPending || isFileChangeInProgress || isFileDeleteDialogOpenForSelectedSnapshot
 
   return (
     <div className="flex flex-col h-screen bg-gray-50">
@@ -494,7 +715,9 @@ export function SnapshotManagement() {
                           <div
                             key={snapshot.name}
                             role="button"
-                            className={`p-4 rounded-lg border-2 cursor-pointer transition-colors focus-within:ring-2 focus-within:ring-primary-600 ${
+                            className={`p-4 rounded-lg border-2 ${
+                              isFileChangeInProgress ? 'cursor-not-allowed opacity-75' : 'cursor-pointer'
+                            } transition-colors focus-within:ring-2 focus-within:ring-primary-600 ${
                               currentSnapshotName === snapshot.name
                                 ? 'border-green-500 bg-green-50'
                                 : activateMutation.isPending && activateMutation.variables === snapshot.name
@@ -506,6 +729,7 @@ export function SnapshotManagement() {
                             onClick={() => handleSnapshotSelection(snapshot)}
                             tabIndex={0}
                             aria-pressed={selectedSnapshot === snapshot.name}
+                            aria-disabled={isFileChangeInProgress}
                             aria-label={`Snapshot ${snapshot.name} in folder ${getFolderDisplayName(snapshot.folder_name)} with ${snapshot.file_count} files${
                               currentSnapshotName === snapshot.name
                                 ? ' - currently active'
@@ -672,37 +896,139 @@ export function SnapshotManagement() {
 
               {/* Files list */}
               {files && files.length > 0 ? (
-                <div className="bg-white rounded-lg shadow">
-                  <table className="min-w-full divide-y divide-gray-200">
-                    <thead className="bg-gray-50">
-                      <tr>
-                        <th className="px-6 py-3 text-left text-xs font-semibold text-gray-700 uppercase tracking-wider">
-                          {t('snapshots.table.filename')}
-                        </th>
-                        <th className="px-6 py-3 text-left text-xs font-semibold text-gray-700 uppercase tracking-wider">
-                          {t('snapshots.table.size')}
-                        </th>
-                        <th className="px-6 py-3 text-left text-xs font-semibold text-gray-700 uppercase tracking-wider">
-                          {t('snapshots.table.modified')}
-                        </th>
-                      </tr>
-                    </thead>
-                    <tbody className="bg-white divide-y divide-gray-200">
-                      {files.map((file) => (
-                        <tr key={file.name} className="hover:bg-gray-50">
-                          <td className="px-6 py-4 whitespace-nowrap text-sm font-semibold text-gray-900">
-                            {file.name}
-                          </td>
-                          <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-800 font-medium">
-                            {formatBytes(file.size_bytes)}
-                          </td>
-                          <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-700 font-medium">
-                            {new Date(file.modified_at).toLocaleString()}
-                          </td>
+                <div className="space-y-3">
+                  <div className="rounded-lg border border-blue-100 bg-blue-50 px-4 py-3 text-sm text-blue-900">
+                    <p className="font-medium">{t('snapshots.format.help')}</p>
+                    <p className="mt-1 text-blue-800">{t('snapshots.format.logWarning')}</p>
+                  </div>
+                  {fileFormatError && (
+                    <p className="rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm font-medium text-red-700" role="alert">
+                      {fileFormatError}
+                    </p>
+                  )}
+                  {fileDeleteError && (
+                    <p className="rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm font-medium text-red-700" role="alert">
+                      {fileDeleteError}
+                    </p>
+                  )}
+                  {fileReinitializeError && (
+                    <p className="rounded-lg border border-yellow-200 bg-yellow-50 px-4 py-3 text-sm font-medium text-yellow-800" role="alert">
+                      {fileReinitializeError}
+                    </p>
+                  )}
+                  <div className="overflow-hidden rounded-lg bg-white shadow">
+                    <table className="min-w-full divide-y divide-gray-200">
+                      <thead className="bg-gray-50">
+                        <tr>
+                          <th className="px-6 py-3 text-left text-xs font-semibold text-gray-700 uppercase tracking-wider">
+                            {t('snapshots.table.filenameAndFormat')}
+                          </th>
+                          <th className="px-6 py-3 text-left text-xs font-semibold text-gray-700 uppercase tracking-wider">
+                            {t('snapshots.table.size')}
+                          </th>
+                          <th className="px-6 py-3 text-left text-xs font-semibold text-gray-700 uppercase tracking-wider">
+                            {t('snapshots.table.modified')}
+                          </th>
                         </tr>
-                      ))}
-                    </tbody>
-                  </table>
+                      </thead>
+                      <tbody className="bg-white divide-y divide-gray-200">
+                        {files.map((file) => {
+                          const formatSelectValue = getFileFormatSelectValue(file)
+                          const formatControlId = getFileFormatControlId(selectedSnapshot, file.name)
+                          const unsupportedFormat = file.unsupported_configuration_format_override
+                          const hasUnsupportedFormat =
+                            unsupportedFormat !== null && unsupportedFormat !== undefined
+                          const unsupportedFormatLabel =
+                            unsupportedFormat || t('snapshots.format.emptyHeader')
+                          const formatOverrideError = file.format_override_error
+                          const isUpdatingFormat =
+                            updateFileFormatMutation.isPending &&
+                            updateFileFormatMutation.variables?.name === selectedSnapshot &&
+                            updateFileFormatMutation.variables?.filename === file.name
+                          const isDeletingFile =
+                            deleteFileMutation.isPending &&
+                            deleteFileMutation.variables?.name === selectedSnapshot &&
+                            deleteFileMutation.variables?.filename === file.name
+
+                          return (
+                            <tr key={file.name} className="hover:bg-gray-50">
+                              <td className="px-6 py-4 align-top text-sm text-gray-900">
+                                <div className="flex flex-col gap-2 xl:flex-row xl:items-center xl:gap-4">
+                                  <span className="min-w-0 break-all font-semibold">{file.name}</span>
+                                  <div className="min-w-[13rem] max-w-xs">
+                                    <label htmlFor={formatControlId} className="sr-only">
+                                      {t('snapshots.format.ariaLabel', { name: file.name })}
+                                    </label>
+                                    <select
+                                      id={formatControlId}
+                                      value={formatSelectValue}
+                                      disabled={
+                                        isSelectedSnapshotFileActionBlocked ||
+                                        file.format_override_supported === false
+                                      }
+                                      onChange={(event) => handleFileFormatChange(file, event.target.value)}
+                                      className="w-full rounded-md border border-gray-300 bg-white px-3 py-2 text-sm font-medium text-gray-800 shadow-sm transition-colors focus:border-primary-600 focus:outline-none focus:ring-2 focus:ring-primary-600 disabled:cursor-not-allowed disabled:opacity-60"
+                                      aria-label={t('snapshots.format.ariaLabel', { name: file.name })}
+                                    >
+                                      {hasUnsupportedFormat && (
+                                        <option value={`${UNSUPPORTED_FORMAT_PREFIX}${unsupportedFormat}`} disabled>
+                                          {t('snapshots.format.unsupportedOption', { format: unsupportedFormatLabel })}
+                                        </option>
+                                      )}
+                                      <option value={AUTO_FORMAT_VALUE}>{t('snapshots.format.auto')}</option>
+                                      {RANCID_FORMAT_OPTIONS.map((option) => (
+                                        <option key={option.value} value={option.value}>
+                                          {t(option.labelKey)}
+                                        </option>
+                                      ))}
+                                    </select>
+                                    {isUpdatingFormat && (
+                                      <p className="mt-1 text-xs font-medium text-blue-700">
+                                        {t('snapshots.format.updating')}
+                                      </p>
+                                    )}
+                                    {hasUnsupportedFormat && (
+                                      <p className="mt-1 text-xs font-medium text-yellow-700">
+                                        {t('snapshots.format.unsupportedHeader', { format: unsupportedFormatLabel })}
+                                      </p>
+                                    )}
+                                    {formatOverrideError && (
+                                      <p className="mt-1 text-xs font-medium text-red-700">
+                                        {t('snapshots.format.readFailed')}
+                                      </p>
+                                    )}
+                                  </div>
+                                </div>
+                              </td>
+                              <td className="px-6 py-4 align-top whitespace-nowrap text-sm text-gray-800 font-medium">
+                                {formatBytes(file.size_bytes)}
+                              </td>
+                              <td className="px-6 py-4 align-top whitespace-nowrap text-sm text-gray-700 font-medium">
+                                <div className="flex items-center justify-between gap-4">
+                                  <span>{new Date(file.modified_at).toLocaleString()}</span>
+                                  <button
+                                    type="button"
+                                    onClick={() => handleFileDelete(file)}
+                                    disabled={isSelectedSnapshotFileActionBlocked}
+                                    className="inline-flex h-9 w-9 items-center justify-center rounded-md border border-red-200 text-red-600 transition-colors hover:bg-red-50 hover:text-red-700 focus:outline-none focus:ring-2 focus:ring-red-600 focus:ring-offset-1 disabled:cursor-not-allowed disabled:opacity-50"
+                                    aria-label={t('snapshots.deleteFileAria', { name: file.name })}
+                                    aria-busy={isDeletingFile}
+                                    title={t('snapshots.deleteFile')}
+                                  >
+                                    {isDeletingFile ? (
+                                      <Loader2 className="h-4 w-4 animate-spin" aria-hidden="true" />
+                                    ) : (
+                                      <Trash2 className="h-4 w-4" aria-hidden="true" />
+                                    )}
+                                  </button>
+                                </div>
+                              </td>
+                            </tr>
+                          )
+                        })}
+                      </tbody>
+                    </table>
+                  </div>
                 </div>
               ) : (
                 <div className="text-center py-12 text-gray-700">
@@ -844,6 +1170,20 @@ export function SnapshotManagement() {
         onCancel={cancelDelete}
         variant="danger"
         isLoading={deleteMutation.isPending}
+      />
+      <ConfirmDialog
+        isOpen={fileDeleteConfirmOpen}
+        title={t('snapshots.deleteFileConfirm.title')}
+        message={t('snapshots.deleteFileConfirm.message', {
+          snapshot: fileToDelete?.snapshotName ?? '',
+          file: fileToDelete?.file.name ?? '',
+        })}
+        confirmText={t('common.delete', 'Delete')}
+        cancelText={t('common.cancel', 'Cancel')}
+        onConfirm={confirmFileDelete}
+        onCancel={cancelFileDelete}
+        variant="danger"
+        isLoading={deleteFileMutation.isPending}
       />
     </div>
   )

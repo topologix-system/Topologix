@@ -42,6 +42,9 @@ import type {
   Snapshot,
   SnapshotFile,
   CreateSnapshotRequest,
+  UpdateSnapshotFileFormatRequest,
+  SnapshotFileMutationResponse,
+  DeleteSnapshotFileResponse,
   BGPEdge,
   BGPPeerConfiguration,
   BGPProcessConfiguration,
@@ -447,6 +450,30 @@ export const snapshotAPI = {
           }
         },
       }
+    )
+    return response.data.data
+  },
+
+  async updateFileFormat(
+    name: string,
+    filename: string,
+    configurationFormatOverride: string | null
+  ) {
+    const request: UpdateSnapshotFileFormatRequest = {
+      configuration_format_override: configurationFormatOverride,
+    }
+    const encodedFilename = encodeURIComponent(filename)
+    const response = await apiClient.patch<APIResponse<SnapshotFileMutationResponse>>(
+      `/snapshots/${name}/files/${encodedFilename}/format`,
+      request
+    )
+    return response.data.data
+  },
+
+  async deleteFile(name: string, filename: string) {
+    const encodedFilename = encodeURIComponent(filename)
+    const response = await apiClient.delete<APIResponse<DeleteSnapshotFileResponse>>(
+      `/snapshots/${name}/files/${encodedFilename}`
     )
     return response.data.data
   },

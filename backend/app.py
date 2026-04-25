@@ -341,6 +341,9 @@ def request_uses_batfish() -> bool:
     if path.endswith('/activate') and path.startswith('/api/snapshots/'):
         return True
 
+    if path.startswith('/api/snapshots/') and '/files' in path and request.method in {'POST', 'PATCH', 'DELETE'}:
+        return True
+
     if path.endswith('/interfaces') and path.startswith('/api/snapshots/'):
         return True
 
@@ -3460,8 +3463,7 @@ def delete_snapshot(name: str):
     except PermissionError as e:
         return error_response(str(e), 403)
     except ValueError as e:
-        # Protected snapshot
-        return error_response(str(e), 403)
+        return error_response(str(e), 400)
     except FileNotFoundError as e:
         return error_response(str(e), 404)
     except Exception as e:
@@ -3480,6 +3482,8 @@ def get_snapshot_files(name: str):
         return error_response(str(e), 403)
     except FileNotFoundError as e:
         return error_response(str(e), 404)
+    except ValueError as e:
+        return error_response(str(e), 400)
     except Exception as e:
         logger.error(f"Failed to get snapshot files: {e}")
         return error_response(str(e), 500)
@@ -3519,6 +3523,60 @@ def upload_snapshot_file(name: str):
         return error_response(str(e), 500)
 
 
+@app.route('/api/snapshots/<name>/files/<filename>/format', methods=['PATCH'])
+def update_snapshot_file_format(name: str, filename: str):
+    """Update a snapshot file's Batfish configuration format override."""
+    try:
+        data = request.get_json(silent=True)
+        if not isinstance(data, dict):
+            return error_response("Request body must be a JSON object", 400)
+
+        if 'configuration_format_override' not in data:
+            return error_response("Missing 'configuration_format_override' in request body", 400)
+
+        file_info = snapshot_service.update_snapshot_file_format(
+            name,
+            filename,
+            data.get('configuration_format_override'),
+            **get_snapshot_request_context(),
+        )
+
+        return success_response(file_info, "Snapshot file format updated successfully")
+
+    except PermissionError as e:
+        return error_response(str(e), 403)
+    except FileNotFoundError as e:
+        return error_response(str(e), 404)
+    except ValueError as e:
+        return error_response(str(e), 400)
+    except Exception as e:
+        logger.error(f"Failed to update snapshot file format: {e}")
+        return error_response(str(e), 500)
+
+
+@app.route('/api/snapshots/<name>/files/<filename>', methods=['DELETE'])
+def delete_snapshot_file(name: str, filename: str):
+    """Delete one uploaded file from a snapshot."""
+    try:
+        file_info = snapshot_service.delete_snapshot_file(
+            name,
+            filename,
+            **get_snapshot_request_context(),
+        )
+
+        return success_response(file_info, "Snapshot file deleted successfully")
+
+    except PermissionError as e:
+        return error_response(str(e), 403)
+    except FileNotFoundError as e:
+        return error_response(str(e), 404)
+    except ValueError as e:
+        return error_response(str(e), 400)
+    except Exception as e:
+        logger.error(f"Failed to delete snapshot file: {e}")
+        return error_response(str(e), 500)
+
+
 @app.route('/api/snapshots/<name>/activate', methods=['POST'])
 def activate_snapshot(name: str):
     """
@@ -3537,6 +3595,8 @@ def activate_snapshot(name: str):
         return error_response(str(e), 403)
     except FileNotFoundError as e:
         return error_response(str(e), 404)
+    except ValueError as e:
+        return error_response(str(e), 400)
     except Exception as e:
         import traceback
         logger.error(f"Failed to activate snapshot: {e}")
@@ -3614,6 +3674,8 @@ def get_snapshot_layer1_topology(name: str):
         return error_response(str(e), 403)
     except FileNotFoundError as e:
         return error_response(str(e), 404)
+    except ValueError as e:
+        return error_response(str(e), 400)
     except Exception as e:
         logger.error(f"Failed to get Layer1 topology: {e}")
         return error_response(str(e), 500)
@@ -3685,6 +3747,8 @@ def delete_snapshot_layer1_topology(name: str):
         return error_response(str(e), 403)
     except FileNotFoundError as e:
         return error_response(str(e), 404)
+    except ValueError as e:
+        return error_response(str(e), 400)
     except Exception as e:
         logger.error(f"Failed to delete Layer1 topology: {e}")
         return error_response(str(e), 500)
@@ -3709,6 +3773,8 @@ def get_snapshot_interfaces(name: str):
         return error_response(str(e), 403)
     except FileNotFoundError as e:
         return error_response(str(e), 404)
+    except ValueError as e:
+        return error_response(str(e), 400)
     except Exception as e:
         logger.error(f"Failed to get snapshot interfaces: {e}")
         import traceback

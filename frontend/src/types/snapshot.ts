@@ -4,7 +4,6 @@
  */
 export interface Snapshot {
   name: string
-  path: string
   file_count: number
   created_at: string
   size_bytes: number
@@ -17,6 +16,10 @@ export interface SnapshotFile {
   name: string
   size_bytes: number
   modified_at: string
+  configuration_format_override?: string | null
+  unsupported_configuration_format_override?: string | null
+  format_override_supported?: boolean
+  format_override_error?: string | null
 }
 
 export interface CreateSnapshotRequest {
@@ -35,4 +38,17 @@ export interface UpdateSnapshotRequest {
 export interface UploadFileRequest {
   snapshot_name: string
   file: File
+}
+
+export interface UpdateSnapshotFileFormatRequest {
+  configuration_format_override: string | null
+}
+
+export interface SnapshotFileMutationResponse extends SnapshotFile {
+  requires_reinitialize?: boolean
+}
+
+export interface DeleteSnapshotFileResponse {
+  name: string
+  requires_reinitialize: boolean
 }

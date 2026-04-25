@@ -117,6 +117,47 @@ export function useUploadFile() {
 }
 
 /**
+ * Mutation to update a file's Batfish configuration format override.
+ * Invalidates file metadata and snapshot list because the file content timestamp/size can change.
+ */
+export function useUpdateSnapshotFileFormat() {
+  const queryClient = useQueryClient()
+
+  return useMutation({
+    mutationFn: ({
+      name,
+      filename,
+      configurationFormatOverride,
+    }: {
+      name: string
+      filename: string
+      configurationFormatOverride: string | null
+    }) => snapshotAPI.updateFileFormat(name, filename, configurationFormatOverride),
+    onSuccess: (_, variables) => {
+      queryClient.invalidateQueries({ queryKey: snapshotKeys.files(variables.name) })
+      queryClient.invalidateQueries({ queryKey: snapshotKeys.list() })
+    },
+  })
+}
+
+/**
+ * Mutation to delete one uploaded snapshot file.
+ * Invalidates file metadata and snapshot list because file count and size can change.
+ */
+export function useDeleteSnapshotFile() {
+  const queryClient = useQueryClient()
+
+  return useMutation({
+    mutationFn: ({ name, filename }: { name: string; filename: string }) =>
+      snapshotAPI.deleteFile(name, filename),
+    onSuccess: (_, variables) => {
+      queryClient.invalidateQueries({ queryKey: snapshotKeys.files(variables.name) })
+      queryClient.invalidateQueries({ queryKey: snapshotKeys.list() })
+    },
+  })
+}
+
+/**
  * Mutation to activate snapshot for Batfish analysis
  * Initializes Batfish with snapshot and refetches all network data
  * Uses refetchQueries (not invalidateQueries) for immediate data refresh

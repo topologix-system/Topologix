@@ -1137,9 +1137,41 @@
     "uploading": "ファイルをアップロード中...",
     "table": {
       "filename": "ファイル名",
+      "filenameAndFormat": "ファイル名 / フォーマット",
       "size": "サイズ",
       "modified": "更新日時"
     },
+    "format": {
+      "auto": "自動判別",
+      "ariaLabel": "{{name}} のフォーマットを選択",
+      "updating": "フォーマットを更新中...",
+      "updateFailed": "ファイルフォーマットの更新に失敗しました",
+      "help": "フォーマット選択は Batfish の RANCID content type header をファイル先頭に追加・変更します。",
+      "logWarning": ".log も指定できますが、Batfish が機器設定として解析できる内容である必要があります。",
+      "emptyHeader": "空のヘッダー",
+      "unsupportedOption": "未対応: {{format}}",
+      "unsupportedHeader": "未対応のRANCIDヘッダー: {{format}}",
+      "readFailed": "このファイルはUTF-8テキストとして読み取れないため、フォーマット指定を無効化しています。",
+      "options": {
+        "arista": "Arista",
+        "bigip": "F5 BIG-IP",
+        "ciscoNx": "Cisco NX-OS",
+        "ciscoXr": "Cisco IOS-XR",
+        "force10": "Dell Force10",
+        "foundry": "Foundry",
+        "juniper": "Juniper",
+        "mrv": "MRV",
+        "paloAlto": "Palo Alto"
+      }
+    },
+    "deleteFile": "ファイルを削除",
+    "deleteFileAria": "{{name}} を削除",
+    "deleteFileFailed": "ファイル削除に失敗しました",
+    "deleteFileConfirm": {
+      "title": "ファイル削除",
+      "message": "snapshot「{{snapshot}}」から「{{file}}」を削除しますか？この操作は元に戻せません。"
+    },
+    "reinitializeFailedAfterFileChange": "ファイル変更後の snapshot 再読み込みに失敗しました。解析結果が古い可能性があります。",
     "noFiles": "まだファイルがアップロードされていません",
     "uploadToStart": "開始するには設定ファイルまたはログファイルをアップロードしてください",
     "selectSnapshot": "ファイルを管理するにはスナップショットを選択",

@@ -13,6 +13,7 @@ import logging
 import os
 import re
 import shutil
+import tempfile
 from pathlib import Path
 from typing import Any, Optional
 from datetime import datetime
@@ -28,6 +29,19 @@ MAX_FILE_SIZE = 10 * 1024 * 1024  # 10MB
 PROTECTED_SNAPSHOTS = set()  # No protected snapshots - all can be deleted
 METADATA_FILENAME = '.topologix-snapshot.json'
 FOLDER_SEGMENT_PATTERN = re.compile(r'^[A-Za-z0-9][A-Za-z0-9 _.-]{0,63}$')
+RANCID_CONTENT_TYPE_HEADER = '!RANCID-CONTENT-TYPE:'
+SUPPORTED_RANCID_FORMATS = {
+    'arista',
+    'bigip',
+    'cisco-nx',
+    'cisco-xr',
+    'force10',
+    'foundry',
+    'juniper',
+    'mrv',
+    'paloalto',
+}
+CONFIG_FORMAT_EXTENSIONS = ALLOWED_EXTENSIONS
 
 
 class SnapshotService:
@@ -154,9 +168,30 @@ class SnapshotService:
         owner_user_id = metadata.get('owner_user_id')
         return owner_user_id is not None and owner_user_id == normalized_requester_id
 
+    def _validate_snapshot_name(self, name: str) -> str:
+        """Validate a public snapshot name without silently rewriting it."""
+        if name is None:
+            raise ValueError("Snapshot name cannot be empty")
+
+        raw_name = str(name).strip()
+        if not raw_name:
+            raise ValueError("Snapshot name cannot be empty")
+
+        if '/' in raw_name or '\\' in raw_name:
+            raise ValueError("Snapshot name must not contain path separators")
+
+        if Path(raw_name).name != raw_name:
+            raise ValueError("Snapshot name must not contain path components")
+
+        safe_name = secure_filename(raw_name)
+        if not safe_name or safe_name != raw_name:
+            raise ValueError("Invalid snapshot name")
+
+        return safe_name
+
     def _get_snapshot_directory(self, name: str) -> Path:
         """Resolve snapshot directory from public snapshot name."""
-        safe_name = secure_filename(name)
+        safe_name = self._validate_snapshot_name(name)
         snapshot_path = self.snapshots_dir / safe_name
 
         if not snapshot_path.exists():
@@ -200,7 +235,6 @@ class SnapshotService:
 
         return {
             'name': snapshot_path.name,
-            'path': str(snapshot_path),
             'file_count': file_count,
             'created_at': metadata.get('created_at') or datetime.utcfromtimestamp(snapshot_path.stat().st_ctime).isoformat(),
             'size_bytes': self._get_directory_size(snapshot_path),
@@ -213,6 +247,171 @@ class SnapshotService:
         """Run shared upload validation and return the validated file size."""
         validation_result = validate_file_upload(file_storage)
         return int(validation_result['size'])
+
+    def _validate_snapshot_file_name(self, filename: str) -> str:
+        """Validate an uploaded snapshot file name without silently rewriting it."""
+        if not filename or not filename.strip():
+            raise ValueError("Filename cannot be empty")
+
+        if '/' in filename or '\\' in filename:
+            raise ValueError("Filename must not contain path separators")
+
+        if Path(filename).name != filename:
+            raise ValueError("Filename must not contain path components")
+
+        safe_filename = secure_filename(filename)
+        if not safe_filename or safe_filename != filename:
+            raise ValueError("Invalid filename")
+
+        if Path(safe_filename).suffix.lower() not in ALLOWED_EXTENSIONS:
+            raise ValueError(f"File type not allowed. Allowed: {', '.join(sorted(ALLOWED_EXTENSIONS))}")
+
+        return safe_filename
+
+    def _get_snapshot_config_file(self, snapshot_path: Path, filename: str) -> Path:
+        """Resolve an uploaded config/log file under the snapshot configs directory."""
+        safe_filename = self._validate_snapshot_file_name(filename)
+        configs_dir = snapshot_path / 'configs'
+
+        if not configs_dir.exists():
+            raise FileNotFoundError(f"Snapshot '{snapshot_path.name}' is missing configs directory")
+
+        configs_dir_resolved = configs_dir.resolve(strict=True)
+        file_path = configs_dir / safe_filename
+
+        if not file_path.exists() or not file_path.is_file():
+            raise FileNotFoundError(f"File '{safe_filename}' not found")
+
+        file_path_resolved = file_path.resolve(strict=True)
+        if file_path_resolved.parent != configs_dir_resolved:
+            raise ValueError("Invalid file path")
+
+        return file_path_resolved
+
+    def _has_rancid_content_type_header(self, line: str) -> bool:
+        """Return whether a line is a Batfish RANCID content type header."""
+        normalized_line = line.strip()
+        return normalized_line.startswith(RANCID_CONTENT_TYPE_HEADER)
+
+    def _parse_rancid_content_type_header(self, line: str) -> str:
+        """Return a RANCID content type value from a header line."""
+        normalized_line = line.strip()
+        return normalized_line[len(RANCID_CONTENT_TYPE_HEADER):].strip()
+
+    def _read_rancid_format_override(self, file_path: Path) -> dict[str, Optional[str]]:
+        """Read the first-line Batfish RANCID format override, if present."""
+        try:
+            content = file_path.read_text(encoding='utf-8')
+        except UnicodeDecodeError as exc:
+            raise ValueError("Snapshot file must be UTF-8 text") from exc
+
+        first_line = content.splitlines(keepends=True)[0] if content else ''
+        if not self._has_rancid_content_type_header(first_line):
+            return {
+                'configuration_format_override': None,
+                'unsupported_configuration_format_override': None,
+            }
+
+        header_value = self._parse_rancid_content_type_header(first_line)
+        if header_value in SUPPORTED_RANCID_FORMATS:
+            return {
+                'configuration_format_override': header_value,
+                'unsupported_configuration_format_override': None,
+            }
+
+        return {
+            'configuration_format_override': None,
+            'unsupported_configuration_format_override': header_value,
+        }
+
+    def _build_snapshot_file_response(self, file_path: Path) -> dict[str, Any]:
+        """Build API response payload for one uploaded snapshot file."""
+        stat = file_path.stat()
+        format_override_error = None
+
+        try:
+            format_override = self._read_rancid_format_override(file_path)
+            format_override_supported = file_path.suffix.lower() in CONFIG_FORMAT_EXTENSIONS
+        except ValueError as exc:
+            format_override = {
+                'configuration_format_override': None,
+                'unsupported_configuration_format_override': None,
+            }
+            format_override_supported = False
+            format_override_error = str(exc)
+
+        return {
+            'name': file_path.name,
+            'size_bytes': stat.st_size,
+            'modified_at': datetime.fromtimestamp(stat.st_mtime).isoformat(),
+            'configuration_format_override': format_override['configuration_format_override'],
+            'unsupported_configuration_format_override': format_override['unsupported_configuration_format_override'],
+            'format_override_supported': format_override_supported,
+            'format_override_error': format_override_error,
+        }
+
+    def _normalize_rancid_format_override(self, format_override: Any) -> Optional[str]:
+        """Normalize a requested RANCID format override value."""
+        if format_override is None:
+            return None
+
+        normalized = str(format_override).strip()
+        if not normalized or normalized == 'auto':
+            return None
+
+        if normalized not in SUPPORTED_RANCID_FORMATS:
+            raise ValueError(
+                f"Unsupported configuration format override. Supported: {', '.join(sorted(SUPPORTED_RANCID_FORMATS))}"
+            )
+
+        return normalized
+
+    def _write_rancid_format_override(self, file_path: Path, format_override: Optional[str]) -> dict[str, Any]:
+        """Atomically add, replace, or remove the first-line Batfish RANCID header."""
+        try:
+            content = file_path.read_text(encoding='utf-8')
+        except UnicodeDecodeError as exc:
+            raise ValueError("Snapshot file must be UTF-8 text") from exc
+
+        lines = content.splitlines(keepends=True)
+        has_header = bool(lines and self._has_rancid_content_type_header(lines[0]))
+
+        if format_override is None:
+            updated_content = ''.join(lines[1:]) if has_header else content
+        else:
+            line_ending = '\r\n' if lines and lines[0].endswith('\r\n') else '\n'
+            header_line = f"{RANCID_CONTENT_TYPE_HEADER} {format_override}{line_ending}"
+            if has_header:
+                lines[0] = header_line
+                updated_content = ''.join(lines)
+            else:
+                updated_content = header_line + content
+
+        file_stat = file_path.stat()
+        temp_path: Optional[Path] = None
+
+        try:
+            with tempfile.NamedTemporaryFile(
+                mode='w',
+                encoding='utf-8',
+                dir=str(file_path.parent),
+                prefix=f".{file_path.name}.",
+                suffix='.tmp',
+                delete=False,
+            ) as temp_file:
+                temp_path = Path(temp_file.name)
+                temp_file.write(updated_content)
+                temp_file.flush()
+                os.fsync(temp_file.fileno())
+
+            os.chmod(temp_path, file_stat.st_mode)
+            os.replace(temp_path, file_path)
+        except Exception:
+            if temp_path and temp_path.exists():
+                temp_path.unlink()
+            raise
+
+        return self._build_snapshot_file_response(file_path)
 
     def list_snapshots(self, requester_user_id: Any = None, auth_enabled: bool = False) -> list[dict[str, Any]]:
         """
@@ -262,14 +461,7 @@ class SnapshotService:
         Raises:
             ValueError: If snapshot name is invalid or already exists
         """
-        # Validate name
-        if not name or not name.strip():
-            raise ValueError("Snapshot name cannot be empty")
-
-        # Secure the filename
-        safe_name = secure_filename(name)
-        if not safe_name:
-            raise ValueError("Invalid snapshot name")
+        safe_name = self._validate_snapshot_name(name)
 
         normalized_folder_name = self._normalize_folder_name(folder_name)
         normalized_owner_id = self._normalize_owner_user_id(owner_user_id)
@@ -351,7 +543,7 @@ class SnapshotService:
             ValueError: If snapshot is protected
             FileNotFoundError: If snapshot does not exist
         """
-        safe_name = secure_filename(name)
+        safe_name = self._validate_snapshot_name(name)
 
         # Check if snapshot is protected
         if safe_name in PROTECTED_SNAPSHOTS:
@@ -384,7 +576,7 @@ class SnapshotService:
         Raises:
             FileNotFoundError: If snapshot does not exist
         """
-        safe_name = secure_filename(name)
+        safe_name = self._validate_snapshot_name(name)
         snapshot_path, _ = self._authorize_snapshot(
             safe_name,
             requester_user_id=requester_user_id,
@@ -403,12 +595,7 @@ class SnapshotService:
             if file_path.suffix.lower() not in ALLOWED_EXTENSIONS:
                 continue
 
-            stat = file_path.stat()
-            files.append({
-                'name': file_path.name,
-                'size_bytes': stat.st_size,
-                'modified_at': datetime.fromtimestamp(stat.st_mtime).isoformat()
-            })
+            files.append(self._build_snapshot_file_response(file_path))
 
         # Sort by name
         files.sort(key=lambda x: x['name'])
@@ -436,7 +623,7 @@ class SnapshotService:
             FileNotFoundError: If snapshot does not exist
             ValueError: If file is invalid
         """
-        safe_name = secure_filename(name)
+        safe_name = self._validate_snapshot_name(name)
         snapshot_path, _ = self._authorize_snapshot(
             safe_name,
             requester_user_id=requester_user_id,
@@ -468,10 +655,70 @@ class SnapshotService:
 
         logger.info(f"Uploaded file '{filename}' to snapshot '{safe_name}'")
 
+        uploaded_file_info = self._build_snapshot_file_response(file_path)
+        uploaded_file_info['size_bytes'] = file_size
+
+        return uploaded_file_info
+
+    def update_snapshot_file_format(
+        self,
+        name: str,
+        filename: str,
+        configuration_format_override: Any,
+        requester_user_id: Any = None,
+        auth_enabled: bool = False,
+    ) -> dict[str, Any]:
+        """Update a snapshot file's first-line Batfish RANCID format override."""
+        safe_name = self._validate_snapshot_name(name)
+        snapshot_path, _ = self._authorize_snapshot(
+            safe_name,
+            requester_user_id=requester_user_id,
+            auth_enabled=auth_enabled,
+        )
+        file_path = self._get_snapshot_config_file(snapshot_path, filename)
+        normalized_format = self._normalize_rancid_format_override(configuration_format_override)
+        file_info = self._write_rancid_format_override(file_path, normalized_format)
+        file_info['requires_reinitialize'] = True
+
+        logger.info(
+            "Updated snapshot file format override: snapshot=%s file=%s format=%s requester_user_id=%s",
+            safe_name,
+            file_path.name,
+            normalized_format or 'auto',
+            requester_user_id,
+        )
+
+        return file_info
+
+    def delete_snapshot_file(
+        self,
+        name: str,
+        filename: str,
+        requester_user_id: Any = None,
+        auth_enabled: bool = False,
+    ) -> dict[str, Any]:
+        """Delete one uploaded snapshot file from the snapshot configs directory."""
+        safe_name = self._validate_snapshot_name(name)
+        snapshot_path, _ = self._authorize_snapshot(
+            safe_name,
+            requester_user_id=requester_user_id,
+            auth_enabled=auth_enabled,
+        )
+        file_path = self._get_snapshot_config_file(snapshot_path, filename)
+        deleted_filename = file_path.name
+
+        file_path.unlink()
+
+        logger.info(
+            "Deleted snapshot file: snapshot=%s file=%s requester_user_id=%s",
+            safe_name,
+            deleted_filename,
+            requester_user_id,
+        )
+
         return {
-            'name': filename,
-            'size_bytes': file_size,
-            'modified_at': datetime.now().isoformat()
+            'name': deleted_filename,
+            'requires_reinitialize': True,
         }
 
     def get_snapshot_path(
@@ -526,7 +773,7 @@ class SnapshotService:
             FileNotFoundError: If snapshot does not exist
             ValueError: If layer1_topology.json contains invalid JSON
         """
-        safe_name = secure_filename(name)
+        safe_name = self._validate_snapshot_name(name)
         snapshot_path, _ = self._authorize_snapshot(
             safe_name,
             requester_user_id=requester_user_id,
@@ -568,7 +815,7 @@ class SnapshotService:
             FileNotFoundError: If snapshot does not exist
             ValueError: If topology data is invalid
         """
-        safe_name = secure_filename(name)
+        safe_name = self._validate_snapshot_name(name)
         snapshot_path, _ = self._authorize_snapshot(
             safe_name,
             requester_user_id=requester_user_id,
@@ -644,7 +891,7 @@ class SnapshotService:
         Raises:
             FileNotFoundError: If snapshot or Layer1 file does not exist
         """
-        safe_name = secure_filename(name)
+        safe_name = self._validate_snapshot_name(name)
         snapshot_path, _ = self._authorize_snapshot(
             safe_name,
             requester_user_id=requester_user_id,
@@ -679,7 +926,7 @@ class SnapshotService:
         Raises:
             FileNotFoundError: If snapshot does not exist
         """
-        safe_name = secure_filename(name)
+        safe_name = self._validate_snapshot_name(name)
         snapshot_path, _ = self._authorize_snapshot(
             safe_name,
             requester_user_id=requester_user_id,

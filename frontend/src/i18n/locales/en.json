@@ -1137,9 +1137,41 @@
     "uploading": "Uploading files...",
     "table": {
       "filename": "Filename",
+      "filenameAndFormat": "Filename / Format",
       "size": "Size",
       "modified": "Modified"
     },
+    "format": {
+      "auto": "Auto detect",
+      "ariaLabel": "Select configuration format for {{name}}",
+      "updating": "Updating format...",
+      "updateFailed": "Failed to update file format",
+      "help": "The format selector writes Batfish's RANCID content type header at the start of the file.",
+      "logWarning": ".log files can also be selected, but Batfish must still be able to parse the content as a device configuration.",
+      "emptyHeader": "empty header",
+      "unsupportedOption": "Unsupported: {{format}}",
+      "unsupportedHeader": "Unsupported RANCID header: {{format}}",
+      "readFailed": "Cannot read this file as UTF-8 text. Format override is disabled.",
+      "options": {
+        "arista": "Arista",
+        "bigip": "F5 BIG-IP",
+        "ciscoNx": "Cisco NX-OS",
+        "ciscoXr": "Cisco IOS-XR",
+        "force10": "Dell Force10",
+        "foundry": "Foundry",
+        "juniper": "Juniper",
+        "mrv": "MRV",
+        "paloAlto": "Palo Alto"
+      }
+    },
+    "deleteFile": "Delete file",
+    "deleteFileAria": "Delete file {{name}}",
+    "deleteFileFailed": "Failed to delete file",
+    "deleteFileConfirm": {
+      "title": "Delete File",
+      "message": "Delete \"{{file}}\" from snapshot \"{{snapshot}}\"? This action cannot be undone."
+    },
+    "reinitializeFailedAfterFileChange": "Failed to reload the snapshot after the file change. Analysis results may be stale.",
     "noFiles": "No files uploaded yet",
     "uploadToStart": "Upload configuration or log files to get started",
     "selectSnapshot": "Select a snapshot to manage files",
