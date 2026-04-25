@@ -458,9 +458,9 @@
       "subnetMultipathConsistency": "サブネットマルチパス整合性"
     },
     "subnetMultipath": {
-      "nodePlaceholder": "ノードフィルタ (任意)...",
+      "maxTracesPlaceholder": "最大トレース数 (任意)...",
       "aria": {
-        "nodeFilter": "ノードフィルタ入力",
+        "maxTraces": "最大トレース数入力",
         "results": "サブネットマルチパス整合性の結果"
       }
     },
@@ -555,6 +555,7 @@
       "searchFiltersDesc": "デバイス全体でpermit/denyアクションによるACLを検索",
       "filtersPlaceholder": "フィルタ名 (正規表現)...",
       "nodesPlaceholder": "ノード名 (カンマ区切り)...",
+      "startLocationPlaceholder": "開始位置 (任意)...",
       "headersPlaceholder": "パケットヘッダJSON...",
       "execute": "実行",
       "executing": "実行中...",
@@ -563,9 +564,11 @@
       "actionPermit": "Permit",
       "actionDeny": "Deny",
       "invalidJson": "無効なJSON",
+      "headersRequired": "パケットヘッダJSONは必須です",
       "aria": {
         "filterName": "フィルタ名入力",
         "nodes": "ノード入力",
+        "startLocation": "開始位置入力",
         "headersJson": "パケットヘッダJSON入力",
         "actionFilter": "アクションフィルタ",
         "filterLineResults": "フィルタ行到達性の結果",
@@ -578,6 +581,7 @@
       "searchRoutePoliciesDesc": "デバイス全体でアクション別にルートポリシーを検索",
       "reduceReachabilityDesc": "パス制約条件で到達性を分析",
       "headersPlaceholder": "フローヘッダJSON...",
+      "pathConstraintsPlaceholder": "パス制約JSON...",
       "nodePlaceholder": "ノードでフィルタ...",
       "allActions": "全アクション",
       "permit": "PERMIT",
@@ -586,6 +590,7 @@
         "searchRoutePoliciesResults": "ルートポリシー検索の結果",
         "reduceReachabilityResults": "制約付き到達性の結果",
         "flowHeaders": "フローヘッダJSON入力",
+        "pathConstraints": "パス制約JSON入力",
         "nodeFilter": "ノードフィルタ",
         "actionFilter": "アクションフィルタ"
       }
@@ -1197,6 +1202,185 @@
       "selfConnection": "デバイスを自分自身に接続することはできません",
       "saveFailed": "トポロジーの保存に失敗しました",
       "unknown": "不明なエラーが発生しました"
+    }
+  },
+  "batfishTools": {
+    "title": "Batfish 機能ツール",
+    "categoryLabel": "Batfish 機能カテゴリ",
+    "operationLabels": {
+      "filters": "フィルター・経路操作",
+      "policies": "ルートポリシー操作",
+      "edge": "エッジ・ロードバランサー操作"
+    },
+    "categories": {
+      "resolve": "解決",
+      "filters": "フィルター・経路",
+      "policies": "ポリシー",
+      "edge": "エッジ・LB"
+    },
+    "categoryDescriptions": {
+      "resolve": "Batfish の指定子文字列を、ノード、フィルター、インターフェース、ロケーション、IPに解決します。",
+      "filters": "ACL/フィルター差分、LPM経路、prefix trace、双方向到達性を確認します。",
+      "policies": "ルートポリシーの検索、テスト、BDD検証、snapshot間比較を行います。",
+      "edge": "有効なsnapshotから A10 virtual server と user-provided Layer 1 edge を確認します。"
+    },
+    "operations": {
+      "filters": {
+        "compare": "比較",
+        "lpm": "LPM",
+        "prefix": "Prefix",
+        "bidirectional": "双方向"
+      },
+      "policies": {
+        "search": "検索",
+        "test": "テスト",
+        "transfer": "Transfer",
+        "compare": "比較"
+      },
+      "edge": {
+        "a10": "A10",
+        "layer1": "Layer 1"
+      }
+    },
+    "operationDescriptions": {
+      "filters": {
+        "compare": "参照snapshotとACL/フィルター定義を比較します。",
+        "lpm": "対象IPアドレスに最長一致する経路を確認します。",
+        "prefix": "prefix が routing policy と経路選択でどう扱われるか追跡します。",
+        "bidirectional": "指定したpacket headersで往路と復路の到達性を確認します。"
+      },
+      "policies": {
+        "search": "指定したactionと制約に一致するルートポリシー経路を検索します。",
+        "test": "入力した経路をルートポリシーへ通し、出力を確認します。",
+        "transfer": "Batfish transfer BDD analysis でルートポリシーの振る舞いを検証します。",
+        "compare": "snapshot間でルートポリシーまたはpeer group policyを比較します。"
+      },
+      "edge": {
+        "a10": "有効なsnapshotから A10 virtual server 設定を一覧します。",
+        "layer1": "user-provided Layer 1 edge をsnapshot内のdevice/interfaceと照合します。"
+      }
+    },
+    "resolveDescriptions": {
+      "nodes": "node指定子を実際のnode名に解決します。",
+      "filters": "filter指定子をACLまたはfilter名に解決します。",
+      "interfaces": "interface指定子をinterface名に解決します。",
+      "locations": "location指定子をBatfish locationに解決します。",
+      "ips": "IP指定子をIP集合に解決します。",
+      "locationIps": "locationから関連するIP集合を解決します。"
+    },
+    "sections": {
+      "specifierResolution": "指定子の解決",
+      "filterRoutingAnalysis": "フィルター・経路分析",
+      "routePolicyWorkbench": "ルートポリシー作業領域",
+      "loadBalancerLayer1": "ロードバランサー・Layer 1"
+    },
+    "fields": {
+      "nodes": "ノード",
+      "grammarVersion": "Grammar version",
+      "filters": "フィルター",
+      "interfaces": "インターフェース",
+      "locations": "ロケーション",
+      "ips": "IP",
+      "referenceSnapshot": "参照snapshot",
+      "currentSnapshotOverride": "現在snapshotの上書き",
+      "lpmIp": "LPM対象IP",
+      "lpmNodes": "LPM対象ノード",
+      "lpmVrfs": "LPM対象VRF",
+      "prefix": "Prefix",
+      "prefixTracerNodes": "Prefix tracer対象ノード",
+      "bidirectionalHeadersJson": "双方向headers JSON",
+      "pathConstraintsJson": "Path constraints JSON",
+      "returnFlowType": "Return flow type",
+      "searchAction": "検索action",
+      "searchNodes": "検索対象ノード",
+      "searchPolicies": "検索対象ポリシー",
+      "inputConstraintsJson": "Input constraints JSON",
+      "outputConstraintsJson": "Output constraints JSON",
+      "pathOption": "Path option",
+      "testDirection": "テスト方向",
+      "testNodes": "テスト対象ノード",
+      "testPolicies": "テスト対象ポリシー",
+      "inputRoutesJson": "Input routes JSON",
+      "transferNodes": "Transfer対象ノード",
+      "transferPolicies": "Transfer対象ポリシー",
+      "seed": "Seed",
+      "routeCompareReferenceSnapshot": "ルート比較の参照snapshot",
+      "routeCompareSnapshotOverride": "ルート比較snapshotの上書き",
+      "policy": "ポリシー",
+      "referencePolicy": "参照ポリシー",
+      "compareNodes": "比較対象ノード",
+      "a10Nodes": "A10対象ノード",
+      "a10VirtualServerIps": "A10 virtual server IP",
+      "layer1Nodes": "Layer 1対象ノード",
+      "layer1RemoteNodes": "Layer 1 remote node"
+    },
+    "buttons": {
+      "nodes": "ノード",
+      "filters": "フィルター",
+      "interfaces": "インターフェース",
+      "locations": "ロケーション",
+      "ips": "IP",
+      "locationIps": "Location IP",
+      "compareFilters": "フィルターを比較",
+      "lpmRoutes": "LPM経路を確認",
+      "prefixTracer": "Prefix tracer",
+      "bidirectionalReachability": "双方向到達性を確認",
+      "searchRoutePolicies": "ルートポリシーを検索",
+      "testRoutePolicies": "ルートポリシーをテスト",
+      "transferBddValidation": "Transfer BDDを検証",
+      "compareRoutePolicies": "ルートポリシーを比較",
+      "comparePeerGroups": "Peer groupを比較",
+      "a10VirtualServers": "A10 virtual serverを表示",
+      "userProvidedLayer1Edges": "User-provided Layer 1 edgeを確認"
+    },
+    "checkboxes": {
+      "ignoreComposites": "Compositeを無視",
+      "perPath": "Pathごとに表示",
+      "retainAllPaths": "すべてのpathを保持"
+    },
+    "options": {
+      "selectSnapshot": "snapshotを選択",
+      "activeSnapshot": "有効なsnapshot",
+      "permit": "permit（許可）",
+      "deny": "deny（拒否）",
+      "in": "IN（入力）",
+      "out": "OUT（出力）"
+    },
+    "results": {
+      "resolveNodes": "ノード解決",
+      "resolveFilters": "フィルター解決",
+      "resolveInterfaces": "インターフェース解決",
+      "resolveLocations": "ロケーション解決",
+      "resolveIps": "IP解決",
+      "resolveIpsOfLocation": "Location IP解決",
+      "compareFilters": "フィルター比較",
+      "lpmRoutes": "LPM経路",
+      "prefixTracer": "Prefix tracer",
+      "bidirectionalReachability": "双方向到達性",
+      "searchRoutePolicies": "ルートポリシー検索",
+      "testRoutePolicies": "ルートポリシーテスト",
+      "transferBDD": "Transfer BDD検証",
+      "compareRoutePolicies": "ルートポリシー比較",
+      "comparePeerGroups": "Peer group比較",
+      "a10VirtualServers": "A10 virtual server",
+      "userLayer1Edges": "User-provided Layer 1 edge"
+    },
+    "resultStatus": {
+      "result": "結果",
+      "running": "実行中",
+      "runningText": "実行中...",
+      "error": "エラー",
+      "noData": "データなし",
+      "done": "完了"
+    },
+    "errors": {
+      "jsonObject": "{{field}} はJSON objectで入力してください",
+      "invalidJson": "{{field}} は不正なJSONです",
+      "inputRoutesRequired": "Input routes JSONは必須です",
+      "inputRoutesType": "Input routes JSONはJSON objectまたはarrayで入力してください",
+      "inputRoutesInvalidJson": "Input routes JSONは不正なJSONです",
+      "integerField": "{{field}} は整数で入力してください",
+      "headersRequired": "双方向headers JSONは必須です"
     }
   }
 }

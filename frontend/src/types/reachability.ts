@@ -33,13 +33,6 @@ export interface TracerouteRequest {
   }
   /** Ingress device/interface where the trace starts (Batfish query param) */
   startLocation?: string
-  pathConstraints?: {
-    /** Path constraint: restrict traces to those starting from this location */
-    startLocation?: string
-    endLocation?: string
-    transitLocations?: string
-    forbiddenLocations?: string
-  }
   maxTraces?: number
   ignoreFilters?: boolean
 }

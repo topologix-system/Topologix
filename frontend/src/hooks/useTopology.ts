@@ -2,7 +2,7 @@
  * React Query hooks for network topology layers
  * Handles Layer 1/2 topology, VXLAN VNI properties, and switched VLAN edges
  */
-import { useQuery } from '@tanstack/react-query'
+import { useQuery, useMutation } from '@tanstack/react-query'
 import { topologyAPI } from '../services/api'
 
 /**
@@ -149,5 +149,35 @@ export function useIPSpaceAssignment(enabled = true) {
     queryFn: () => topologyAPI.getIPSpaceAssignment(),
     enabled,
     staleTime: 60000,
+  })
+}
+
+/**
+ * Mutation to query longest-prefix-match routes for a target IP.
+ */
+export function useLpmRoutes() {
+  return useMutation({
+    mutationFn: (request: { ip: string; nodes?: string | string[]; vrfs?: string | string[] }) =>
+      topologyAPI.getLpmRoutes(request),
+  })
+}
+
+/**
+ * Mutation to trace prefix propagation through the network.
+ */
+export function usePrefixTracer() {
+  return useMutation({
+    mutationFn: (request: { prefix: string; nodes?: string | string[] }) =>
+      topologyAPI.getPrefixTracer(request),
+  })
+}
+
+/**
+ * Mutation to inspect Batfish-normalized user-provided Layer1 edges.
+ */
+export function useUserProvidedLayer1Edges() {
+  return useMutation({
+    mutationFn: (request?: { nodes?: string | string[]; remoteNodes?: string | string[] }) =>
+      topologyAPI.getUserProvidedLayer1Edges(request),
   })
 }

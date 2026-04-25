@@ -151,11 +151,57 @@ export function useLoopbackMultipathConsistency(enabled = true) {
 /**
  * Mutation to check subnet-level multipath consistency
  * Validates ECMP behavior per subnet (more granular than global check)
- * User-triggered analysis with optional node filter
+ * User-triggered analysis with optional max trace limit
  */
 export function useSubnetMultipathConsistency() {
   return useMutation({
-    mutationFn: (request?: { node?: string }) =>
+    mutationFn: (request?: { maxTraces?: number }) =>
       validationAPI.getSubnetMultipathConsistency(request),
+  })
+}
+
+/**
+ * Mutation to resolve filter specifiers into concrete Batfish filters.
+ */
+export function useResolveFilterSpecifier() {
+  return useMutation({
+    mutationFn: (request?: { filters?: string | string[]; nodes?: string | string[]; grammarVersion?: string }) =>
+      validationAPI.resolveFilterSpecifier(request),
+  })
+}
+
+/**
+ * Mutation to resolve node specifiers into concrete Batfish nodes.
+ */
+export function useResolveNodeSpecifier() {
+  return useMutation({
+    mutationFn: (request?: { nodes?: string | string[]; grammarVersion?: string }) =>
+      validationAPI.resolveNodeSpecifier(request),
+  })
+}
+
+/**
+ * Mutation to resolve interface specifiers into concrete Batfish interfaces.
+ */
+export function useResolveInterfaceSpecifier() {
+  return useMutation({
+    mutationFn: (request?: { interfaces?: string | string[]; nodes?: string | string[]; grammarVersion?: string }) =>
+      validationAPI.resolveInterfaceSpecifier(request),
+  })
+}
+
+/**
+ * Mutation to compare filters between the active snapshot and a reference snapshot.
+ */
+export function useCompareFilters() {
+  return useMutation({
+    mutationFn: (request: {
+      reference_snapshot: string
+      snapshot?: string
+      filters?: string | string[]
+      nodes?: string | string[]
+      ignoreComposites?: boolean
+    }) =>
+      validationAPI.compareFilters(request),
   })
 }

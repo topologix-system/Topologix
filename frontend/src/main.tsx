@@ -4,9 +4,10 @@
  */
 import React, { Suspense, lazy } from 'react'
 import ReactDOM from 'react-dom/client'
-import { createBrowserRouter, createHashRouter, RouterProvider } from 'react-router-dom'
+import { createBrowserRouter, createHashRouter, Navigate, RouterProvider } from 'react-router-dom'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { runtimeConfig } from './config/runtimeConfig'
+import { authAPI } from './services/api'
 import './index.css'
 
 // Lazy load components for code splitting
@@ -63,6 +64,7 @@ const RouteLoadingFallback = () => (
 
 // Create router with lazy loaded components
 const RouterFactory = runtimeConfig.useHashRouter ? createHashRouter : createBrowserRouter
+const authEnabled = authAPI.isAuthEnabled()
 const router = RouterFactory([
   {
     path: '/login',
@@ -136,36 +138,51 @@ const router = RouterFactory([
       </Suspense>
     ),
   },
-  {
-    path: '/admin/users',
-    element: (
-      <Suspense fallback={<RouteLoadingFallback />}>
-        <ProtectedRoute>
-          <UserManagementPage />
-        </ProtectedRoute>
-      </Suspense>
-    ),
-  },
-  {
-    path: '/admin/users/:id/edit',
-    element: (
-      <Suspense fallback={<RouteLoadingFallback />}>
-        <ProtectedRoute>
-          <UserEditPage />
-        </ProtectedRoute>
-      </Suspense>
-    ),
-  },
-  {
-    path: '/admin/security-logs',
-    element: (
-      <Suspense fallback={<RouteLoadingFallback />}>
-        <ProtectedRoute>
-          <SecurityLogsPage />
-        </ProtectedRoute>
-      </Suspense>
-    ),
-  },
+  ...(authEnabled ? [
+    {
+      path: '/admin/users',
+      element: (
+        <Suspense fallback={<RouteLoadingFallback />}>
+          <ProtectedRoute>
+            <UserManagementPage />
+          </ProtectedRoute>
+        </Suspense>
+      ),
+    },
+    {
+      path: '/admin/users/:id/edit',
+      element: (
+        <Suspense fallback={<RouteLoadingFallback />}>
+          <ProtectedRoute>
+            <UserEditPage />
+          </ProtectedRoute>
+        </Suspense>
+      ),
+    },
+    {
+      path: '/admin/security-logs',
+      element: (
+        <Suspense fallback={<RouteLoadingFallback />}>
+          <ProtectedRoute>
+            <SecurityLogsPage />
+          </ProtectedRoute>
+        </Suspense>
+      ),
+    },
+  ] : [
+    {
+      path: '/admin/users',
+      element: <Navigate to="/" replace />,
+    },
+    {
+      path: '/admin/users/:id/edit',
+      element: <Navigate to="/" replace />,
+    },
+    {
+      path: '/admin/security-logs',
+      element: <Navigate to="/" replace />,
+    },
+  ]),
   {
     path: '/sidebar-popout',
     element: (

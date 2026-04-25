@@ -150,12 +150,12 @@ function Section({ title, icon, isLoading, data, defaultOpen = false, severity =
 function SubnetMultipathSection() {
   const { t } = useTranslation()
   const [isOpen, setIsOpen] = useState(false)
-  const [nodeFilter, setNodeFilter] = useState('')
+  const [maxTraces, setMaxTraces] = useState('')
   const mutation = useSubnetMultipathConsistency()
 
   const handleExecute = () => {
-    const request: { node?: string } = {}
-    if (nodeFilter.trim()) request.node = nodeFilter.trim()
+    const request: { maxTraces?: number } = {}
+    if (maxTraces.trim()) request.maxTraces = Number(maxTraces)
     mutation.mutate(Object.keys(request).length > 0 ? request : undefined)
   }
 
@@ -188,9 +188,9 @@ function SubnetMultipathSection() {
       {isOpen && (
         <div id={`${sectionId}-content`} role="region" aria-labelledby={`${sectionId}-button`} className="px-4 pb-4 border-t border-gray-100">
           <div className="flex gap-2 mt-3 mb-3">
-            <input type="text" placeholder={t('validation.subnetMultipath.nodePlaceholder')} value={nodeFilter} onChange={(e) => setNodeFilter(e.target.value)}
+            <input type="number" min="1" placeholder={t('validation.subnetMultipath.maxTracesPlaceholder')} value={maxTraces} onChange={(e) => setMaxTraces(e.target.value)}
               className="flex-1 px-3 py-1.5 text-sm border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-primary-600"
-              aria-label={t('validation.subnetMultipath.aria.nodeFilter')} />
+              aria-label={t('validation.subnetMultipath.aria.maxTraces')} />
             <button onClick={handleExecute} disabled={mutation.isPending}
               className="px-4 py-1.5 text-sm bg-primary-600 hover:bg-primary-700 disabled:bg-gray-400 text-white rounded-md transition-colors focus:outline-none focus:ring-2 focus:ring-primary-600 focus:ring-offset-1">
               {mutation.isPending ? (

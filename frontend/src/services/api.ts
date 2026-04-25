@@ -348,7 +348,7 @@ export const authAPI = {
 
   hasRole(role: string) {
     if (!AUTH_ENABLED) {
-      return true
+      return false
     }
     return authState.user?.roles?.includes(role) || false
   },
@@ -619,18 +619,53 @@ export const validationAPI = {
     return response.data.data
   },
 
-  async getSubnetMultipathConsistency(request?: { node?: string }) {
-    const response = await apiClient.post<APIResponse>('/validation/subnet-multipath-consistency', request || {})
+  async getSubnetMultipathConsistency(request?: { maxTraces?: number }) {
+    const response = await apiClient.post<APIResponse<any>>('/validation/subnet-multipath-consistency', request || {})
     return response.data.data
   },
 
-  async getDifferentialReachability(request?: { reference_snapshot?: string }) {
-    const response = await apiClient.post<APIResponse>('/advanced/differential-reachability', request || {})
+  async getDifferentialReachability(request: {
+    reference_snapshot: string
+    snapshot?: string
+    headers?: object
+    pathConstraints?: object
+    actions?: string | string[]
+    maxTraces?: number
+    invertSearch?: boolean
+    ignoreFilters?: boolean
+  }) {
+    const response = await apiClient.post<APIResponse<any>>('/advanced/differential-reachability', request || {})
     return response.data.data
   },
 
   async getLoopbackMultipathConsistency() {
     const response = await apiClient.get<APIResponse>('/validation/loopback-multipath-consistency')
+    return response.data.data
+  },
+
+  async resolveFilterSpecifier(request?: { filters?: string | string[]; nodes?: string | string[]; grammarVersion?: string }) {
+    const response = await apiClient.post<APIResponse<any[]>>('/validation/resolve-filter-specifier', request || {})
+    return response.data.data
+  },
+
+  async resolveNodeSpecifier(request?: { nodes?: string | string[]; grammarVersion?: string }) {
+    const response = await apiClient.post<APIResponse<any[]>>('/validation/resolve-node-specifier', request || {})
+    return response.data.data
+  },
+
+  async resolveInterfaceSpecifier(request?: { interfaces?: string | string[]; nodes?: string | string[]; grammarVersion?: string }) {
+    const response = await apiClient.post<APIResponse<any[]>>('/validation/resolve-interface-specifier', request || {})
+    return response.data.data
+  },
+
+  async compareFilters(request: {
+    reference_snapshot: string
+    snapshot?: string
+    filters?: string | string[]
+    nodes?: string | string[]
+    ignoreComposites?: boolean
+  }) {
+    const response = await apiClient.post<APIResponse<any[]>>('/validation/compare-filters', request)
     return response.data.data
   },
 }
@@ -886,6 +921,21 @@ export const topologyAPI = {
     const response = await apiClient.get<APIResponse>('/topology/ip-space-assignment')
     return response.data.data
   },
+
+  async getLpmRoutes(request: { ip: string; nodes?: string | string[]; vrfs?: string | string[] }) {
+    const response = await apiClient.post<APIResponse<any[]>>('/topology/lpm-routes', request)
+    return response.data.data
+  },
+
+  async getPrefixTracer(request: { prefix: string; nodes?: string | string[] }) {
+    const response = await apiClient.post<APIResponse<any[]>>('/topology/prefix-tracer', request)
+    return response.data.data
+  },
+
+  async getUserProvidedLayer1Edges(request?: { nodes?: string | string[]; remoteNodes?: string | string[] }) {
+    const response = await apiClient.post<APIResponse<any[]>>('/topology/user-provided-layer1-edges', request || {})
+    return response.data.data
+  },
 }
 
 /**
@@ -899,23 +949,88 @@ export const advancedAPI = {
     return response.data.data
   },
 
-  async testRoutePolicies(request: { direction: string; policy: string }) {
-    const response = await apiClient.post<APIResponse>('/advanced/test-route-policies', request)
+  async testRoutePolicies(request: {
+    direction: string
+    inputRoutes: object | object[]
+    nodes?: string | string[]
+    policies?: string | string[]
+    bgpSessionProperties?: object
+  }) {
+    const response = await apiClient.post<APIResponse<any>>('/advanced/test-route-policies', request)
     return response.data.data
   },
 
-  async searchRoutePolicies(request?: { action?: string; nodes?: string[] }) {
+  async searchRoutePolicies(request?: {
+    action?: string
+    nodes?: string | string[]
+    policies?: string | string[]
+    inputConstraints?: object
+    outputConstraints?: object
+    perPath?: boolean
+    pathOption?: string
+  }) {
     const response = await apiClient.post<APIResponse>('/advanced/search-route-policies', request || {})
     return response.data.data
   },
 
-  async getFilterLineReachability(request?: { filters?: string; nodes?: string[] }) {
-    const response = await apiClient.get<APIResponse>('/acl/filter-line-reachability', { params: request })
+  async resolveLocationSpecifier(request?: { locations?: string; grammarVersion?: string }) {
+    const response = await apiClient.post<APIResponse<any[]>>('/advanced/resolve-location-specifier', request || {})
     return response.data.data
   },
 
-  async testFilters(request: { filters: string; nodes?: string[] }) {
-    const response = await apiClient.post<APIResponse>('/acl/test-filters', request)
+  async resolveIpSpecifier(request?: { ips?: string; grammarVersion?: string }) {
+    const response = await apiClient.post<APIResponse<any[]>>('/advanced/resolve-ip-specifier', request || {})
+    return response.data.data
+  },
+
+  async resolveIpsOfLocationSpecifier(request: { locations: string; grammarVersion?: string }) {
+    const response = await apiClient.post<APIResponse<any[]>>('/advanced/resolve-ips-of-location-specifier', request)
+    return response.data.data
+  },
+
+  async bidirectionalReachability(request: { headers: object; pathConstraints?: object; returnFlowType?: string }) {
+    const response = await apiClient.post<APIResponse<any[]>>('/advanced/bidirectional-reachability', request)
+    return response.data.data
+  },
+
+  async getA10VirtualServerConfiguration(request?: { nodes?: string | string[]; virtualServerIps?: string }) {
+    const response = await apiClient.post<APIResponse<any[]>>('/advanced/a10-virtual-server-configuration', request || {})
+    return response.data.data
+  },
+
+  async transferBDDValidation(request?: {
+    nodes?: string | string[]
+    policies?: string | string[]
+    retainAllPaths?: boolean
+    seed?: number | string
+  }) {
+    const response = await apiClient.post<APIResponse<any[]>>('/advanced/transfer-bdd-validation', request || {}, { timeout: 120000 })
+    return response.data.data
+  },
+
+  async comparePeerGroupPolicies(request: { reference_snapshot: string; snapshot?: string }) {
+    const response = await apiClient.post<APIResponse<any[]>>('/advanced/compare-peer-group-policies', request, { timeout: 120000 })
+    return response.data.data
+  },
+
+  async compareRoutePolicies(request: {
+    policy: string
+    referencePolicy: string
+    reference_snapshot: string
+    snapshot?: string
+    nodes?: string | string[]
+  }) {
+    const response = await apiClient.post<APIResponse<any[]>>('/advanced/compare-route-policies', request, { timeout: 120000 })
+    return response.data.data
+  },
+
+  async getFilterLineReachability(request?: { filters?: string; nodes?: string[]; ignoreComposites?: boolean }) {
+    const response = await apiClient.get<APIResponse<any>>('/acl/filter-line-reachability', { params: request })
+    return response.data.data
+  },
+
+  async testFilters(request: { headers: object; filters?: string; nodes?: string[]; startLocation?: string }) {
+    const response = await apiClient.post<APIResponse<any>>('/acl/test-filters', request)
     return response.data.data
   },
 
@@ -929,8 +1044,15 @@ export const advancedAPI = {
     return response.data.data
   },
 
-  async reduceReachability(request?: { pathConstraints?: object }) {
-    const response = await apiClient.post<APIResponse>('/advanced/reduce-reachability', request || {})
+  async reduceReachability(request?: {
+    headers?: object
+    pathConstraints?: object
+    actions?: string | string[]
+    maxTraces?: number
+    invertSearch?: boolean
+    ignoreFilters?: boolean
+  }) {
+    const response = await apiClient.post<APIResponse<any>>('/advanced/reduce-reachability', request || {})
     return response.data.data
   },
 

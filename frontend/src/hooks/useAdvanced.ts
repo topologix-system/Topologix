@@ -52,7 +52,13 @@ export function useVIModel(enabled = true) {
  */
 export function useTestRoutePolicies() {
   return useMutation({
-    mutationFn: (request: { direction: string; policy: string }) =>
+    mutationFn: (request: {
+      direction: string
+      inputRoutes: object | object[]
+      nodes?: string | string[]
+      policies?: string | string[]
+      bgpSessionProperties?: object
+    }) =>
       advancedAPI.testRoutePolicies(request),
   })
 }
@@ -64,8 +70,107 @@ export function useTestRoutePolicies() {
  */
 export function useSearchRoutePolicies() {
   return useMutation({
-    mutationFn: (request?: { action?: string; nodes?: string[] }) =>
+    mutationFn: (request?: {
+      action?: string
+      nodes?: string | string[]
+      policies?: string | string[]
+      inputConstraints?: object
+      outputConstraints?: object
+      perPath?: boolean
+      pathOption?: string
+    }) =>
       advancedAPI.searchRoutePolicies(request),
+  })
+}
+
+/**
+ * Mutation to resolve location specifiers into concrete Batfish locations.
+ */
+export function useResolveLocationSpecifier() {
+  return useMutation({
+    mutationFn: (request?: { locations?: string; grammarVersion?: string }) =>
+      advancedAPI.resolveLocationSpecifier(request),
+  })
+}
+
+/**
+ * Mutation to resolve IP specifiers into concrete IPs.
+ */
+export function useResolveIpSpecifier() {
+  return useMutation({
+    mutationFn: (request?: { ips?: string; grammarVersion?: string }) =>
+      advancedAPI.resolveIpSpecifier(request),
+  })
+}
+
+/**
+ * Mutation to resolve location specifiers into source IP spaces.
+ */
+export function useResolveIpsOfLocationSpecifier() {
+  return useMutation({
+    mutationFn: (request: { locations: string; grammarVersion?: string }) =>
+      advancedAPI.resolveIpsOfLocationSpecifier(request),
+  })
+}
+
+/**
+ * Mutation for bidirectional reachability.
+ */
+export function useBidirectionalReachability() {
+  return useMutation({
+    mutationFn: (request: { headers: object; pathConstraints?: object; returnFlowType?: string }) =>
+      advancedAPI.bidirectionalReachability(request),
+  })
+}
+
+/**
+ * Mutation to query A10 virtual server configuration.
+ */
+export function useA10VirtualServerConfiguration() {
+  return useMutation({
+    mutationFn: (request?: { nodes?: string | string[]; virtualServerIps?: string }) =>
+      advancedAPI.getA10VirtualServerConfiguration(request),
+  })
+}
+
+/**
+ * Mutation to run transfer BDD validation for route policies.
+ */
+export function useTransferBDDValidation() {
+  return useMutation({
+    mutationFn: (request?: {
+      nodes?: string | string[]
+      policies?: string | string[]
+      retainAllPaths?: boolean
+      seed?: number | string
+    }) =>
+      advancedAPI.transferBDDValidation(request),
+  })
+}
+
+/**
+ * Mutation to compare peer group policies.
+ */
+export function useComparePeerGroupPolicies() {
+  return useMutation({
+    mutationFn: (request: { reference_snapshot: string; snapshot?: string }) =>
+      advancedAPI.comparePeerGroupPolicies(request),
+  })
+}
+
+/**
+ * Mutation to compare route policy symbolic behavior.
+ */
+export function useCompareRoutePolicies() {
+  return useMutation({
+    mutationFn: (request: {
+      policy: string
+      referencePolicy: string
+      reference_snapshot: string
+      snapshot?: string
+      nodes?: string | string[]
+    }) =>
+      advancedAPI.compareRoutePolicies(request),
   })
 }
 
@@ -76,7 +181,7 @@ export function useSearchRoutePolicies() {
  */
 export function useFilterLineReachability() {
   return useMutation({
-    mutationFn: (request?: { filters?: string; nodes?: string[] }) =>
+    mutationFn: (request?: { filters?: string; nodes?: string[]; ignoreComposites?: boolean }) =>
       advancedAPI.getFilterLineReachability(request),
   })
 }
@@ -88,7 +193,7 @@ export function useFilterLineReachability() {
  */
 export function useTestFilters() {
   return useMutation({
-    mutationFn: (request: { filters: string; nodes?: string[] }) =>
+    mutationFn: (request: { headers: object; filters?: string; nodes?: string[]; startLocation?: string }) =>
       advancedAPI.testFilters(request),
   })
 }
@@ -124,7 +229,14 @@ export function useSearchFilters() {
  */
 export function useReduceReachability() {
   return useMutation({
-    mutationFn: (request?: { pathConstraints?: object }) =>
+    mutationFn: (request?: {
+      headers?: object
+      pathConstraints?: object
+      actions?: string | string[]
+      maxTraces?: number
+      invertSearch?: boolean
+      ignoreFilters?: boolean
+    }) =>
       advancedAPI.reduceReachability(request),
   })
 }

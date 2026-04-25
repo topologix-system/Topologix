@@ -458,9 +458,9 @@
       "subnetMultipathConsistency": "Subnet Multipath Consistency"
     },
     "subnetMultipath": {
-      "nodePlaceholder": "Node filter (optional)...",
+      "maxTracesPlaceholder": "Max traces (optional)...",
       "aria": {
-        "nodeFilter": "Node filter input",
+        "maxTraces": "Max traces input",
         "results": "Subnet multipath consistency results"
       }
     },
@@ -555,6 +555,7 @@
       "searchFiltersDesc": "Search ACLs by permit/deny action across devices",
       "filtersPlaceholder": "Filter name (regex)...",
       "nodesPlaceholder": "Node names (comma-separated)...",
+      "startLocationPlaceholder": "Start location (optional)...",
       "headersPlaceholder": "Packet headers JSON...",
       "execute": "Execute",
       "executing": "Executing...",
@@ -563,9 +564,11 @@
       "actionPermit": "Permit",
       "actionDeny": "Deny",
       "invalidJson": "Invalid JSON",
+      "headersRequired": "Packet headers JSON is required",
       "aria": {
         "filterName": "Filter name input",
         "nodes": "Nodes input",
+        "startLocation": "Start location input",
         "headersJson": "Packet headers JSON input",
         "actionFilter": "Action filter",
         "filterLineResults": "Filter line reachability results",
@@ -578,6 +581,7 @@
       "searchRoutePoliciesDesc": "Search route policies by action across devices",
       "reduceReachabilityDesc": "Analyze reachability with path constraints",
       "headersPlaceholder": "Flow headers JSON...",
+      "pathConstraintsPlaceholder": "Path constraints JSON...",
       "nodePlaceholder": "Filter by node...",
       "allActions": "All Actions",
       "permit": "PERMIT",
@@ -586,6 +590,7 @@
         "searchRoutePoliciesResults": "Search route policies results",
         "reduceReachabilityResults": "Reduce reachability results",
         "flowHeaders": "Flow headers JSON input",
+        "pathConstraints": "Path constraints JSON input",
         "nodeFilter": "Node filter",
         "actionFilter": "Action filter"
       }
@@ -1197,6 +1202,185 @@
       "selfConnection": "Cannot connect device to itself",
       "saveFailed": "Failed to save topology",
       "unknown": "An unknown error occurred"
+    }
+  },
+  "batfishTools": {
+    "title": "Batfish Feature Tools",
+    "categoryLabel": "Batfish feature category",
+    "operationLabels": {
+      "filters": "Filter and routing operation",
+      "policies": "Route policy operation",
+      "edge": "Edge and load balancer operation"
+    },
+    "categories": {
+      "resolve": "Resolve",
+      "filters": "Filters & Routes",
+      "policies": "Policies",
+      "edge": "Edge & Load Balancer"
+    },
+    "categoryDescriptions": {
+      "resolve": "Resolve Batfish specifier strings into concrete nodes, filters, interfaces, locations, or IPs.",
+      "filters": "Inspect ACL/filter differences, route lookup behavior, prefix paths, and bidirectional reachability.",
+      "policies": "Search, test, validate, and compare route policy behavior across snapshots.",
+      "edge": "Review A10 virtual servers and user-provided Layer 1 edges from the active snapshot."
+    },
+    "operations": {
+      "filters": {
+        "compare": "Compare",
+        "lpm": "LPM",
+        "prefix": "Prefix",
+        "bidirectional": "Bidirectional"
+      },
+      "policies": {
+        "search": "Search",
+        "test": "Test",
+        "transfer": "Transfer",
+        "compare": "Compare"
+      },
+      "edge": {
+        "a10": "A10",
+        "layer1": "Layer 1"
+      }
+    },
+    "operationDescriptions": {
+      "filters": {
+        "compare": "Compare ACL/filter definitions against a reference snapshot.",
+        "lpm": "Find the longest-prefix-match route for a target IP address.",
+        "prefix": "Trace how a prefix is handled by routing policy and route selection.",
+        "bidirectional": "Check forward and return reachability for the provided packet headers."
+      },
+      "policies": {
+        "search": "Find route policy paths that match selected actions and constraints.",
+        "test": "Run route policies against supplied input routes and inspect the output.",
+        "transfer": "Validate route policy behavior with Batfish transfer BDD analysis.",
+        "compare": "Compare route policies or peer group policies between snapshots."
+      },
+      "edge": {
+        "a10": "List A10 virtual server configuration from the active snapshot.",
+        "layer1": "Verify user-provided Layer 1 edges against snapshot devices and interfaces."
+      }
+    },
+    "resolveDescriptions": {
+      "nodes": "Resolve a node specifier into node names.",
+      "filters": "Resolve a filter specifier into ACL or filter names.",
+      "interfaces": "Resolve an interface specifier into interface names.",
+      "locations": "Resolve a location specifier into Batfish locations.",
+      "ips": "Resolve an IP specifier into an IP set.",
+      "locationIps": "Resolve locations into their associated IP set."
+    },
+    "sections": {
+      "specifierResolution": "Specifier resolution",
+      "filterRoutingAnalysis": "Filter and routing analysis",
+      "routePolicyWorkbench": "Route policy workbench",
+      "loadBalancerLayer1": "Load balancer and Layer 1"
+    },
+    "fields": {
+      "nodes": "Nodes",
+      "grammarVersion": "Grammar version",
+      "filters": "Filters",
+      "interfaces": "Interfaces",
+      "locations": "Locations",
+      "ips": "IPs",
+      "referenceSnapshot": "Reference snapshot",
+      "currentSnapshotOverride": "Current snapshot override",
+      "lpmIp": "LPM IP",
+      "lpmNodes": "LPM nodes",
+      "lpmVrfs": "LPM VRFs",
+      "prefix": "Prefix",
+      "prefixTracerNodes": "Prefix tracer nodes",
+      "bidirectionalHeadersJson": "Bidirectional headers JSON",
+      "pathConstraintsJson": "Path constraints JSON",
+      "returnFlowType": "Return flow type",
+      "searchAction": "Search action",
+      "searchNodes": "Search nodes",
+      "searchPolicies": "Search policies",
+      "inputConstraintsJson": "Input constraints JSON",
+      "outputConstraintsJson": "Output constraints JSON",
+      "pathOption": "Path option",
+      "testDirection": "Test direction",
+      "testNodes": "Test nodes",
+      "testPolicies": "Test policies",
+      "inputRoutesJson": "Input routes JSON",
+      "transferNodes": "Transfer nodes",
+      "transferPolicies": "Transfer policies",
+      "seed": "Seed",
+      "routeCompareReferenceSnapshot": "Route compare reference snapshot",
+      "routeCompareSnapshotOverride": "Route compare snapshot override",
+      "policy": "Policy",
+      "referencePolicy": "Reference policy",
+      "compareNodes": "Compare nodes",
+      "a10Nodes": "A10 nodes",
+      "a10VirtualServerIps": "A10 virtual server IPs",
+      "layer1Nodes": "Layer 1 nodes",
+      "layer1RemoteNodes": "Layer 1 remote nodes"
+    },
+    "buttons": {
+      "nodes": "Nodes",
+      "filters": "Filters",
+      "interfaces": "Interfaces",
+      "locations": "Locations",
+      "ips": "IPs",
+      "locationIps": "Location IPs",
+      "compareFilters": "Compare filters",
+      "lpmRoutes": "LPM routes",
+      "prefixTracer": "Prefix tracer",
+      "bidirectionalReachability": "Bidirectional reachability",
+      "searchRoutePolicies": "Search route policies",
+      "testRoutePolicies": "Test route policies",
+      "transferBddValidation": "Transfer BDD validation",
+      "compareRoutePolicies": "Compare route policies",
+      "comparePeerGroups": "Compare peer groups",
+      "a10VirtualServers": "A10 virtual servers",
+      "userProvidedLayer1Edges": "User-provided Layer 1 edges"
+    },
+    "checkboxes": {
+      "ignoreComposites": "Ignore composites",
+      "perPath": "Per path",
+      "retainAllPaths": "Retain all paths"
+    },
+    "options": {
+      "selectSnapshot": "Select snapshot",
+      "activeSnapshot": "Active snapshot",
+      "permit": "permit",
+      "deny": "deny",
+      "in": "IN",
+      "out": "OUT"
+    },
+    "results": {
+      "resolveNodes": "Resolve nodes",
+      "resolveFilters": "Resolve filters",
+      "resolveInterfaces": "Resolve interfaces",
+      "resolveLocations": "Resolve locations",
+      "resolveIps": "Resolve IPs",
+      "resolveIpsOfLocation": "Resolve location IPs",
+      "compareFilters": "Compare filters",
+      "lpmRoutes": "LPM routes",
+      "prefixTracer": "Prefix tracer",
+      "bidirectionalReachability": "Bidirectional reachability",
+      "searchRoutePolicies": "Search route policies",
+      "testRoutePolicies": "Test route policies",
+      "transferBDD": "Transfer BDD validation",
+      "compareRoutePolicies": "Compare route policies",
+      "comparePeerGroups": "Compare peer groups",
+      "a10VirtualServers": "A10 virtual servers",
+      "userLayer1Edges": "User-provided Layer 1 edges"
+    },
+    "resultStatus": {
+      "result": "Result",
+      "running": "Running",
+      "runningText": "Running...",
+      "error": "Error",
+      "noData": "No data",
+      "done": "Done"
+    },
+    "errors": {
+      "jsonObject": "{{field}} must be a JSON object",
+      "invalidJson": "{{field}} is invalid JSON",
+      "inputRoutesRequired": "Input routes are required",
+      "inputRoutesType": "Input routes must be a JSON object or array",
+      "inputRoutesInvalidJson": "Input routes are invalid JSON",
+      "integerField": "{{field}} must be an integer",
+      "headersRequired": "Bidirectional headers JSON is required"
     }
   }
 }

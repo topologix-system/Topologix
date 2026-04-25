@@ -636,13 +636,22 @@ export const validationAPI = {
     return response.data.data
   },
 
-  async getSubnetMultipathConsistency(request?: { node?: string }) {
-    const response = await apiClient.post<APIResponse>('/validation/subnet-multipath-consistency', request || {})
+  async getSubnetMultipathConsistency(request?: { maxTraces?: number }) {
+    const response = await apiClient.post<APIResponse<any>>('/validation/subnet-multipath-consistency', request || {})
     return response.data.data
   },
 
-  async getDifferentialReachability(request?: { reference_snapshot?: string }) {
-    const response = await apiClient.post<APIResponse>('/advanced/differential-reachability', request || {})
+  async getDifferentialReachability(request: {
+    reference_snapshot: string
+    snapshot?: string
+    headers?: object
+    pathConstraints?: object
+    actions?: string | string[]
+    maxTraces?: number
+    invertSearch?: boolean
+    ignoreFilters?: boolean
+  }) {
+    const response = await apiClient.post<APIResponse<any>>('/advanced/differential-reachability', request || {})
     return response.data.data
   },
 
@@ -769,8 +778,14 @@ export const advancedAPI = {
     return response.data.data
   },
 
-  async testRoutePolicies(request: { direction: string; policy: string }) {
-    const response = await apiClient.post<APIResponse>('/advanced/test-route-policies', request)
+  async testRoutePolicies(request: {
+    direction: string
+    inputRoutes: object | object[]
+    nodes?: string | string[]
+    policies?: string | string[]
+    bgpSessionProperties?: object
+  }) {
+    const response = await apiClient.post<APIResponse<any>>('/advanced/test-route-policies', request)
     return response.data.data
   },
 
@@ -779,13 +794,13 @@ export const advancedAPI = {
     return response.data.data
   },
 
-  async getFilterLineReachability(request?: { filters?: string; nodes?: string[] }) {
-    const response = await apiClient.get<APIResponse>('/acl/filter-line-reachability', { params: request })
+  async getFilterLineReachability(request?: { filters?: string; nodes?: string[]; ignoreComposites?: boolean }) {
+    const response = await apiClient.get<APIResponse<any>>('/acl/filter-line-reachability', { params: request })
     return response.data.data
   },
 
-  async testFilters(request: { filters: string; nodes?: string[] }) {
-    const response = await apiClient.post<APIResponse>('/acl/test-filters', request)
+  async testFilters(request: { headers: object; filters?: string; nodes?: string[]; startLocation?: string }) {
+    const response = await apiClient.post<APIResponse<any>>('/acl/test-filters', request)
     return response.data.data
   },
 
@@ -799,8 +814,15 @@ export const advancedAPI = {
     return response.data.data
   },
 
-  async reduceReachability(request?: { pathConstraints?: object }) {
-    const response = await apiClient.post<APIResponse>('/advanced/reduce-reachability', request || {})
+  async reduceReachability(request?: {
+    headers?: object
+    pathConstraints?: object
+    actions?: string | string[]
+    maxTraces?: number
+    invertSearch?: boolean
+    ignoreFilters?: boolean
+  }) {
+    const response = await apiClient.post<APIResponse<any>>('/advanced/reduce-reachability', request || {})
     return response.data.data
   },
 

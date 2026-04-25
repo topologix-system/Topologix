@@ -2,7 +2,6 @@
  * Network path analysis tool with traceroute simulation
  * - Supports unidirectional and bidirectional traceroute modes
  * - Detailed packet specification: src/dst IP, ports, protocols, DSCP, ECN, fragment offset
- * - Path constraints: ingress/egress nodes, transit nodes, forbidden nodes for "what-if" scenarios
  * - Advanced options: maxTraces, ignoreFilters for analysis control
  * - Results visualization: hop-by-hop trace with flow dispositions (accepted/denied/loop/etc)
  * - Collapsible trace sections with success/fail indicators per flow
@@ -82,20 +81,6 @@ export function TraceroutePanel() {
       ...prev,
       headers: {
         ...prev.headers,
-        [field]: value,
-      },
-    }))
-  }
-
-  /**
-   * Update path constraint fields in form data
-   * Used for ingress/egress nodes, transit nodes, forbidden nodes
-   */
-  const updatePathConstraints = (field: string, value: string | undefined) => {
-    setFormData((prev) => ({
-      ...prev,
-      pathConstraints: {
-        ...prev.pathConstraints,
         [field]: value,
       },
     }))
@@ -370,54 +355,6 @@ export function TraceroutePanel() {
                     placeholder={t('traceroute.placeholders.packetLength')}
                     className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-primary-600 focus:border-transparent"
                   />
-                </div>
-              </div>
-
-              {/* Path Constraints */}
-              <div className="pt-4 border-t border-gray-200">
-                <h4 className="text-sm font-semibold text-gray-900 mb-3">{t('traceroute.sections.pathConstraints')}</h4>
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                  <div>
-                    <label htmlFor="endLocation" className="block text-sm font-medium text-gray-700 mb-1">
-                      {t('traceroute.fields.endLocation')}
-                    </label>
-                    <input
-                      type="text"
-                      id="endLocation"
-                      value={formData.pathConstraints?.endLocation || ''}
-                      onChange={(e) => updatePathConstraints('endLocation', e.target.value)}
-                      placeholder={t('traceroute.placeholders.endLocation')}
-                      className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-primary-600 focus:border-transparent"
-                    />
-                  </div>
-
-                  <div>
-                    <label htmlFor="transitLocations" className="block text-sm font-medium text-gray-700 mb-1">
-                      {t('traceroute.fields.transitLocations')}
-                    </label>
-                    <input
-                      type="text"
-                      id="transitLocations"
-                      value={formData.pathConstraints?.transitLocations || ''}
-                      onChange={(e) => updatePathConstraints('transitLocations', e.target.value)}
-                      placeholder={t('traceroute.placeholders.transitLocations')}
-                      className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-primary-600 focus:border-transparent"
-                    />
-                  </div>
-
-                  <div>
-                    <label htmlFor="forbiddenLocations" className="block text-sm font-medium text-gray-700 mb-1">
-                      {t('traceroute.fields.forbiddenLocations')}
-                    </label>
-                    <input
-                      type="text"
-                      id="forbiddenLocations"
-                      value={formData.pathConstraints?.forbiddenLocations || ''}
-                      onChange={(e) => updatePathConstraints('forbiddenLocations', e.target.value)}
-                      placeholder={t('traceroute.placeholders.forbiddenLocations')}
-                      className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-primary-600 focus:border-transparent"
-                    />
-                  </div>
                 </div>
               </div>
 

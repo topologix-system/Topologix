@@ -20,7 +20,14 @@ import { logger } from '../utils/logger'
 import { useCytoscapeLazy } from '../hooks/useCytoscapeLazy'
 import { useAllNetworkData } from '../hooks'
 import { useUIStore, usePositionStore, useSnapshotStore } from '../store'
-import { buildGraphElements } from '../lib/cytoscape'
+import {
+  applyPositionsToElements,
+  buildFallbackPositions,
+  buildGraphElements,
+  mergePositions,
+  validatePositionsForSave,
+  validateSavedPositions,
+} from '../lib/cytoscape'
 import type { LayoutName, LayerType } from '../lib/cytoscape/types'
 
 /**
@@ -41,6 +48,7 @@ export const TopologyViewer = memo(function TopologyViewer() {
   const isUpdatingRef = useRef(false) // Prevents concurrent initialization
   const savePositionTimeoutRef = useRef<NodeJS.Timeout | null>(null) // Debounce timer for position saving
   const fitTimeoutRef = useRef<NodeJS.Timeout | null>(null) // Timeout for delayed fit operation
+  const lastRenderSignatureRef = useRef<string | null>(null) // Prevents duplicate layout runs for the same graph
 
   const currentLayout = useUIStore((state) => state.currentLayout)
   const setCurrentLayout = useUIStore((state) => state.setCurrentLayout)
@@ -58,6 +66,17 @@ export const TopologyViewer = memo(function TopologyViewer() {
 
   // Lazy-loaded Cytoscape instance (initialized only when needed)
   const cy = useCytoscapeLazy()
+
+  const scheduleFit = useCallback((delayMs = 50) => {
+    if (fitTimeoutRef.current) {
+      clearTimeout(fitTimeoutRef.current)
+    }
+
+    fitTimeoutRef.current = setTimeout(() => {
+      cy.fit()
+      fitTimeoutRef.current = null
+    }, delayMs)
+  }, [cy])
 
   // Filter nodes based on search query
   const filteredNodes = useMemo(() => {
@@ -153,17 +172,11 @@ export const TopologyViewer = memo(function TopologyViewer() {
 
         logger.log('[TopologyViewer] Cytoscape initialized successfully')
         cytoscapeInitializedRef.current = true
-
-        if (graphElements) {
-          logger.log('[TopologyViewer] Network data available, adding elements')
-          logger.log('[TopologyViewer] Built', graphElements.nodes.length, 'nodes and', graphElements.edges.length, 'edges')
-          cy.updateElements([...graphElements.nodes, ...graphElements.edges])
-        }
       } finally {
         isUpdatingRef.current = false
       }
     },
-    [graphElements, cy]
+    [cy]
   )
 
   /**
@@ -172,16 +185,9 @@ export const TopologyViewer = memo(function TopologyViewer() {
    */
   const handleRefresh = useCallback(() => {
     logger.log('[TopologyViewer] Refresh button clicked')
-    refetch()
-
-    if (graphElements) {
-      logger.log('[TopologyViewer] Refreshing with existing network data')
-      logger.log('[TopologyViewer] Refresh: updating with', graphElements.nodes.length, 'nodes and', graphElements.edges.length, 'edges')
-      cy.updateElements([...graphElements.nodes, ...graphElements.edges])
-    } else {
-      logger.log('[TopologyViewer] No network data to refresh')
-    }
-  }, [graphElements, cy, refetch])
+    lastRenderSignatureRef.current = null
+    void refetch()
+  }, [refetch])
 
   /**
    * Main effect: Updates graph when network data or layers change
@@ -221,30 +227,78 @@ export const TopologyViewer = memo(function TopologyViewer() {
     }
     logger.log('[TopologyViewer] Using memoized graph elements')
 
-    // Check for saved node positions from previous snapshot view
-    const savedPositions = currentSnapshotName ? getPositions(currentSnapshotName) : null
-    const hasSavedPositions = savedPositions && Object.keys(savedPositions).length > 0
+    const nodeIds = graphElements.nodes
+      .map((node) => node.data.id)
+      .filter((nodeId): nodeId is string => Boolean(nodeId))
+    const edgeIds = graphElements.edges
+      .map((edge) => edge.data.id)
+      .filter((edgeId): edgeId is string => Boolean(edgeId))
+    const renderSignature = JSON.stringify({
+      snapshot: currentSnapshotName ?? '',
+      layers: Array.from(visibleLayers).sort(),
+      nodes: [...nodeIds].sort(),
+      edges: [...edgeIds].sort(),
+    })
 
-    // Restore saved positions or apply automatic layout
-    if (hasSavedPositions) {
-      logger.log(`[TopologyViewer] Found ${Object.keys(savedPositions).length} saved positions for snapshot: ${currentSnapshotName}`)
-      logger.log('[TopologyViewer] Updating graph WITHOUT layout (will restore saved positions)')
-      cy.updateElements([...graphElements.nodes, ...graphElements.edges], false)
-
-      logger.log('[TopologyViewer] Restoring node positions immediately')
-      cy.restoreNodePositions(savedPositions)
-
-      // Clear any pending fit timeout before setting a new one
-      if (fitTimeoutRef.current) {
-        clearTimeout(fitTimeoutRef.current)
-      }
-      fitTimeoutRef.current = setTimeout(() => {
-        cy.fit()
-      }, 50)
-    } else {
-      logger.log(`[TopologyViewer] No saved positions for snapshot: ${currentSnapshotName}, applying layout`)
-      cy.updateElements([...graphElements.nodes, ...graphElements.edges], true)
+    if (lastRenderSignatureRef.current === renderSignature && cy.cyRef.current.elements().length > 0) {
+      logger.log('[TopologyViewer] Skipping duplicate graph render for unchanged topology signature')
+      return
     }
+
+    const graphElementList = [...graphElements.nodes, ...graphElements.edges]
+
+    // Check and validate saved node positions from previous snapshot view
+    const savedPositions = currentSnapshotName ? getPositions(currentSnapshotName) : null
+    const positionValidation = validateSavedPositions(nodeIds, savedPositions)
+    logger.log(
+      `[TopologyViewer] Position validation status: ${positionValidation.status} (${positionValidation.reason}); ` +
+      `nodes=${positionValidation.nodeCount}, saved=${positionValidation.savedCount}, valid=${positionValidation.validCount}`
+    )
+
+    if (positionValidation.status === 'valid') {
+      logger.log(`[TopologyViewer] Restoring valid saved positions for snapshot: ${currentSnapshotName}`)
+      const positionedElements = applyPositionsToElements(graphElementList, positionValidation.validPositions)
+      cy.updateElements(positionedElements, false)
+      cy.restoreNodePositions(positionValidation.validPositions)
+      scheduleFit()
+    } else {
+      const fallbackPositions = buildFallbackPositions(nodeIds)
+      const mergedPositions = positionValidation.status === 'partial'
+        ? mergePositions(nodeIds, positionValidation.validPositions, fallbackPositions)
+        : fallbackPositions
+      const positionedElements = applyPositionsToElements(graphElementList, mergedPositions)
+      const shouldApplyFallbackLayout =
+        positionValidation.status !== 'partial' &&
+        graphElements.edges.length > 0 &&
+        nodeIds.length > 1
+
+      if (positionValidation.status === 'partial') {
+        logger.log('[TopologyViewer] Applying partial saved positions with deterministic fallback positions')
+      } else {
+        logger.log('[TopologyViewer] Applying deterministic fallback positions')
+      }
+
+      cy.updateElements(positionedElements, shouldApplyFallbackLayout
+        ? {
+            applyLayout: true,
+            layoutName: 'cola',
+            fitAfterLayout: true,
+            layoutOptions: {
+              animate: false,
+              fit: false,
+              randomize: false,
+              maxSimulationTime: 1500,
+            },
+          }
+        : false
+      )
+
+      if (!shouldApplyFallbackLayout) {
+        scheduleFit()
+      }
+    }
+
+    lastRenderSignatureRef.current = renderSignature
 
     // Cleanup fit timeout on effect re-run or unmount
     return () => {
@@ -253,7 +307,7 @@ export const TopologyViewer = memo(function TopologyViewer() {
         fitTimeoutRef.current = null
       }
     }
-  }, [networkData, cy, handleContainerRef, graphElements, currentSnapshotName, getPositions])
+  }, [networkData, cy, handleContainerRef, graphElements, currentSnapshotName, getPositions, scheduleFit, visibleLayers])
 
   /**
    * Cleanup effect: Destroys Cytoscape instance on component unmount
@@ -365,7 +419,22 @@ export const TopologyViewer = memo(function TopologyViewer() {
             return
           }
 
+          if (cy.isLayoutRunning()) {
+            logger.log('[TopologyViewer] Skipping position save while layout is running')
+            return
+          }
+
           const positions = cy.saveNodePositions()
+          const saveValidation = validatePositionsForSave(
+            positions,
+            cy.cyRef.current?.nodes().length ?? 0
+          )
+
+          if (!saveValidation.valid) {
+            logger.warn(`[TopologyViewer] Skipping position save: ${saveValidation.reason}`)
+            return
+          }
+
           savePositions(currentSnapshotName, positions)
           logger.log(`[TopologyViewer] Node positions saved for snapshot: ${currentSnapshotName}`)
         }, 500)

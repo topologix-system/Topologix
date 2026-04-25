@@ -7,6 +7,9 @@ Flask application entry point with authentication
 - Health check, snapshot management, and 40+ Batfish query endpoints
 """
 import logging
+import os
+import re
+import sys
 import time
 from pathlib import Path
 from typing import Any
@@ -22,6 +25,7 @@ from werkzeug.middleware.proxy_fix import ProxyFix
 
 from config import config
 from services import BatfishService, SnapshotService
+from security.validation import validate_path
 
 # Configure logging early so it's available during conditional imports
 logging.basicConfig(
@@ -35,7 +39,7 @@ if config.AUTH_ENABLED:
     from flask_session import Session
     from security import (
         JWTManager, require_auth, require_role,
-        sanitize_input, validate_path, validate_file_upload,
+        sanitize_input, validate_file_upload,
         validate_snapshot_name, validate_node_name, validate_json_input,
         SecurityHeaders, RateLimiter
     )
@@ -235,6 +239,61 @@ if config.AUTH_ENABLED:
 batfish_service = BatfishService()
 snapshot_service = SnapshotService()
 batfish_request_lock = RLock()
+
+
+def _parse_gunicorn_workers(command_text: str | None) -> int | None:
+    """Extract gunicorn worker count from a command string when it is explicit."""
+    if not command_text:
+        return None
+
+    match = re.search(r"(?:--workers(?:=|\s+)|-w(?:\s+)?)(\d+)", command_text)
+    if not match:
+        return None
+    return int(match.group(1))
+
+
+def _get_process_command_line(pid: int) -> str | None:
+    """Read a process command line on Linux containers when available."""
+    try:
+        with open(f"/proc/{pid}/cmdline", "rb") as command_file:
+            command = command_file.read().replace(b"\x00", b" ").decode("utf-8", errors="ignore").strip()
+            return command or None
+    except OSError:
+        return None
+
+
+def warn_if_multi_worker_batfish_state() -> None:
+    """Warn when process-local Batfish state may be split across workers."""
+    worker_values = [
+        os.environ.get("WEB_CONCURRENCY"),
+        os.environ.get("GUNICORN_WORKERS"),
+    ]
+    command_lines = [
+        " ".join(sys.argv),
+        _get_process_command_line(os.getpid()),
+        _get_process_command_line(os.getppid()),
+    ]
+    worker_values.extend([
+        str(_parse_gunicorn_workers(os.environ.get("GUNICORN_CMD_ARGS")) or ""),
+        str(_parse_gunicorn_workers(os.environ.get("BACKEND_COMMAND")) or ""),
+        *(str(_parse_gunicorn_workers(command) or "") for command in command_lines),
+    ])
+
+    for value in worker_values:
+        if not value:
+            continue
+        try:
+            if int(value) > 1:
+                logger.warning(
+                    "Multiple backend workers are not supported for process-local Batfish session state. "
+                    "Use one backend worker or externalize snapshot/session state before scaling workers."
+                )
+                return
+        except ValueError:
+            continue
+
+
+warn_if_multi_worker_batfish_state()
 
 SNAPSHOT_QUERY_PREFIXES = (
     '/api/network/',
@@ -460,6 +519,51 @@ def get_snapshot_creation_context() -> dict[str, Any]:
         'owner_username': getattr(request, 'username', None),
         'auth_enabled': config.AUTH_ENABLED,
     }
+
+
+def require_snapshot_access(snapshot_name: str | None) -> None:
+    """Validate that the current requester can access a named snapshot."""
+    if not snapshot_name:
+        return
+    snapshot_service.get_snapshot_path(snapshot_name, **get_snapshot_request_context())
+
+
+def normalize_batfish_specifier(value: Any) -> str | None:
+    """Normalize UI list or comma text into a Batfish regex-style specifier."""
+    if value is None:
+        return None
+    if isinstance(value, str):
+        cleaned = value.strip()
+        return cleaned or None
+    if isinstance(value, (list, tuple, set)):
+        parts = [str(item).strip() for item in value if str(item).strip()]
+        return "|".join(parts) if parts else None
+    return str(value).strip() or None
+
+
+def get_query_specifier(name: str) -> str | None:
+    """Read a query parameter that may be encoded as name or name[]."""
+    values = request.args.getlist(name) or request.args.getlist(f"{name}[]")
+    if len(values) > 1:
+        return normalize_batfish_specifier(values)
+    if values:
+        return normalize_batfish_specifier(values[0])
+    return normalize_batfish_specifier(request.args.get(name))
+
+
+def parse_optional_bool(value: Any, default: bool | None = None) -> bool | None:
+    """Parse optional bools from JSON or query parameters."""
+    if value is None:
+        return default
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, str):
+        normalized = value.strip().lower()
+        if normalized in {"true", "1", "yes", "on"}:
+            return True
+        if normalized in {"false", "0", "no", "off"}:
+            return False
+    return default
 
 
 def reload_active_snapshot_after_layer1_change(name: str) -> None:
@@ -1999,8 +2103,11 @@ def test_filters():
     try:
         data = request.get_json() or {}
         headers = data.get('headers')
-        nodes = data.get('nodes')
-        filters = data.get('filters')
+        if not isinstance(headers, dict) or not headers:
+            return error_response("Missing required 'headers' object for testFilters", 400)
+
+        nodes = normalize_batfish_specifier(data.get('nodes'))
+        filters = normalize_batfish_specifier(data.get('filters'))
         startLocation = data.get('startLocation')
 
         results = batfish_service.test_filters(headers, nodes, filters, startLocation)
@@ -2016,7 +2123,15 @@ def test_filters():
 def get_filter_line_reachability():
     """Identify unreachable/shadowed ACL lines"""
     try:
-        results = batfish_service.get_filter_line_reachability()
+        filters = get_query_specifier('filters')
+        nodes = get_query_specifier('nodes')
+        ignore_composites = parse_optional_bool(request.args.get('ignoreComposites'))
+
+        results = batfish_service.get_filter_line_reachability(
+            filters=filters,
+            nodes=nodes,
+            ignoreComposites=ignore_composites,
+        )
         return success_response(results)
     except RuntimeError as e:
         return error_response(str(e), 400)
@@ -2042,8 +2157,8 @@ def search_filters():
         data = request.get_json() or {}
         headers = data.get('headers')
         action = data.get('action')
-        filters = data.get('filters')
-        nodes = data.get('nodes')
+        filters = normalize_batfish_specifier(data.get('filters'))
+        nodes = normalize_batfish_specifier(data.get('nodes'))
 
         results = batfish_service.search_filters(headers, action, filters, nodes)
         return success_response(results)
@@ -2069,8 +2184,8 @@ def find_matching_filter_lines():
     try:
         data = request.get_json() or {}
         headers = data.get('headers')
-        filters = data.get('filters')
-        nodes = data.get('nodes')
+        filters = normalize_batfish_specifier(data.get('filters'))
+        nodes = normalize_batfish_specifier(data.get('nodes'))
 
         results = batfish_service.find_matching_filter_lines(headers, filters, nodes)
         return success_response(results)
@@ -2102,12 +2217,6 @@ def traceroute():
             "ecns": [0]
         },
         "startLocation": "router1[GigabitEthernet0/1]",
-        "pathConstraints": {
-            "startLocation": "router1",
-            "endLocation": "router2",
-            "transitLocations": "router3",
-            "forbiddenLocations": "router4"
-        },
         "maxTraces": 10,
         "ignoreFilters": false
     }
@@ -2118,14 +2227,12 @@ def traceroute():
         startLocation = data.get('startLocation')
         ignoreFilters = data.get('ignoreFilters', False)
         maxTraces = data.get('maxTraces')
-        pathConstraints = data.get('pathConstraints')
 
         results = batfish_service.traceroute(
             headers=headers,
             startLocation=startLocation,
             ignoreFilters=ignoreFilters,
             maxTraces=maxTraces,
-            pathConstraints=pathConstraints
         )
         return success_response(results)
     except RuntimeError as e:
@@ -2145,7 +2252,6 @@ def bidirectional_traceroute():
     Request body supports:
     - headers: detailed packet specifications (srcIps, dstIps, ipProtocols, ports, ICMP, DSCP, ECN)
     - startLocation: starting device/interface
-    - pathConstraints: start/end/transit/forbidden locations
     - maxTraces: limit result count
     - ignoreFilters: bypass ACLs
 
@@ -2159,10 +2265,7 @@ def bidirectional_traceroute():
         },
         "startLocation": "router1",
         "maxTraces": 5,
-        "ignoreFilters": false,
-        "pathConstraints": {
-            "forbiddenLocations": "firewall1"
-        }
+        "ignoreFilters": false
     }
     """
     try:
@@ -2171,14 +2274,12 @@ def bidirectional_traceroute():
         startLocation = data.get('startLocation')
         ignoreFilters = data.get('ignoreFilters', False)
         maxTraces = data.get('maxTraces')
-        pathConstraints = data.get('pathConstraints')
 
         results = batfish_service.bidirectional_traceroute(
             headers=headers,
             startLocation=startLocation,
             ignoreFilters=ignoreFilters,
             maxTraces=maxTraces,
-            pathConstraints=pathConstraints
         )
         return success_response(results)
     except RuntimeError as e:
@@ -2248,10 +2349,14 @@ def resolve_filter_specifier():
     """
     try:
         data = request.get_json() or {}
-        filters = data.get('filters')
-        nodes = data.get('nodes')
+        filters = normalize_batfish_specifier(data.get('filters'))
+        nodes = normalize_batfish_specifier(data.get('nodes'))
+        grammar_version = data.get('grammarVersion')
 
-        results = batfish_service.resolve_filter_specifier(filters, nodes)
+        if not filters:
+            return error_response("Missing required 'filters' for resolveFilterSpecifier", 400)
+
+        results = batfish_service.resolve_filter_specifier(filters, nodes, grammar_version)
         return success_response(results)
     except RuntimeError as e:
         return error_response(str(e), 400)
@@ -2272,9 +2377,10 @@ def resolve_node_specifier():
     """
     try:
         data = request.get_json() or {}
-        nodes = data.get('nodes')
+        nodes = normalize_batfish_specifier(data.get('nodes'))
+        grammar_version = data.get('grammarVersion')
 
-        results = batfish_service.resolve_node_specifier(nodes)
+        results = batfish_service.resolve_node_specifier(nodes, grammar_version)
         return success_response(results)
     except RuntimeError as e:
         return error_response(str(e), 400)
@@ -2296,10 +2402,14 @@ def resolve_interface_specifier():
     """
     try:
         data = request.get_json() or {}
-        interfaces = data.get('interfaces')
-        nodes = data.get('nodes')
+        interfaces = normalize_batfish_specifier(data.get('interfaces'))
+        nodes = normalize_batfish_specifier(data.get('nodes'))
+        grammar_version = data.get('grammarVersion')
 
-        results = batfish_service.resolve_interface_specifier(interfaces, nodes)
+        if not interfaces:
+            return error_response("Missing required 'interfaces' for resolveInterfaceSpecifier", 400)
+
+        results = batfish_service.resolve_interface_specifier(interfaces, nodes, grammar_version)
         return success_response(results)
     except RuntimeError as e:
         return error_response(str(e), 400)
@@ -2349,8 +2459,17 @@ def get_loopback_multipath_consistency():
 
 @app.route('/api/validation/subnet-multipath-consistency', methods=['POST'])
 def get_subnet_multipath_consistency():
-    """Subnet multipath consistency check (delegates to canonical handler)"""
-    return get_multipath_consistency()
+    """Subnet multipath consistency check"""
+    try:
+        data = request.get_json() or {}
+        max_traces = data.get('maxTraces')
+        consistency = batfish_service.get_subnet_multipath_consistency(maxTraces=max_traces)
+        return success_response(consistency)
+    except RuntimeError as e:
+        return error_response(str(e), 400)
+    except Exception as e:
+        logger.error(f"Failed to check subnet multipath consistency: {e}")
+        return error_response(str(e), 500)
 
 
 @app.route('/api/validation/compare-filters', methods=['POST'])
@@ -2366,13 +2485,32 @@ def compare_filters():
     """
     try:
         data = request.get_json() or {}
-        filters = data.get('filters')
-        nodes = data.get('nodes')
+        filters = normalize_batfish_specifier(data.get('filters'))
+        nodes = normalize_batfish_specifier(data.get('nodes'))
+        ignore_composites = parse_optional_bool(data.get('ignoreComposites'))
+        reference_snapshot = data.get('reference_snapshot', data.get('referenceSnapshot'))
+        snapshot = data.get('snapshot')
 
-        results = batfish_service.compare_filters(filters, nodes)
+        if not reference_snapshot:
+            return error_response("Missing required 'reference_snapshot' for compare filters", 400)
+
+        require_snapshot_access(reference_snapshot)
+        require_snapshot_access(snapshot)
+
+        results = batfish_service.compare_filters(
+            filters=filters,
+            nodes=nodes,
+            ignoreComposites=ignore_composites,
+            reference_snapshot=reference_snapshot,
+            snapshot=snapshot,
+        )
         return success_response(results)
     except RuntimeError as e:
         return error_response(str(e), 400)
+    except PermissionError:
+        return error_response("Snapshot access denied", 403)
+    except FileNotFoundError as e:
+        return error_response(str(e), 404)
     except Exception as e:
         logger.error(f"Failed to compare filters: {e}")
         return error_response(str(e), 500)
@@ -2589,6 +2727,23 @@ def get_layer1_topology():
         return error_response(str(e), 500)
 
 
+@app.route('/api/topology/user-provided-layer1-edges', methods=['POST'])
+def get_user_provided_layer1_edges():
+    """Get Batfish-normalized user-provided Layer1 edges."""
+    try:
+        data = request.get_json() or {}
+        nodes = normalize_batfish_specifier(data.get('nodes'))
+        remote_nodes = normalize_batfish_specifier(data.get('remoteNodes'))
+
+        edges = batfish_service.get_user_provided_layer1_edges(nodes, remote_nodes)
+        return success_response(edges)
+    except RuntimeError as e:
+        return error_response(str(e), 400)
+    except Exception as e:
+        logger.error(f"Failed to get user-provided Layer1 edges: {e}")
+        return error_response(str(e), 500)
+
+
 @app.route('/api/topology/ipsec-session-status', methods=['GET'])
 def get_ipsec_session_status():
     """Get IPsec session status"""
@@ -2693,11 +2848,13 @@ def get_lpm_routes():
     try:
         data = request.get_json() or {}
         ip = data.get('ip')
+        nodes = normalize_batfish_specifier(data.get('nodes'))
+        vrfs = normalize_batfish_specifier(data.get('vrfs'))
 
         if not ip:
             return error_response("Missing 'ip' parameter", 400)
 
-        routes = batfish_service.get_lpm_routes(ip)
+        routes = batfish_service.get_lpm_routes(ip, nodes, vrfs)
         return success_response(routes)
     except RuntimeError as e:
         return error_response(str(e), 400)
@@ -2720,7 +2877,7 @@ def get_prefix_tracer():
     try:
         data = request.get_json() or {}
         prefix = data.get('prefix')
-        nodes = data.get('nodes')
+        nodes = normalize_batfish_specifier(data.get('nodes'))
 
         if not prefix:
             return error_response("Missing 'prefix' parameter", 400)
@@ -2742,20 +2899,51 @@ def get_differential_reachability():
 
     Request body:
     {
+        "reference_snapshot": "baseline-snapshot",
+        "snapshot": "candidate-snapshot",
         "headers": {
             "srcIps": "192.0.2.1",
             "dstIps": "198.51.100.1"
+        },
+        "pathConstraints": {
+            "transitLocations": "router1"
         }
     }
     """
     try:
         data = request.get_json() or {}
         headers = data.get('headers')
+        reference_snapshot = data.get('reference_snapshot')
+        snapshot = data.get('snapshot')
+        path_constraints = data.get('pathConstraints')
+        actions = data.get('actions')
+        max_traces = data.get('maxTraces')
+        invert_search = parse_optional_bool(data.get('invertSearch'))
+        ignore_filters = parse_optional_bool(data.get('ignoreFilters'))
 
-        results = batfish_service.get_differential_reachability(headers)
+        if not reference_snapshot:
+            return error_response("Missing required 'reference_snapshot' for differential reachability", 400)
+
+        require_snapshot_access(reference_snapshot)
+        require_snapshot_access(snapshot)
+
+        results = batfish_service.get_differential_reachability(
+            reference_snapshot=reference_snapshot,
+            snapshot=snapshot,
+            headers=headers,
+            pathConstraints=path_constraints,
+            actions=actions,
+            maxTraces=max_traces,
+            invertSearch=invert_search,
+            ignoreFilters=ignore_filters,
+        )
         return success_response(results)
     except RuntimeError as e:
         return error_response(str(e), 400)
+    except PermissionError:
+        return error_response("Snapshot access denied", 403)
+    except FileNotFoundError as e:
+        return error_response(str(e), 404)
     except Exception as e:
         logger.error(f"Failed to get differential reachability: {e}")
         return error_response(str(e), 500)
@@ -2777,8 +2965,17 @@ def get_bidirectional_reachability():
     try:
         data = request.get_json() or {}
         headers = data.get('headers')
+        path_constraints = data.get('pathConstraints')
+        return_flow_type = data.get('returnFlowType')
 
-        results = batfish_service.get_bidirectional_reachability(headers)
+        if not headers:
+            return error_response("Missing required 'headers' for bidirectional reachability", 400)
+
+        results = batfish_service.get_bidirectional_reachability(
+            headers=headers,
+            pathConstraints=path_constraints,
+            returnFlowType=return_flow_type,
+        )
         return success_response(results)
     except RuntimeError as e:
         return error_response(str(e), 400)
@@ -2800,8 +2997,9 @@ def resolve_location_specifier():
     try:
         data = request.get_json() or {}
         locations = data.get('locations')
+        grammar_version = data.get('grammarVersion')
 
-        results = batfish_service.resolve_location_specifier(locations)
+        results = batfish_service.resolve_location_specifier(locations, grammar_version)
         return success_response(results)
     except RuntimeError as e:
         return error_response(str(e), 400)
@@ -2823,13 +3021,41 @@ def resolve_ip_specifier():
     try:
         data = request.get_json() or {}
         ips = data.get('ips')
+        grammar_version = data.get('grammarVersion')
 
-        results = batfish_service.resolve_ip_specifier(ips)
+        results = batfish_service.resolve_ip_specifier(ips, grammar_version)
         return success_response(results)
     except RuntimeError as e:
         return error_response(str(e), 400)
     except Exception as e:
         logger.error(f"Failed to resolve IP specifier: {e}")
+        return error_response(str(e), 500)
+
+
+@app.route('/api/advanced/resolve-ips-of-location-specifier', methods=['POST'])
+def resolve_ips_of_location_specifier():
+    """
+    Resolve location specifier to source IP spaces.
+
+    Request body:
+    {
+        "locations": "@enter(router1[GigabitEthernet0/1])"
+    }
+    """
+    try:
+        data = request.get_json() or {}
+        locations = data.get('locations')
+        grammar_version = data.get('grammarVersion')
+
+        if not locations:
+            return error_response("Missing required 'locations' for resolveIpsOfLocationSpecifier", 400)
+
+        results = batfish_service.resolve_ips_of_location_specifier(locations, grammar_version)
+        return success_response(results)
+    except RuntimeError as e:
+        return error_response(str(e), 400)
+    except Exception as e:
+        logger.error(f"Failed to resolve IPs of location specifier: {e}")
         return error_response(str(e), 500)
 
 
@@ -2843,6 +3069,26 @@ def get_f5_bigip_vip_configuration():
         return error_response(str(e), 400)
     except Exception as e:
         logger.error(f"Failed to get F5 VIP configuration: {e}")
+        return error_response(str(e), 500)
+
+
+@app.route('/api/advanced/a10-virtual-server-configuration', methods=['POST'])
+def get_a10_virtual_server_configuration():
+    """Get A10 virtual server configuration."""
+    try:
+        data = request.get_json() or {}
+        nodes = normalize_batfish_specifier(data.get('nodes'))
+        virtual_server_ips = data.get('virtualServerIps')
+
+        virtual_servers = batfish_service.get_a10_virtual_server_configuration(
+            nodes=nodes,
+            virtualServerIps=virtual_server_ips,
+        )
+        return success_response(virtual_servers)
+    except RuntimeError as e:
+        return error_response(str(e), 400)
+    except Exception as e:
+        logger.error(f"Failed to get A10 virtual server configuration: {e}")
         return error_response(str(e), 500)
 
 
@@ -2874,11 +3120,11 @@ def test_route_policies():
     Request body:
     {
         "direction": "IN",
-        "inputRoute": {
+        "inputRoutes": [{
             "network": "192.0.2.0/24",
             "nextHopIp": "198.51.100.1",
             "protocol": "bgp"
-        },
+        }],
         "nodes": "router1",
         "policies": "POLICY_NAME"
     }
@@ -2886,16 +3132,132 @@ def test_route_policies():
     try:
         data = request.get_json() or {}
         direction = data.get('direction')
-        inputRoute = data.get('inputRoute')
-        nodes = data.get('nodes')
-        policies = data.get('policies')
+        inputRoutes = data.get('inputRoutes', data.get('inputRoute'))
+        nodes = normalize_batfish_specifier(data.get('nodes'))
+        policies = normalize_batfish_specifier(data.get('policies'))
+        bgpSessionProperties = data.get('bgpSessionProperties')
 
-        results = batfish_service.test_route_policies(direction, inputRoute, nodes, policies)
+        if not direction:
+            return error_response("Missing required 'direction' for testRoutePolicies", 400)
+        if inputRoutes is None:
+            return error_response("Missing required 'inputRoutes' for testRoutePolicies", 400)
+
+        results = batfish_service.test_route_policies(
+            direction=direction,
+            inputRoutes=inputRoutes,
+            nodes=nodes,
+            policies=policies,
+            bgpSessionProperties=bgpSessionProperties,
+        )
         return success_response(results)
     except RuntimeError as e:
         return error_response(str(e), 400)
     except Exception as e:
         logger.error(f"Failed to test route policies: {e}")
+        return error_response(str(e), 500)
+
+
+@app.route('/api/advanced/transfer-bdd-validation', methods=['POST'])
+def transfer_bdd_validation():
+    """Run symbolic route policy transfer BDD validation."""
+    try:
+        data = request.get_json() or {}
+        nodes = normalize_batfish_specifier(data.get('nodes'))
+        policies = normalize_batfish_specifier(data.get('policies'))
+        retain_all_paths = parse_optional_bool(data.get('retainAllPaths'))
+        seed = data.get('seed')
+
+        if seed is not None:
+            if isinstance(seed, bool):
+                return error_response("'seed' must be an integer", 400)
+            if isinstance(seed, int):
+                pass
+            elif isinstance(seed, str) and re.fullmatch(r'-?\d+', seed.strip()):
+                seed = int(seed.strip())
+            else:
+                return error_response("'seed' must be an integer", 400)
+
+        results = batfish_service.get_transfer_bdd_validation(
+            nodes=nodes,
+            policies=policies,
+            retainAllPaths=retain_all_paths,
+            seed=seed,
+        )
+        return success_response(results)
+    except RuntimeError as e:
+        return error_response(str(e), 400)
+    except Exception as e:
+        logger.error(f"Failed to run transfer BDD validation: {e}")
+        return error_response(str(e), 500)
+
+
+@app.route('/api/advanced/compare-peer-group-policies', methods=['GET', 'POST'])
+def compare_peer_group_policies():
+    """Compare peer group policies."""
+    try:
+        data = request.get_json(silent=True) or {}
+        reference_snapshot = data.get('reference_snapshot', data.get('referenceSnapshot', request.args.get('reference_snapshot')))
+        snapshot = data.get('snapshot', request.args.get('snapshot'))
+
+        if not reference_snapshot:
+            return error_response("Missing required 'reference_snapshot' for comparePeerGroupPolicies", 400)
+
+        require_snapshot_access(reference_snapshot)
+        require_snapshot_access(snapshot)
+
+        results = batfish_service.compare_peer_group_policies(
+            reference_snapshot=reference_snapshot,
+            snapshot=snapshot,
+        )
+        return success_response(results)
+    except RuntimeError as e:
+        return error_response(str(e), 400)
+    except PermissionError:
+        return error_response("Snapshot access denied", 403)
+    except FileNotFoundError as e:
+        return error_response(str(e), 404)
+    except Exception as e:
+        logger.error(f"Failed to compare peer group policies: {e}")
+        return error_response(str(e), 500)
+
+
+@app.route('/api/advanced/compare-route-policies', methods=['POST'])
+def compare_route_policies():
+    """Compare symbolic behavior of two route policies."""
+    try:
+        data = request.get_json() or {}
+        policy = data.get('policy')
+        reference_policy = data.get('referencePolicy')
+        nodes = normalize_batfish_specifier(data.get('nodes'))
+        reference_snapshot = data.get('reference_snapshot', data.get('referenceSnapshot'))
+        snapshot = data.get('snapshot')
+
+        if not policy:
+            return error_response("Missing required 'policy' for compareRoutePolicies", 400)
+        if not reference_policy:
+            return error_response("Missing required 'referencePolicy' for compareRoutePolicies", 400)
+        if not reference_snapshot:
+            return error_response("Missing required 'reference_snapshot' for compareRoutePolicies", 400)
+
+        require_snapshot_access(reference_snapshot)
+        require_snapshot_access(snapshot)
+
+        results = batfish_service.compare_route_policies(
+            policy,
+            reference_policy,
+            nodes,
+            reference_snapshot=reference_snapshot,
+            snapshot=snapshot,
+        )
+        return success_response(results)
+    except RuntimeError as e:
+        return error_response(str(e), 400)
+    except PermissionError:
+        return error_response("Snapshot access denied", 403)
+    except FileNotFoundError as e:
+        return error_response(str(e), 404)
+    except Exception as e:
+        logger.error(f"Failed to compare route policies: {e}")
         return error_response(str(e), 500)
 
 
@@ -2956,11 +3318,24 @@ def advanced_search_route_policies():
     """Search route policies"""
     try:
         data = request.get_json() or {}
-        nodes_raw = data.get('nodes', '.*')
-        nodes = '|'.join(nodes_raw) if isinstance(nodes_raw, list) else nodes_raw
+        nodes = normalize_batfish_specifier(data.get('nodes', '.*'))
         action = data.get('action', 'permit')
-        policies = batfish_service.get_search_route_policies(nodes, action)
-        return success_response(policies)
+        policies = normalize_batfish_specifier(data.get('policies'))
+        input_constraints = data.get('inputConstraints')
+        output_constraints = data.get('outputConstraints')
+        per_path = parse_optional_bool(data.get('perPath'))
+        path_option = data.get('pathOption')
+
+        results = batfish_service.get_search_route_policies(
+            nodes=nodes,
+            action=action,
+            policies=policies,
+            inputConstraints=input_constraints,
+            outputConstraints=output_constraints,
+            perPath=per_path,
+            pathOption=path_option,
+        )
+        return success_response(results)
     except RuntimeError as e:
         return error_response(str(e), 400)
     except Exception as e:
@@ -2974,7 +3349,20 @@ def reduce_reachability():
     try:
         data = request.get_json() or {}
         headers = data.get('headers')
-        flow_traces = batfish_service.get_reachability(headers)
+        path_constraints = data.get('pathConstraints')
+        actions = data.get('actions')
+        max_traces = data.get('maxTraces')
+        invert_search = parse_optional_bool(data.get('invertSearch'))
+        ignore_filters = parse_optional_bool(data.get('ignoreFilters'))
+
+        flow_traces = batfish_service.get_reachability(
+            headers=headers,
+            pathConstraints=path_constraints,
+            actions=actions,
+            maxTraces=max_traces,
+            invertSearch=invert_search,
+            ignoreFilters=ignore_filters,
+        )
         return success_response([f.to_dict() for f in flow_traces])
     except RuntimeError as e:
         return error_response(str(e), 400)

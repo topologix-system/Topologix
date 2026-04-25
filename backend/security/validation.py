@@ -261,9 +261,11 @@ def _is_valid_network_text_content(content: bytes, file_ext: str) -> bool:
         if file_ext == '.log':
             log_indicators = [
                 '%', 'link-', 'line protocol', 'ospf-', 'bgp-', 'adjacency',
-                'error', 'warning', 'notice', 'info', 'up', 'down', 'changed state'
+                'error', 'warning', 'notice', 'info', 'up', 'down', 'changed state',
+                'interface', 'hostname', 'router', 'vlan', 'access-list',
+                'tcp', 'udp', 'icmp', 'denied', 'permitted', 'session'
             ]
-            return any(indicator in text_lower for indicator in log_indicators) or len(text.strip()) > 0
+            return any(indicator in text_lower for indicator in log_indicators)
 
         # Check for common network configuration keywords
         config_keywords = [

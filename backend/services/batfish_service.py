@@ -15,6 +15,7 @@ Batfish network analysis service wrapper
 """
 import gc
 import logging
+import re
 import sys
 from typing import Any
 from pathlib import Path
@@ -186,6 +187,54 @@ class BatfishService:
             return {k: self._safe_serialize(v) for k, v in vars(obj).items() if not k.startswith('_')}
         # Fallback to string for types without __dict__
         return str(obj)
+
+    def _to_snake_case(self, value: str) -> str:
+        """Convert Batfish column names to API-friendly snake_case."""
+        normalized = re.sub(r"[^0-9A-Za-z]+", "_", value).strip("_")
+        return re.sub(r"([a-z0-9])([A-Z])", r"\1_\2", normalized).lower()
+
+    def _dataframe_to_records(self, df: pd.DataFrame) -> list[dict[str, Any]]:
+        """Convert a Batfish DataFrame into JSON-safe dynamic records."""
+        records: list[dict[str, Any]] = []
+        for _, row in df.iterrows():
+            records.append({
+                self._to_snake_case(str(column)): self._safe_serialize(row.get(column))
+                for column in df.columns
+            })
+        return records
+
+    def _execute_query_records(
+        self,
+        query: Any,
+        query_name: str,
+        answer_kwargs: dict[str, Any] | None = None,
+    ) -> list[dict[str, Any]]:
+        """Execute a query and return dynamic records while preserving errors."""
+        try:
+            result = query.answer(**(answer_kwargs or {})).frame()
+            if result.empty:
+                logger.debug(f"Query '{query_name}' returned empty result")
+                return []
+            return self._dataframe_to_records(result)
+        except Exception as e:
+            logger.warning(f"Query '{query_name}' failed: {e}")
+            raise RuntimeError(f"{query_name} query failed: {e}") from e
+
+    def _unavailable_capability(
+        self,
+        capability: str,
+        reason: str,
+        alternatives: list[str] | None = None,
+    ) -> list[dict[str, Any]]:
+        """Return explicit metadata for Batfish capabilities unavailable in pybatfish."""
+        logger.warning("%s is unavailable: %s", capability, reason)
+        return [{
+            "available": False,
+            "capability": capability,
+            "reason": reason,
+            "alternatives": alternatives or [],
+            "data": [],
+        }]
 
     # ========== Query 1: Node Properties ==========
     def get_node_properties(self) -> list[dict[str, Any]]:
@@ -827,7 +876,15 @@ class BatfishService:
         return statuses
 
     # ========== Query 20: Reachability ==========
-    def get_reachability(self, headers: dict[str, Any] | None = None) -> list[FlowTrace]:
+    def get_reachability(
+        self,
+        headers: dict[str, Any] | None = None,
+        pathConstraints: dict[str, Any] | None = None,
+        actions: str | list[str] | None = None,
+        maxTraces: int | None = None,
+        invertSearch: bool | None = None,
+        ignoreFilters: bool | None = None,
+    ) -> list[FlowTrace]:
         """
         Get reachability analysis results
 
@@ -836,7 +893,21 @@ class BatfishService:
         """
         self._ensure_initialized()
 
-        query = self.session.q.reachability(headers=headers) if headers else self.session.q.reachability()
+        query_params: dict[str, Any] = {}
+        if headers is not None:
+            query_params["headers"] = headers
+        if pathConstraints is not None:
+            query_params["pathConstraints"] = pathConstraints
+        if actions is not None:
+            query_params["actions"] = actions
+        if maxTraces is not None:
+            query_params["maxTraces"] = maxTraces
+        if invertSearch is not None:
+            query_params["invertSearch"] = invertSearch
+        if ignoreFilters is not None:
+            query_params["ignoreFilters"] = ignoreFilters
+
+        query = self.session.q.reachability(**query_params)
         df = self._execute_query(query, "reachability")
         if df is None:
             return []
@@ -862,7 +933,16 @@ class BatfishService:
         return flow_traces
 
     # ========== Query 21: Search Route Policies ==========
-    def get_search_route_policies(self, nodes: str = ".*", action: str = "permit") -> list[dict[str, Any]]:
+    def get_search_route_policies(
+        self,
+        nodes: str | None = ".*",
+        action: str = "permit",
+        policies: str | None = None,
+        inputConstraints: dict[str, Any] | None = None,
+        outputConstraints: dict[str, Any] | None = None,
+        perPath: bool | None = None,
+        pathOption: str | None = None,
+    ) -> list[dict[str, Any]]:
         """
         Search route policies
 
@@ -872,27 +952,31 @@ class BatfishService:
         """
         self._ensure_initialized()
 
+        query_params: dict[str, Any] = {"action": action}
+        if nodes is not None:
+            query_params["nodes"] = nodes
+        if policies is not None:
+            query_params["policies"] = policies
+        if inputConstraints is not None:
+            query_params["inputConstraints"] = inputConstraints
+        if outputConstraints is not None:
+            query_params["outputConstraints"] = outputConstraints
+        if perPath is not None:
+            query_params["perPath"] = perPath
+        if pathOption is not None:
+            query_params["pathOption"] = pathOption
+
         df = self._execute_query(
-            self.session.q.searchRoutePolicies(nodes=nodes, action=action),
-            "searchRoutePolicies"
+            self.session.q.searchRoutePolicies(**query_params),
+            "searchRoutePolicies",
+            raise_on_error=True,
         )
         if df is None:
             return []
 
-        policies = []
-        for _, row in df.iterrows():
-            policy_data = {
-                "node": row.get("Node", ""),
-                "policy_name": row.get("Policy_Name", ""),
-                "action": row.get("Action", ""),
-                "input_routes": row.get("Input_Routes", []),
-                "output_routes": row.get("Output_Routes", []),
-                "trace": [str(t) for t in row.get("Trace", [])] if row.get("Trace") else []
-            }
-            policies.append(policy_data)
-
+        results = self._dataframe_to_records(df)
         del df  # Free DataFrame memory
-        return policies
+        return results
 
     # ========== Query 22: AAA Authentication Login ==========
     def get_aaa_authentication_login(self) -> list[dict[str, Any]]:
@@ -1125,7 +1209,15 @@ class BatfishService:
         """Test flows against ACLs/firewall rules"""
         self._ensure_initialized()
 
-        query = self.session.q.testFilters(headers=headers, nodes=nodes, filters=filters, startLocation=startLocation)
+        query_params: dict[str, Any] = {"headers": headers}
+        if nodes is not None:
+            query_params["nodes"] = nodes
+        if filters is not None:
+            query_params["filters"] = filters
+        if startLocation is not None:
+            query_params["startLocation"] = startLocation
+
+        query = self.session.q.testFilters(**query_params)
         df = self._execute_query(query, "testFilters")
         if df is None:
             return []
@@ -1145,11 +1237,27 @@ class BatfishService:
         del df  # Free DataFrame memory
         return results
 
-    def get_filter_line_reachability(self) -> list[dict[str, Any]]:
+    def get_filter_line_reachability(
+        self,
+        filters: str | None = None,
+        nodes: str | None = None,
+        ignoreComposites: bool | None = None,
+    ) -> list[dict[str, Any]]:
         """Identify unreachable/shadowed ACL lines"""
         self._ensure_initialized()
 
-        df = self._execute_query(self.session.q.filterLineReachability(), "filterLineReachability")
+        query_params: dict[str, Any] = {}
+        if filters is not None:
+            query_params["filters"] = filters
+        if nodes is not None:
+            query_params["nodes"] = nodes
+        if ignoreComposites is not None:
+            query_params["ignoreComposites"] = ignoreComposites
+
+        df = self._execute_query(
+            self.session.q.filterLineReachability(**query_params),
+            "filterLineReachability"
+        )
         if df is None:
             return []
 
@@ -1265,7 +1373,6 @@ class BatfishService:
         startLocation=None,
         ignoreFilters=False,
         maxTraces=None,
-        pathConstraints=None
     ) -> list[dict[str, Any]]:
         """
         Virtual traceroute through network
@@ -1275,7 +1382,6 @@ class BatfishService:
             startLocation: Starting location for the trace
             ignoreFilters: Whether to ignore ACLs/filters
             maxTraces: Maximum number of traces to return
-            pathConstraints: Path constraints (startLocation, endLocation, transit, forbidden)
         """
         self._ensure_initialized()
 
@@ -1288,8 +1394,6 @@ class BatfishService:
 
         if maxTraces is not None:
             query_params["maxTraces"] = maxTraces
-        if pathConstraints is not None:
-            query_params["pathConstraints"] = pathConstraints
 
         query = self.session.q.traceroute(**query_params)
         df = self._execute_query(query, "traceroute", raise_on_error=True)
@@ -1313,7 +1417,6 @@ class BatfishService:
         startLocation=None,
         ignoreFilters=False,
         maxTraces=None,
-        pathConstraints=None
     ) -> list[dict[str, Any]]:
         """
         Bidirectional traceroute validation
@@ -1323,7 +1426,6 @@ class BatfishService:
             startLocation: Starting location for the trace
             ignoreFilters: Whether to ignore ACLs/filters
             maxTraces: Maximum number of traces to return
-            pathConstraints: Path constraints (startLocation, endLocation, transit, forbidden)
         """
         self._ensure_initialized()
 
@@ -1336,8 +1438,6 @@ class BatfishService:
 
         if maxTraces is not None:
             query_params["maxTraces"] = maxTraces
-        if pathConstraints is not None:
-            query_params["pathConstraints"] = pathConstraints
 
         query = self.session.q.bidirectionalTraceroute(**query_params)
         df = self._execute_query(query, "bidirectionalTraceroute", raise_on_error=True)
@@ -1402,12 +1502,20 @@ class BatfishService:
         del df  # Free DataFrame memory
         return results
 
-    def resolve_filter_specifier(self, filters=None, nodes=None) -> list[dict[str, Any]]:
+    def resolve_filter_specifier(self, filters=None, nodes=None, grammarVersion=None) -> list[dict[str, Any]]:
         """Validate filter names"""
         self._ensure_initialized()
 
-        query = self.session.q.resolveFilterSpecifier(filters=filters, nodes=nodes) if filters or nodes else self.session.q.resolveFilterSpecifier()
-        df = self._execute_query(query, "resolveFilterSpecifier")
+        query_params: dict[str, Any] = {}
+        if filters is not None:
+            query_params["filters"] = filters
+        if nodes is not None:
+            query_params["nodes"] = nodes
+        if grammarVersion is not None:
+            query_params["grammarVersion"] = grammarVersion
+
+        query = self.session.q.resolveFilterSpecifier(**query_params)
+        df = self._execute_query(query, "resolveFilterSpecifier", raise_on_error=True)
         if df is None:
             return []
 
@@ -1422,12 +1530,18 @@ class BatfishService:
         del df  # Free DataFrame memory
         return results
 
-    def resolve_node_specifier(self, nodes=None) -> list[dict[str, Any]]:
+    def resolve_node_specifier(self, nodes=None, grammarVersion=None) -> list[dict[str, Any]]:
         """Validate node patterns"""
         self._ensure_initialized()
 
-        query = self.session.q.resolveNodeSpecifier(nodes=nodes) if nodes else self.session.q.resolveNodeSpecifier()
-        df = self._execute_query(query, "resolveNodeSpecifier")
+        query_params: dict[str, Any] = {}
+        if nodes is not None:
+            query_params["nodes"] = nodes
+        if grammarVersion is not None:
+            query_params["grammarVersion"] = grammarVersion
+
+        query = self.session.q.resolveNodeSpecifier(**query_params)
+        df = self._execute_query(query, "resolveNodeSpecifier", raise_on_error=True)
         if df is None:
             return []
 
@@ -1441,12 +1555,20 @@ class BatfishService:
         del df  # Free DataFrame memory
         return results
 
-    def resolve_interface_specifier(self, interfaces=None, nodes=None) -> list[dict[str, Any]]:
+    def resolve_interface_specifier(self, interfaces=None, nodes=None, grammarVersion=None) -> list[dict[str, Any]]:
         """Validate interface specifications"""
         self._ensure_initialized()
 
-        query = self.session.q.resolveInterfaceSpecifier(interfaces=interfaces, nodes=nodes) if interfaces or nodes else self.session.q.resolveInterfaceSpecifier()
-        df = self._execute_query(query, "resolveInterfaceSpecifier")
+        query_params: dict[str, Any] = {}
+        if interfaces is not None:
+            query_params["interfaces"] = interfaces
+        if nodes is not None:
+            query_params["nodes"] = nodes
+        if grammarVersion is not None:
+            query_params["grammarVersion"] = grammarVersion
+
+        query = self.session.q.resolveInterfaceSpecifier(**query_params)
+        df = self._execute_query(query, "resolveInterfaceSpecifier", raise_on_error=True)
         if df is None:
             return []
 
@@ -1710,27 +1832,63 @@ class BatfishService:
         del df  # Free DataFrame memory
         return results
 
-    def compare_filters(self, filters=None, nodes=None) -> list[dict[str, Any]]:
-        """Compare ACL behavior"""
+    def get_subnet_multipath_consistency(self, maxTraces=None) -> list[dict[str, Any]]:
+        """Subnet multipath validation"""
         self._ensure_initialized()
 
-        query = self.session.q.compareFilters(filters=filters, nodes=nodes) if filters or nodes else self.session.q.compareFilters()
-        df = self._execute_query(query, "compareFilters")
+        query_params: dict[str, Any] = {}
+        if maxTraces is not None:
+            query_params["maxTraces"] = maxTraces
+
+        df = self._execute_query(
+            self.session.q.subnetMultipathConsistency(**query_params),
+            "subnetMultipathConsistency"
+        )
         if df is None:
             return []
 
         results = []
         for _, row in df.iterrows():
             result_data = {
-                "node": row.get("Node", ""),
-                "filter_name": row.get("Filter_Name", ""),
-                "base_filter_name": row.get("Base_Filter_Name", ""),
-                "differences": self._safe_serialize(row.get("Differences", []))
+                "flow": self._safe_serialize(row.get("Flow")),
+                "traces": self._safe_serialize(row.get("Traces", [])),
+                "trace_count": row.get("TraceCount", 0),
             }
             results.append(result_data)
 
         del df  # Free DataFrame memory
         return results
+
+    def compare_filters(
+        self,
+        filters=None,
+        nodes=None,
+        ignoreComposites=None,
+        reference_snapshot: str | None = None,
+        snapshot: str | None = None,
+    ) -> list[dict[str, Any]]:
+        """Compare ACL behavior"""
+        self._ensure_initialized()
+
+        query_params: dict[str, Any] = {}
+        if filters is not None:
+            query_params["filters"] = filters
+        if nodes is not None:
+            query_params["nodes"] = nodes
+        if ignoreComposites is not None:
+            query_params["ignoreComposites"] = ignoreComposites
+
+        answer_kwargs: dict[str, Any] = {}
+        if reference_snapshot:
+            answer_kwargs["reference_snapshot"] = reference_snapshot
+        if snapshot:
+            answer_kwargs["snapshot"] = snapshot
+
+        return self._execute_query_records(
+            self.session.q.compareFilters(**query_params),
+            "compareFilters",
+            answer_kwargs=answer_kwargs or None,
+        )
 
     # ========== PHASE 2: IMPORTANT - Additional Protocols (13 queries) ==========
 
@@ -1839,10 +1997,11 @@ class BatfishService:
         """
         self._ensure_initialized()
 
-        # Method eigrpInterfaces() does not exist in pybatfish API
-        # Only eigrpEdges() is available for EIGRP topology
-        logger.warning("eigrpInterfaces() method does not exist in pybatfish - returning empty list")
-        return {"data": [], "stub": True, "message": "EIGRP interface configuration query is not yet implemented"}
+        return self._unavailable_capability(
+            "eigrpInterfaces",
+            "pybatfish does not provide eigrpInterfaces() in this runtime",
+            ["eigrpEdges"],
+        )
 
     def get_isis_edges(self) -> list[dict[str, Any]]:
         """IS-IS adjacencies"""
@@ -1876,10 +2035,11 @@ class BatfishService:
         """
         self._ensure_initialized()
 
-        # Method isisInterfaces() does not exist in pybatfish API
-        # Only isisEdges() is available for IS-IS topology
-        logger.warning("isisInterfaces() method does not exist in pybatfish - returning empty list")
-        return {"data": [], "stub": True, "message": "IS-IS interface configuration query is not yet implemented"}
+        return self._unavailable_capability(
+            "isisInterfaces",
+            "pybatfish does not provide isisInterfaces() in this runtime",
+            ["isisEdges"],
+        )
 
     def get_layer1_edges(self) -> list[dict[str, Any]]:
         """Physical connectivity"""
@@ -1901,6 +2061,21 @@ class BatfishService:
 
         del df  # Free DataFrame memory
         return results
+
+    def get_user_provided_layer1_edges(self, nodes=None, remoteNodes=None) -> list[dict[str, Any]]:
+        """Return Batfish-normalized user-provided Layer1 edges."""
+        self._ensure_initialized()
+
+        query_params: dict[str, Any] = {}
+        if nodes is not None:
+            query_params["nodes"] = nodes
+        if remoteNodes is not None:
+            query_params["remoteNodes"] = remoteNodes
+
+        return self._execute_query_records(
+            self.session.q.userProvidedLayer1Edges(**query_params),
+            "userProvidedLayer1Edges",
+        )
 
     def get_ipsec_session_status(self) -> list[dict[str, Any]]:
         """IPsec session status"""
@@ -1980,9 +2155,11 @@ class BatfishService:
         """
         self._ensure_initialized()
 
-        # Method ipsecPeerConfiguration() does not exist in pybatfish API
-        logger.warning("ipsecPeerConfiguration() method does not exist in pybatfish - returning empty list")
-        return {"data": [], "stub": True, "message": "IPsec peer configuration query is not yet implemented"}
+        return self._unavailable_capability(
+            "ipsecPeerConfiguration",
+            "pybatfish does not provide ipsecPeerConfiguration() in this runtime",
+            ["ipsecSessionStatus", "ipsecEdges"],
+        )
 
     def get_bfd_session_status(self) -> list[dict[str, Any]]:
         """
@@ -1993,9 +2170,10 @@ class BatfishService:
         """
         self._ensure_initialized()
 
-        # Method bfdSessionStatus() does not exist in pybatfish API
-        logger.warning("bfdSessionStatus() method does not exist in pybatfish - returning empty list")
-        return {"data": [], "stub": True, "message": "BFD session status query is not yet implemented"}
+        return self._unavailable_capability(
+            "bfdSessionStatus",
+            "pybatfish does not provide bfdSessionStatus() in this runtime",
+        )
 
     def get_layer2_topology(self) -> list[dict[str, Any]]:
         """
@@ -2007,22 +2185,30 @@ class BatfishService:
         """
         self._ensure_initialized()
 
-        # Method layer2Topology() does not exist in pybatfish API
-        logger.warning("layer2Topology() method does not exist in pybatfish - returning empty list")
-        return {"data": [], "stub": True, "message": "Layer 2 topology query is not yet implemented"}
+        return self._unavailable_capability(
+            "layer2Topology",
+            "pybatfish does not provide layer2Topology() in this runtime",
+            ["switchedVlanProperties"],
+        )
 
     def get_vi_model(self) -> list[dict[str, Any]]:
-        """
-        VI (Vendor Independent) model
-
-        Note: pybatfish does not provide a viModel() method.
-        This method returns an empty list.
-        """
+        """VI (Vendor Independent) model"""
         self._ensure_initialized()
 
-        # Method viModel() does not exist in pybatfish API
-        logger.warning("viModel() method does not exist in pybatfish - returning empty list")
-        return {"data": [], "stub": True, "message": "VI model query is not yet implemented"}
+        df = self._execute_query(self.session.q.viModel(), "viModel")
+        if df is None:
+            return []
+
+        results = []
+        for _, row in df.iterrows():
+            result_data = {
+                str(column).lower(): self._safe_serialize(row.get(column))
+                for column in df.columns
+            }
+            results.append(result_data)
+
+        del df  # Free DataFrame memory
+        return results
 
     def get_switched_vlan_edges(self) -> list[dict[str, Any]]:
         """
@@ -2034,9 +2220,11 @@ class BatfishService:
         """
         self._ensure_initialized()
 
-        # Method switchedVlanEdges() does not exist in pybatfish API
-        logger.warning("switchedVlanEdges() method does not exist in pybatfish - returning empty list")
-        return {"data": [], "stub": True, "message": "Switched VLAN edges query is not yet implemented"}
+        return self._unavailable_capability(
+            "switchedVlanEdges",
+            "pybatfish does not provide switchedVlanEdges() in this runtime",
+            ["switchedVlanProperties"],
+        )
 
     def get_interface_mtu(self) -> list[dict[str, Any]]:
         """MTU analysis"""
@@ -2070,16 +2258,26 @@ class BatfishService:
         """
         self._ensure_initialized()
 
-        # Method ipSpaceAssignment() does not exist in pybatfish API
-        logger.warning("ipSpaceAssignment() method does not exist in pybatfish - returning empty list")
-        return {"data": [], "stub": True, "message": "IP space assignment query is not yet implemented"}
+        return self._unavailable_capability(
+            "ipSpaceAssignment",
+            "pybatfish does not provide ipSpaceAssignment() in this runtime",
+            ["ipOwners"],
+        )
 
-    def get_lpm_routes(self, ip=None) -> list[dict[str, Any]]:
+    def get_lpm_routes(self, ip=None, nodes=None, vrfs=None) -> list[dict[str, Any]]:
         """Longest prefix match routing"""
         self._ensure_initialized()
 
-        query = self.session.q.lpmRoutes(ip=ip) if ip else self.session.q.lpmRoutes()
-        df = self._execute_query(query, "lpmRoutes")
+        query_params: dict[str, Any] = {}
+        if ip is not None:
+            query_params["ip"] = ip
+        if nodes is not None:
+            query_params["nodes"] = nodes
+        if vrfs is not None:
+            query_params["vrfs"] = vrfs
+
+        query = self.session.q.lpmRoutes(**query_params)
+        df = self._execute_query(query, "lpmRoutes", raise_on_error=True)
         if df is None:
             return []
 
@@ -2093,7 +2291,8 @@ class BatfishService:
                 "network": row.get("Network", ""),
                 "next_hop": row.get("Next_Hop", ""),
                 "next_hop_interface": str(next_hop_interface_raw) if next_hop_interface_raw else None,
-                "protocol": row.get("Protocol", "")
+                "protocol": row.get("Protocol", ""),
+                "num_routes": row.get("Num_Routes")
             }
             results.append(result_data)
 
@@ -2104,8 +2303,14 @@ class BatfishService:
         """Prefix advertisement trace"""
         self._ensure_initialized()
 
-        query = self.session.q.prefixTracer(prefix=prefix, nodes=nodes) if prefix or nodes else self.session.q.prefixTracer()
-        df = self._execute_query(query, "prefixTracer")
+        query_params: dict[str, Any] = {}
+        if prefix is not None:
+            query_params["prefix"] = prefix
+        if nodes is not None:
+            query_params["nodes"] = nodes
+
+        query = self.session.q.prefixTracer(**query_params)
+        df = self._execute_query(query, "prefixTracer", raise_on_error=True)
         if df is None:
             return []
 
@@ -2125,7 +2330,17 @@ class BatfishService:
 
     # ========== PHASE 3: NICE-TO-HAVE (10 queries) ==========
 
-    def get_differential_reachability(self, reference_snapshot: str = None, snapshot: str = None, headers=None) -> list[dict[str, Any]]:
+    def get_differential_reachability(
+        self,
+        reference_snapshot: str,
+        snapshot: str | None = None,
+        headers=None,
+        pathConstraints=None,
+        actions=None,
+        maxTraces=None,
+        invertSearch=None,
+        ignoreFilters=None,
+    ) -> list[dict[str, Any]]:
         """
         Compare reachability between snapshots
 
@@ -2136,14 +2351,32 @@ class BatfishService:
         """
         self._ensure_initialized()
 
-        query = self.session.q.differentialReachability(headers=headers) if headers else self.session.q.differentialReachability()
+        if not reference_snapshot:
+            raise RuntimeError("reference_snapshot is required for differential reachability")
+
+        query_params: dict[str, Any] = {}
+        if headers is not None:
+            query_params["headers"] = headers
+        if pathConstraints is not None:
+            query_params["pathConstraints"] = pathConstraints
+        if actions is not None:
+            query_params["actions"] = actions
+        if maxTraces is not None:
+            query_params["maxTraces"] = maxTraces
+        if invertSearch is not None:
+            query_params["invertSearch"] = invertSearch
+        if ignoreFilters is not None:
+            query_params["ignoreFilters"] = ignoreFilters
+
+        query = self.session.q.differentialReachability(**query_params)
 
         # For differential queries, pass snapshot parameters to answer()
         try:
-            if reference_snapshot and snapshot:
-                result = query.answer(snapshot=snapshot, reference_snapshot=reference_snapshot).frame()
-            else:
-                result = query.answer().frame()
+            answer_kwargs: dict[str, Any] = {"reference_snapshot": reference_snapshot}
+            if snapshot:
+                answer_kwargs["snapshot"] = snapshot
+
+            result = query.answer(**answer_kwargs).frame()
 
             if result.empty:
                 logger.debug("differentialReachability query returned empty result")
@@ -2152,27 +2385,41 @@ class BatfishService:
             df = result
         except Exception as e:
             logger.warning(f"differentialReachability query failed: {e}")
-            return []
+            raise RuntimeError(f"differentialReachability query failed: {e}") from e
 
         results = []
         for _, row in df.iterrows():
+            snapshot_traces = row.get("Snapshot_Traces", row.get("Delta_Traces", []))
+            reference_traces = row.get("Reference_Traces", row.get("Base_Traces", []))
             result_data = {
                 "flow": self._safe_serialize(row.get("Flow")),
-                "base_traces": self._safe_serialize(row.get("Base_Traces", [])),
-                "delta_traces": self._safe_serialize(row.get("Delta_Traces", [])),
-                "change": row.get("Change", "")
+                "snapshot_traces": self._safe_serialize(snapshot_traces),
+                "reference_traces": self._safe_serialize(reference_traces),
+                "snapshot_trace_count": row.get("Snapshot_TraceCount", row.get("Delta_TraceCount", 0)),
+                "reference_trace_count": row.get("Reference_TraceCount", row.get("Base_TraceCount", 0)),
+                "base_traces": self._safe_serialize(reference_traces),
+                "delta_traces": self._safe_serialize(snapshot_traces),
+                "change": row.get("Change", row.get("Key_Presence", "")),
             }
             results.append(result_data)
 
         del df  # Free DataFrame memory
         return results
 
-    def get_bidirectional_reachability(self, headers=None) -> list[dict[str, Any]]:
+    def get_bidirectional_reachability(self, headers=None, pathConstraints=None, returnFlowType=None) -> list[dict[str, Any]]:
         """Bidirectional reachability"""
         self._ensure_initialized()
 
-        query = self.session.q.bidirectionalReachability(headers=headers) if headers else self.session.q.bidirectionalReachability()
-        df = self._execute_query(query, "bidirectionalReachability")
+        query_params: dict[str, Any] = {}
+        if headers is not None:
+            query_params["headers"] = headers
+        if pathConstraints is not None:
+            query_params["pathConstraints"] = pathConstraints
+        if returnFlowType is not None:
+            query_params["returnFlowType"] = returnFlowType
+
+        query = self.session.q.bidirectionalReachability(**query_params)
+        df = self._execute_query(query, "bidirectionalReachability", raise_on_error=True)
         if df is None:
             return []
 
@@ -2189,12 +2436,18 @@ class BatfishService:
         del df  # Free DataFrame memory
         return results
 
-    def resolve_location_specifier(self, locations=None) -> list[dict[str, Any]]:
+    def resolve_location_specifier(self, locations=None, grammarVersion=None) -> list[dict[str, Any]]:
         """Location validation"""
         self._ensure_initialized()
 
-        query = self.session.q.resolveLocationSpecifier(locations=locations) if locations else self.session.q.resolveLocationSpecifier()
-        df = self._execute_query(query, "resolveLocationSpecifier")
+        query_params: dict[str, Any] = {}
+        if locations is not None:
+            query_params["locations"] = locations
+        if grammarVersion is not None:
+            query_params["grammarVersion"] = grammarVersion
+
+        query = self.session.q.resolveLocationSpecifier(**query_params)
+        df = self._execute_query(query, "resolveLocationSpecifier", raise_on_error=True)
         if df is None:
             return []
 
@@ -2208,12 +2461,18 @@ class BatfishService:
         del df  # Free DataFrame memory
         return results
 
-    def resolve_ip_specifier(self, ips=None) -> list[dict[str, Any]]:
+    def resolve_ip_specifier(self, ips=None, grammarVersion=None) -> list[dict[str, Any]]:
         """IP validation"""
         self._ensure_initialized()
 
-        query = self.session.q.resolveIpSpecifier(ips=ips) if ips else self.session.q.resolveIpSpecifier()
-        df = self._execute_query(query, "resolveIpSpecifier")
+        query_params: dict[str, Any] = {}
+        if ips is not None:
+            query_params["ips"] = ips
+        if grammarVersion is not None:
+            query_params["grammarVersion"] = grammarVersion
+
+        query = self.session.q.resolveIpSpecifier(**query_params)
+        df = self._execute_query(query, "resolveIpSpecifier", raise_on_error=True)
         if df is None:
             return []
 
@@ -2226,6 +2485,21 @@ class BatfishService:
 
         del df  # Free DataFrame memory
         return results
+
+    def resolve_ips_of_location_specifier(self, locations=None, grammarVersion=None) -> list[dict[str, Any]]:
+        """Resolve location specifier to source IP spaces."""
+        self._ensure_initialized()
+
+        query_params: dict[str, Any] = {}
+        if locations is not None:
+            query_params["locations"] = locations
+        if grammarVersion is not None:
+            query_params["grammarVersion"] = grammarVersion
+
+        return self._execute_query_records(
+            self.session.q.resolveIpsOfLocationSpecifier(**query_params),
+            "resolveIpsOfLocationSpecifier",
+        )
 
     def get_f5_bigip_vip_configuration(self) -> list[dict[str, Any]]:
         """F5 VIP configuration"""
@@ -2250,6 +2524,21 @@ class BatfishService:
         del df  # Free DataFrame memory
         return results
 
+    def get_a10_virtual_server_configuration(self, nodes=None, virtualServerIps=None) -> list[dict[str, Any]]:
+        """A10 virtual server configuration."""
+        self._ensure_initialized()
+
+        query_params: dict[str, Any] = {}
+        if nodes is not None:
+            query_params["nodes"] = nodes
+        if virtualServerIps is not None:
+            query_params["virtualServerIps"] = virtualServerIps
+
+        return self._execute_query_records(
+            self.session.q.a10VirtualServerConfiguration(**query_params),
+            "a10VirtualServerConfiguration",
+        )
+
     def get_route_policies(self, nodes=None) -> list[dict[str, Any]]:
         """
         Route policy analysis
@@ -2259,22 +2548,36 @@ class BatfishService:
         """
         self._ensure_initialized()
 
-        # Method routePolicies() does not exist in pybatfish API
-        # Return empty list to avoid causing delays
-        logger.warning("routePolicies() method not available - returning empty list")
-        return {"data": [], "stub": True, "message": "Route policies query is not yet implemented"}
+        return self._unavailable_capability(
+            "routePolicies",
+            "pybatfish does not provide routePolicies() in this runtime",
+            ["searchRoutePolicies", "testRoutePolicies"],
+        )
 
-    def test_route_policies(self, direction=None, inputRoute=None, nodes=None, policies=None) -> list[dict[str, Any]]:
+    def test_route_policies(
+        self,
+        direction=None,
+        inputRoutes=None,
+        nodes=None,
+        policies=None,
+        bgpSessionProperties=None,
+    ) -> list[dict[str, Any]]:
         """Test route policies"""
         self._ensure_initialized()
 
-        query = self.session.q.testRoutePolicies(
-            direction=direction,
-            inputRoute=inputRoute,
-            nodes=nodes,
-            policies=policies
-        )
-        df = self._execute_query(query, "testRoutePolicies")
+        query_params: dict[str, Any] = {
+            "direction": direction,
+            "inputRoutes": inputRoutes,
+        }
+        if nodes is not None:
+            query_params["nodes"] = nodes
+        if policies is not None:
+            query_params["policies"] = policies
+        if bgpSessionProperties is not None:
+            query_params["bgpSessionProperties"] = bgpSessionProperties
+
+        query = self.session.q.testRoutePolicies(**query_params)
+        df = self._execute_query(query, "testRoutePolicies", raise_on_error=True)
         if df is None:
             return []
 
@@ -2283,15 +2586,90 @@ class BatfishService:
             result_data = {
                 "node": row.get("Node", ""),
                 "policy_name": row.get("Policy_Name", ""),
-                "input_route": self._safe_serialize(row.get("Input_Route")),
+                "input_route": self._safe_serialize(row.get("Input_Route", row.get("Input_Routes"))),
+                "input_routes": self._safe_serialize(row.get("Input_Routes", row.get("Input_Route"))),
                 "action": row.get("Action", ""),
-                "output_route": self._safe_serialize(row.get("Output_Route")),
+                "output_route": self._safe_serialize(row.get("Output_Route", row.get("Output_Routes"))),
+                "output_routes": self._safe_serialize(row.get("Output_Routes", row.get("Output_Route"))),
                 "trace": self._safe_serialize(row.get("Trace", []))
             }
             results.append(result_data)
 
         del df  # Free DataFrame memory
         return results
+
+    def get_transfer_bdd_validation(
+        self,
+        nodes=None,
+        policies=None,
+        retainAllPaths=None,
+        seed=None,
+    ) -> list[dict[str, Any]]:
+        """Run symbolic route policy transfer BDD validation."""
+        self._ensure_initialized()
+
+        query_params: dict[str, Any] = {}
+        if nodes is not None:
+            query_params["nodes"] = nodes
+        if policies is not None:
+            query_params["policies"] = policies
+        if retainAllPaths is not None:
+            query_params["retainAllPaths"] = retainAllPaths
+        if seed is not None:
+            query_params["seed"] = seed
+
+        return self._execute_query_records(
+            self.session.q.transferBDDValidation(**query_params),
+            "transferBDDValidation",
+        )
+
+    def compare_peer_group_policies(
+        self,
+        reference_snapshot: str,
+        snapshot: str | None = None,
+    ) -> list[dict[str, Any]]:
+        """Compare BGP peer group policies."""
+        self._ensure_initialized()
+
+        answer_kwargs: dict[str, Any] = {"reference_snapshot": reference_snapshot}
+        if snapshot:
+            answer_kwargs["snapshot"] = snapshot
+
+        return self._execute_query_records(
+            self.session.q.comparePeerGroupPolicies(),
+            "comparePeerGroupPolicies",
+            answer_kwargs=answer_kwargs,
+        )
+
+    def compare_route_policies(
+        self,
+        policy,
+        referencePolicy,
+        nodes=None,
+        reference_snapshot: str | None = None,
+        snapshot: str | None = None,
+    ) -> list[dict[str, Any]]:
+        """Compare symbolic behavior of two route policies."""
+        self._ensure_initialized()
+
+        query_params: dict[str, Any] = {
+            "policy": policy,
+            "referencePolicy": referencePolicy,
+        }
+        if nodes is not None:
+            query_params["nodes"] = nodes
+
+        answer_kwargs: dict[str, Any] | None = None
+        if reference_snapshot:
+            answer_kwargs = {"reference_snapshot": reference_snapshot}
+            if snapshot:
+                answer_kwargs["snapshot"] = snapshot
+
+        return self._execute_query_records(
+            self.session.q.compareRoutePolicies(**query_params),
+            "compareRoutePolicies",
+            answer_kwargs=answer_kwargs,
+        )
 
     def get_questions(self) -> list[dict[str, Any]]:
         """
@@ -2343,9 +2721,10 @@ class BatfishService:
         """
         self._ensure_initialized()
 
-        # Method nodeRoles() does not exist in pybatfish API version 2025.7.7.2423
-        logger.warning("nodeRoles() method does not exist in this pybatfish version - returning empty list")
-        return {"data": [], "stub": True, "message": "Node roles query is not yet implemented"}
+        return self._unavailable_capability(
+            "nodeRoles",
+            "pybatfish does not provide nodeRoles() in this runtime",
+        )
 
     def get_interface_blacklist(self) -> list[dict[str, Any]]:
         """Blacklisted interfaces"""

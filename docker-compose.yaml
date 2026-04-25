@@ -25,13 +25,13 @@ services:
   backend:
     image: ${BACKEND_IMAGE:-ghcr.io/topologix-system/topologix/backend:latest}
     container_name: topologix-backend
-    # Command: default to gunicorn for production; override BACKEND_COMMAND for dev
-    # Production (default): gunicorn --worker-class gevent --bind 0.0.0.0:5000 app:app
+    # Command: default to single-worker gunicorn for process-local Batfish session state.
+    # Production (default): gunicorn --worker-class gevent --workers 1 --bind 0.0.0.0:5000 app:app
     # Development: BACKEND_COMMAND="python app.py"
     command:
       - /bin/sh
       - -c
-      - ${BACKEND_COMMAND:-gunicorn --worker-class gevent --bind 0.0.0.0:5000 app:app}
+      - ${BACKEND_COMMAND:-gunicorn --worker-class gevent --workers 1 --bind 0.0.0.0:5000 app:app}
     ports:
       - "5000:5000"
     environment:
@@ -77,6 +77,9 @@ services:
       # SQLite (default - stored in Docker volume for persistence)
       - DATABASE_URL=${DATABASE_URL:-sqlite:////app/data/topologix.db}
 
+      # Snapshot storage path (must match the snapshots-data mount below)
+      - SNAPSHOTS_DIR=${SNAPSHOTS_DIR:-/app/snapshots}
+
       # Email configuration for password reset
       - EMAIL_PROVIDER=${EMAIL_PROVIDER:-console}
       - EMAIL_FROM=${EMAIL_FROM:-noreply@topologix.local}
@@ -105,7 +108,7 @@ services:
       # - DATABASE_URL=mysql+pymysql://user:password@mysql:3306/topologix
     volumes:
       # Snapshots directory (shared with Batfish)
-      - snapshots-data:/snapshots
+      - snapshots-data:/app/snapshots
       # Database volume (SQLite persistence when AUTH_ENABLED=true)
       - backend-db:/app/data
       # Flask session storage (named volume for proper permissions)
@@ -129,8 +132,8 @@ services:
     container_name: topologix-frontend
     ports:
       - "3000:80"
-    # Runtime environment variables (not used by production build)
-    # Kept for documentation purposes
+    # Runtime environment variables consumed by docker-entrypoint.sh
+    # to generate /usr/share/nginx/html/runtime-config.js.
     environment:
       - VITE_API_BASE_URL=${VITE_API_BASE_URL:-}
       # Authentication (must match backend AUTH_ENABLED)
@@ -140,7 +143,8 @@ services:
     networks:
       - topologix-network
     depends_on:
-      - backend
+      backend:
+        condition: service_healthy
     restart: unless-stopped
     stdin_open: true
     tty: true

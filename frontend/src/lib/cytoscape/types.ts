@@ -20,6 +20,10 @@ export interface CytoscapeNode {
     health_status?: string
     [key: string]: any
   }
+  position?: {
+    x: number
+    y: number
+  }
   classes?: string
 }
 

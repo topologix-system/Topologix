@@ -7,6 +7,7 @@
  * - Used by TopologyViewer for optimal performance and user position persistence
  */
 import { useRef, useCallback, useState, useEffect, useMemo } from 'react'
+import type cytoscape from 'cytoscape'
 import type { Core, ElementDefinition } from 'cytoscape'
 import { getLayoutConfig } from '../lib/cytoscape/layouts'
 import type { LayoutName, CytoscapeConfig } from '../lib/cytoscape/types'
@@ -63,13 +64,21 @@ export interface NodePositions {
   [nodeId: string]: { x: number; y: number }
 }
 
+export interface UpdateElementsOptions {
+  applyLayout?: boolean
+  layoutName?: LayoutName
+  layoutOptions?: cytoscape.LayoutOptions
+  fitAfterLayout?: boolean
+}
+
 export interface UseCytoscapeLazyReturn {
   cyRef: React.RefObject<Core | null>
   isLoaded: boolean
   initialize: (container: HTMLElement, elements?: ElementDefinition[]) => Promise<Core | null>
   destroy: () => void
-  updateElements: (elements: ElementDefinition[], applyLayout?: boolean) => void
+  updateElements: (elements: ElementDefinition[], options?: boolean | UpdateElementsOptions) => void
   applyLayout: (layoutName: LayoutName) => void
+  isLayoutRunning: () => boolean
   fit: () => void
   center: () => void
   zoomIn: () => void
@@ -97,6 +106,122 @@ export function useCytoscapeLazy(config?: CytoscapeConfig): UseCytoscapeLazyRetu
   const cyRef = useRef<Core | null>(null)
   const [isLoaded, setIsLoaded] = useState(false)
   const updateTimeoutRef = useRef<NodeJS.Timeout | null>(null)
+  const fitAfterLayoutTimeoutRef = useRef<NodeJS.Timeout | null>(null)
+  const runningLayoutRef = useRef<any | null>(null)
+  const resizeObserverRef = useRef<ResizeObserver | null>(null)
+  const isLayoutRunningRef = useRef(false)
+  const layoutRunIdRef = useRef(0)
+
+  const clearFitAfterLayoutTimeout = useCallback(() => {
+    if (fitAfterLayoutTimeoutRef.current) {
+      clearTimeout(fitAfterLayoutTimeoutRef.current)
+      fitAfterLayoutTimeoutRef.current = null
+    }
+  }, [])
+
+  const scheduleFitAfterLayout = useCallback((delayMs = 50) => {
+    clearFitAfterLayoutTimeout()
+
+    fitAfterLayoutTimeoutRef.current = setTimeout(() => {
+      if (!cyRef.current || cyRef.current.destroyed()) {
+        return
+      }
+
+      try {
+        cyRef.current.resize()
+        cyRef.current.fit(undefined, 50)
+        console.log('[useCytoscapeLazy] Fit applied after layout or container resize')
+      } catch (error) {
+        console.error('[useCytoscapeLazy] Failed to fit after layout or container resize:', error)
+      } finally {
+        fitAfterLayoutTimeoutRef.current = null
+      }
+    }, delayMs)
+  }, [clearFitAfterLayoutTimeout])
+
+  const stopRunningLayout = useCallback((reason: string) => {
+    layoutRunIdRef.current += 1
+    clearFitAfterLayoutTimeout()
+
+    if (!runningLayoutRef.current) {
+      isLayoutRunningRef.current = false
+      return
+    }
+
+    try {
+      console.log(`[useCytoscapeLazy] Stopping running layout before ${reason}`)
+      runningLayoutRef.current.stop()
+    } catch (error) {
+      console.warn('[useCytoscapeLazy] Failed to stop running layout:', error)
+    } finally {
+      runningLayoutRef.current = null
+      isLayoutRunningRef.current = false
+    }
+  }, [clearFitAfterLayoutTimeout])
+
+  const disconnectResizeObserver = useCallback(() => {
+    if (resizeObserverRef.current) {
+      resizeObserverRef.current.disconnect()
+      resizeObserverRef.current = null
+    }
+  }, [])
+
+  const runManagedLayout = useCallback((
+    layoutOptions: cytoscape.LayoutOptions,
+    options: { fitAfterLayout?: boolean; reason: string }
+  ) => {
+    if (!cyRef.current || cyRef.current.destroyed()) {
+      console.log('[useCytoscapeLazy] Cannot run layout: Cytoscape instance not available')
+      return false
+    }
+
+    if (cyRef.current.elements().length === 0) {
+      console.log('[useCytoscapeLazy] Cannot run layout: no elements available')
+      return false
+    }
+
+    stopRunningLayout(options.reason)
+
+    const runId = layoutRunIdRef.current + 1
+    layoutRunIdRef.current = runId
+
+    const originalStop = layoutOptions.stop as ((event: unknown) => void) | undefined
+    const managedLayoutOptions: cytoscape.LayoutOptions = {
+      ...layoutOptions,
+      fit: false,
+      stop: (event: unknown) => {
+        if (layoutRunIdRef.current !== runId) {
+          return
+        }
+
+        runningLayoutRef.current = null
+        isLayoutRunningRef.current = false
+        console.log('[useCytoscapeLazy] Managed layout stopped')
+
+        if (options.fitAfterLayout ?? true) {
+          scheduleFitAfterLayout()
+        }
+
+        if (originalStop) {
+          originalStop(event)
+        }
+      },
+    }
+
+    try {
+      console.log('[useCytoscapeLazy] Running managed layout:', managedLayoutOptions.name)
+      isLayoutRunningRef.current = true
+      const layout = cyRef.current.layout(managedLayoutOptions)
+      runningLayoutRef.current = layout
+      layout.run()
+      return true
+    } catch (layoutError) {
+      console.error('[useCytoscapeLazy] Error running managed layout:', layoutError)
+      runningLayoutRef.current = null
+      isLayoutRunningRef.current = false
+      return false
+    }
+  }, [scheduleFitAfterLayout, stopRunningLayout])
 
   const initialize = useCallback(async (container: HTMLElement, elements?: ElementDefinition[]) => {
     console.log('[useCytoscapeLazy] Initializing Cytoscape instance with', elements?.length || 0, 'elements')
@@ -104,6 +229,8 @@ export function useCytoscapeLazy(config?: CytoscapeConfig): UseCytoscapeLazyRetu
     try {
       if (cyRef.current) {
         console.log('[useCytoscapeLazy] Destroying existing Cytoscape instance')
+        stopRunningLayout('reinitialization')
+        disconnectResizeObserver()
         cyRef.current.destroy()
         cyRef.current = null
         setIsLoaded(false)
@@ -113,6 +240,9 @@ export function useCytoscapeLazy(config?: CytoscapeConfig): UseCytoscapeLazyRetu
         clearTimeout(updateTimeoutRef.current)
         updateTimeoutRef.current = null
       }
+
+      clearFitAfterLayoutTimeout()
+      disconnectResizeObserver()
 
       console.log('[useCytoscapeLazy] Loading Cytoscape modules')
       const cytoscape = await loadCytoscape()
@@ -132,7 +262,7 @@ export function useCytoscapeLazy(config?: CytoscapeConfig): UseCytoscapeLazyRetu
         container,
         elements: initialElements,
         style: config?.style || defaultStyles,
-        layout: config?.layout || getLayoutConfig('cola'),
+        layout: config?.layout || { name: 'preset' },
         minZoom: config?.minZoom || 0.1,
         maxZoom: config?.maxZoom || 3,
         wheelSensitivity: config?.wheelSensitivity || 0.2,
@@ -152,6 +282,25 @@ export function useCytoscapeLazy(config?: CytoscapeConfig): UseCytoscapeLazyRetu
       console.log('[useCytoscapeLazy] Cytoscape instance created successfully')
       console.log('[useCytoscapeLazy] Initial element count:', cyRef.current.elements().length)
 
+      if (typeof ResizeObserver !== 'undefined') {
+        resizeObserverRef.current = new ResizeObserver(() => {
+          if (!cyRef.current || cyRef.current.destroyed()) {
+            return
+          }
+
+          try {
+            cyRef.current.resize()
+            if (!isLayoutRunningRef.current && cyRef.current.elements().length > 0) {
+              scheduleFitAfterLayout(100)
+            }
+          } catch (error) {
+            console.warn('[useCytoscapeLazy] Failed to handle Cytoscape container resize:', error)
+          }
+        })
+        resizeObserverRef.current.observe(container)
+        console.log('[useCytoscapeLazy] Resize observer registered for Cytoscape container')
+      }
+
       setIsLoaded(true)
       return cyRef.current
     } catch (error) {
@@ -166,16 +315,20 @@ export function useCytoscapeLazy(config?: CytoscapeConfig): UseCytoscapeLazyRetu
       cyRef.current = null
       return null
     }
-  }, [config])
+  }, [clearFitAfterLayoutTimeout, config, disconnectResizeObserver, scheduleFitAfterLayout, stopRunningLayout])
 
   const destroy = useCallback(() => {
     console.log('[useCytoscapeLazy] Destroying Cytoscape instance')
+    stopRunningLayout('destroy')
+    disconnectResizeObserver()
 
     if (updateTimeoutRef.current) {
       console.log('[useCytoscapeLazy] Clearing pending layout timeout')
       clearTimeout(updateTimeoutRef.current)
       updateTimeoutRef.current = null
     }
+
+    clearFitAfterLayoutTimeout()
 
     if (cyRef.current) {
       try {
@@ -192,10 +345,15 @@ export function useCytoscapeLazy(config?: CytoscapeConfig): UseCytoscapeLazyRetu
     } else {
       console.log('[useCytoscapeLazy] No Cytoscape instance to destroy')
     }
-  }, [])
+  }, [clearFitAfterLayoutTimeout, disconnectResizeObserver, stopRunningLayout])
 
-  const updateElements = useCallback((elements: ElementDefinition[], applyLayout: boolean = true) => {
-    console.log('[useCytoscapeLazy] updateElements called with', elements.length, 'elements, applyLayout:', applyLayout)
+  const updateElements = useCallback((elements: ElementDefinition[], options: boolean | UpdateElementsOptions = true) => {
+    const normalizedOptions: UpdateElementsOptions = typeof options === 'boolean'
+      ? { applyLayout: options }
+      : options
+    const shouldApplyLayout = normalizedOptions.applyLayout ?? true
+
+    console.log('[useCytoscapeLazy] updateElements called with', elements.length, 'elements, applyLayout:', shouldApplyLayout)
 
     if (!cyRef.current) {
       console.error('[useCytoscapeLazy] Cannot update elements: Cytoscape instance not initialized')
@@ -208,6 +366,7 @@ export function useCytoscapeLazy(config?: CytoscapeConfig): UseCytoscapeLazyRetu
         updateTimeoutRef.current = null
       }
 
+      stopRunningLayout('element update')
       console.log('[useCytoscapeLazy] Updating elements in batch mode')
 
       cyRef.current.batch(() => {
@@ -223,23 +382,55 @@ export function useCytoscapeLazy(config?: CytoscapeConfig): UseCytoscapeLazyRetu
 
       console.log('[useCytoscapeLazy] Elements updated successfully, current count:', cyRef.current.elements().length)
 
-      if (applyLayout && cyRef.current && cyRef.current.elements().length > 0) {
-        console.log('[useCytoscapeLazy] Applying layout immediately')
+      if (shouldApplyLayout && cyRef.current && cyRef.current.elements().length > 0) {
+        const layoutName = normalizedOptions.layoutName ?? 'cola'
+        const layoutOptions: cytoscape.LayoutOptions = {
+          ...getLayoutConfig(layoutName),
+          animate: false,
+          fit: false,
+          maxSimulationTime: 1500,
+          ...normalizedOptions.layoutOptions,
+        }
+
+        console.log('[useCytoscapeLazy] Applying managed layout:', layoutOptions.name)
         try {
-          const layout = cyRef.current.layout(getLayoutConfig('cola'))
-          layout.run()
-          console.log('[useCytoscapeLazy] Layout applied successfully')
+          const layoutStarted = runManagedLayout(layoutOptions, {
+            fitAfterLayout: normalizedOptions.fitAfterLayout ?? true,
+            reason: 'element update layout',
+          })
+
+          if (layoutStarted) {
+            console.log('[useCytoscapeLazy] Managed layout started successfully')
+          } else {
+            console.log('[useCytoscapeLazy] Managed layout did not start, trying fallback grid layout')
+            runManagedLayout({
+              name: 'grid',
+              animate: false,
+              fit: false,
+              padding: 50,
+            }, {
+              fitAfterLayout: true,
+              reason: 'fallback grid layout',
+            })
+          }
         } catch (layoutError) {
           console.error('[useCytoscapeLazy] Error applying layout:', layoutError)
           try {
             console.log('[useCytoscapeLazy] Trying fallback grid layout')
-            const fallbackLayout = cyRef.current.layout({ name: 'grid' })
-            fallbackLayout.run()
+            runManagedLayout({
+              name: 'grid',
+              animate: false,
+              fit: false,
+              padding: 50,
+            }, {
+              fitAfterLayout: true,
+              reason: 'fallback grid layout',
+            })
           } catch (fallbackError) {
             console.error('[useCytoscapeLazy] Fallback layout also failed:', fallbackError)
           }
         }
-      } else if (!applyLayout) {
+      } else if (!shouldApplyLayout) {
         console.log('[useCytoscapeLazy] Skipping layout application (applyLayout=false)')
       } else if (cyRef.current) {
         console.log('[useCytoscapeLazy] No elements to layout')
@@ -252,22 +443,28 @@ export function useCytoscapeLazy(config?: CytoscapeConfig): UseCytoscapeLazyRetu
         elementsCount: elements.length
       })
     }
-  }, [])
+  }, [runManagedLayout, stopRunningLayout])
 
   const applyLayout = useCallback((layoutName: LayoutName) => {
     if (!cyRef.current) return
 
-    const layout = cyRef.current.layout({
+    runManagedLayout({
       ...getLayoutConfig(layoutName),
       animate: true,
+      fit: false,
       animationDuration: 500,
       animationEasing: 'ease-out',
+    }, {
+      fitAfterLayout: true,
+      reason: `manual ${layoutName} layout`,
     })
-    layout.run()
-  }, [])
+  }, [runManagedLayout])
+
+  const isLayoutRunning = useCallback(() => isLayoutRunningRef.current, [])
 
   const fit = useCallback(() => {
     if (!cyRef.current) return
+    cyRef.current.resize()
     cyRef.current.fit(undefined, 50)
   }, [])
 
@@ -355,6 +552,11 @@ export function useCytoscapeLazy(config?: CytoscapeConfig): UseCytoscapeLazyRetu
       return {}
     }
 
+    if (isLayoutRunningRef.current) {
+      console.log('[useCytoscapeLazy] Skipping position save while layout is running')
+      return {}
+    }
+
     const positions: NodePositions = {}
     cyRef.current.nodes().forEach((node) => {
       const pos = node.position()
@@ -395,6 +597,13 @@ export function useCytoscapeLazy(config?: CytoscapeConfig): UseCytoscapeLazyRetu
       if (updateTimeoutRef.current) {
         clearTimeout(updateTimeoutRef.current)
       }
+      if (fitAfterLayoutTimeoutRef.current) {
+        clearTimeout(fitAfterLayoutTimeoutRef.current)
+      }
+      if (resizeObserverRef.current) {
+        resizeObserverRef.current.disconnect()
+        resizeObserverRef.current = null
+      }
     }
   }, [])
 
@@ -405,6 +614,7 @@ export function useCytoscapeLazy(config?: CytoscapeConfig): UseCytoscapeLazyRetu
     destroy,
     updateElements,
     applyLayout,
+    isLayoutRunning,
     fit,
     center,
     zoomIn,
@@ -424,6 +634,7 @@ export function useCytoscapeLazy(config?: CytoscapeConfig): UseCytoscapeLazyRetu
     destroy,
     updateElements,
     applyLayout,
+    isLayoutRunning,
     fit,
     center,
     zoomIn,

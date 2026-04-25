@@ -83,6 +83,7 @@ import {
   Eye,
   Search,
 } from 'lucide-react'
+import { BatfishFeatureTools } from './BatfishFeatureTools'
 
 interface SectionProps {
   title: string
@@ -105,8 +106,9 @@ function Section({ title, icon, isLoading, data, defaultOpen = false }: SectionP
   const [isOpen, setIsOpen] = useState(defaultOpen)
   const sectionId = `section-${title.toLowerCase().replace(/\s+/g, '-')}`
 
-  const hasData = data && (Array.isArray(data) ? data.length > 0 : Object.keys(data).length > 0)
-  const count = data ? (Array.isArray(data) ? data.length : Object.keys(data).length) : 0
+  const unavailable = Array.isArray(data) && data.length === 1 && data[0]?.available === false
+  const hasData = data && (unavailable || (Array.isArray(data) ? data.length > 0 : Object.keys(data).length > 0))
+  const count = data ? (unavailable ? 0 : (Array.isArray(data) ? data.length : Object.keys(data).length)) : 0
 
   return (
     <div className="bg-white rounded-lg shadow-sm border border-gray-200">
@@ -147,6 +149,13 @@ function Section({ title, icon, isLoading, data, defaultOpen = false }: SectionP
               <span className="sr-only">{t('analysis.loading', { section: title })}</span>
               {t('common.loading')}
             </p>
+          ) : unavailable ? (
+            <div className="py-2 text-sm text-gray-700">
+              <p>{data[0].reason}</p>
+              {Array.isArray(data[0].alternatives) && data[0].alternatives.length > 0 && (
+                <p className="mt-1 text-xs text-gray-600">Alternatives: {data[0].alternatives.join(', ')}</p>
+              )}
+            </div>
           ) : !hasData ? (
             <p className="text-sm text-gray-700 py-2">{t('common.noData')}</p>
           ) : (
@@ -325,12 +334,31 @@ function TestFiltersSection() {
   const [isOpen, setIsOpen] = useState(false)
   const [filters, setFilters] = useState('')
   const [nodes, setNodes] = useState('')
+  const [headersJson, setHeadersJson] = useState('')
+  const [startLocation, setStartLocation] = useState('')
+  const [jsonError, setJsonError] = useState('')
   const mutation = useTestFilters()
 
   const handleExecute = () => {
-    if (!filters.trim()) return
-    const request: { filters: string; nodes?: string[] } = { filters: filters.trim() }
+    let headers: object
+    try {
+      headers = headersJson.trim() ? JSON.parse(headersJson) : {}
+      if (!headersJson.trim() || Object.keys(headers).length === 0) {
+        setJsonError(t('analysis.acl.headersRequired'))
+        return
+      }
+      setJsonError('')
+    } catch {
+      setJsonError(t('analysis.acl.invalidJson'))
+      return
+    }
+
+    const request: { headers: object; filters?: string; nodes?: string[]; startLocation?: string } = {
+      headers,
+    }
+    if (filters.trim()) request.filters = filters.trim()
     if (nodes.trim()) request.nodes = nodes.split(',').map(n => n.trim()).filter(Boolean)
+    if (startLocation.trim()) request.startLocation = startLocation.trim()
     mutation.mutate(request)
   }
 
@@ -362,14 +390,25 @@ function TestFiltersSection() {
       {isOpen && (
         <div id={`${sectionId}-content`} role="region" aria-labelledby={`${sectionId}-button`} className="px-4 pb-4 border-t border-gray-100">
           <p className="text-xs text-gray-500 mt-3 mb-3">{t('analysis.acl.testFiltersDesc')}</p>
-          <div className="flex gap-2 mb-3">
-            <input type="text" placeholder={t('analysis.acl.filtersPlaceholder')} value={filters} onChange={(e) => setFilters(e.target.value)}
-              className="flex-1 px-3 py-1.5 text-sm border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-primary-600"
-              required aria-label={t('analysis.acl.aria.filterName')} aria-required="true" />
-            <input type="text" placeholder={t('analysis.acl.nodesPlaceholder')} value={nodes} onChange={(e) => setNodes(e.target.value)}
-              className="flex-1 px-3 py-1.5 text-sm border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-primary-600"
-              aria-label={t('analysis.acl.aria.nodes')} />
-            <button onClick={handleExecute} disabled={mutation.isPending || !filters.trim()}
+          <div className="space-y-2 mb-3">
+            <div className="flex gap-2">
+              <input type="text" placeholder={t('analysis.acl.filtersPlaceholder')} value={filters} onChange={(e) => setFilters(e.target.value)}
+                className="flex-1 px-3 py-1.5 text-sm border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-primary-600"
+                aria-label={t('analysis.acl.aria.filterName')} />
+              <input type="text" placeholder={t('analysis.acl.nodesPlaceholder')} value={nodes} onChange={(e) => setNodes(e.target.value)}
+                className="flex-1 px-3 py-1.5 text-sm border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-primary-600"
+                aria-label={t('analysis.acl.aria.nodes')} />
+              <input type="text" placeholder={t('analysis.acl.startLocationPlaceholder')} value={startLocation} onChange={(e) => setStartLocation(e.target.value)}
+                className="flex-1 px-3 py-1.5 text-sm border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-primary-600"
+                aria-label={t('analysis.acl.aria.startLocation')} />
+            </div>
+            <textarea placeholder={t('analysis.acl.headersPlaceholder')} value={headersJson}
+              onChange={(e) => { setHeadersJson(e.target.value); setJsonError('') }}
+              rows={3}
+              className={`w-full px-3 py-1.5 text-sm font-mono border rounded-md focus:outline-none focus:ring-2 focus:ring-primary-600 ${jsonError ? 'border-red-400' : 'border-gray-300'}`}
+              aria-label={t('analysis.acl.aria.headersJson')} aria-invalid={!!jsonError} />
+            {jsonError && <p className="text-xs text-red-600">{jsonError}</p>}
+            <button onClick={handleExecute} disabled={mutation.isPending || !headersJson.trim()}
               className="px-4 py-1.5 text-sm bg-primary-600 hover:bg-primary-700 disabled:bg-gray-400 text-white rounded-md transition-colors focus:outline-none focus:ring-2 focus:ring-primary-600 focus:ring-offset-1">
               {mutation.isPending ? (
                 <span className="flex items-center gap-1.5">
@@ -654,15 +693,15 @@ function SearchRoutePoliciesInteractiveSection() {
 function ReduceReachabilitySection() {
   const { t } = useTranslation()
   const [isOpen, setIsOpen] = useState(false)
-  const [headersJson, setHeadersJson] = useState('')
+  const [pathConstraintsJson, setPathConstraintsJson] = useState('')
   const [jsonError, setJsonError] = useState('')
   const mutation = useReduceReachability()
 
   const handleExecute = () => {
     const request: { pathConstraints?: object } = {}
-    if (headersJson.trim()) {
+    if (pathConstraintsJson.trim()) {
       try {
-        request.pathConstraints = JSON.parse(headersJson)
+        request.pathConstraints = JSON.parse(pathConstraintsJson)
         setJsonError('')
       } catch {
         setJsonError(t('analysis.acl.invalidJson'))
@@ -701,11 +740,11 @@ function ReduceReachabilitySection() {
         <div id={`${sectionId}-content`} role="region" aria-labelledby={`${sectionId}-button`} className="px-4 pb-4 border-t border-gray-100">
           <p className="text-xs text-gray-500 mt-3 mb-3">{t('analysis.advanced.reduceReachabilityDesc')}</p>
           <div className="space-y-2 mb-3">
-            <textarea placeholder={t('analysis.advanced.headersPlaceholder')} value={headersJson}
-              onChange={(e) => { setHeadersJson(e.target.value); setJsonError('') }}
+            <textarea placeholder={t('analysis.advanced.pathConstraintsPlaceholder')} value={pathConstraintsJson}
+              onChange={(e) => { setPathConstraintsJson(e.target.value); setJsonError('') }}
               rows={3}
               className={`w-full px-3 py-1.5 text-sm font-mono border rounded-md focus:outline-none focus:ring-2 focus:ring-primary-600 ${jsonError ? 'border-red-400' : 'border-gray-300'}`}
-              aria-label={t('analysis.advanced.aria.flowHeaders')} aria-invalid={!!jsonError} />
+              aria-label={t('analysis.advanced.aria.pathConstraints')} aria-invalid={!!jsonError} />
             {jsonError && <p className="text-xs text-red-600">{jsonError}</p>}
             <button onClick={handleExecute} disabled={mutation.isPending}
               className="px-4 py-1.5 text-sm bg-primary-600 hover:bg-primary-700 disabled:bg-gray-400 text-white rounded-md transition-colors focus:outline-none focus:ring-2 focus:ring-primary-600 focus:ring-offset-1">
@@ -1151,6 +1190,7 @@ export function NetworkAnalysisPanel() {
             />
             <SearchRoutePoliciesInteractiveSection />
             <ReduceReachabilitySection />
+            <BatfishFeatureTools />
           </>
         )}
 

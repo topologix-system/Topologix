@@ -71,6 +71,8 @@ To run the packaged-image compose file instead of building local source, use:
 docker compose up -d
 ```
 
+For production-style packaged-image deployments, set `FLASK_ENV=production`, `FLASK_DEBUG=False`, and provide `SECRET_KEY`, `JWT_SECRET_KEY`, and `CSRF_SECRET_KEY` in your local `.env` before starting the stack.
+
 ### Basic Commands
 
 ```bash
