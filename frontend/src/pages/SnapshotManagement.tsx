@@ -46,11 +46,14 @@ const UNGROUPED_GROUP_KEY = 'ungrouped'
 const AUTO_FORMAT_VALUE = 'auto'
 const UNSUPPORTED_FORMAT_PREFIX = 'unsupported:'
 const RANCID_FORMAT_OPTIONS = [
+  { value: 'a10', labelKey: 'snapshots.format.options.a10' },
   { value: 'arista', labelKey: 'snapshots.format.options.arista' },
   { value: 'bigip', labelKey: 'snapshots.format.options.bigip' },
+  { value: 'ios', labelKey: 'snapshots.format.options.ios' },
   { value: 'cisco-nx', labelKey: 'snapshots.format.options.ciscoNx' },
   { value: 'cisco-xr', labelKey: 'snapshots.format.options.ciscoXr' },
   { value: 'force10', labelKey: 'snapshots.format.options.force10' },
+  { value: 'fortigate', labelKey: 'snapshots.format.options.fortigate' },
   { value: 'foundry', labelKey: 'snapshots.format.options.foundry' },
   { value: 'juniper', labelKey: 'snapshots.format.options.juniper' },
   { value: 'mrv', labelKey: 'snapshots.format.options.mrv' },

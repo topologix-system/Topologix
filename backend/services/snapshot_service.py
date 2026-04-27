@@ -36,11 +36,14 @@ METADATA_FILENAME = '.topologix-snapshot.json'
 FOLDER_SEGMENT_PATTERN = re.compile(r'^[A-Za-z0-9][A-Za-z0-9 _.-]{0,63}$')
 RANCID_CONTENT_TYPE_HEADER = '!RANCID-CONTENT-TYPE:'
 SUPPORTED_RANCID_FORMATS = {
+    'a10',
     'arista',
     'bigip',
+    'ios',
     'cisco-nx',
     'cisco-xr',
     'force10',
+    'fortigate',
     'foundry',
     'juniper',
     'mrv',
