@@ -38,6 +38,7 @@ import {
 import { useSnapshotStore } from '../store'
 import { ConfirmDialog } from '../components/ConfirmDialog'
 import { SnapshotFolderCombobox } from '../components/SnapshotFolderCombobox'
+import { AdvancedArtifactPanel } from '../components/AdvancedArtifactPanel'
 import type { Snapshot, SnapshotFile } from '../types'
 import { extractErrorMessage } from '../types/errors'
 
@@ -334,25 +335,77 @@ export function SnapshotManagement() {
   const handleFileUpload = useCallback(
     (files: FileList | null) => {
       if (!files || !selectedSnapshot) return
+      const uploadFiles = Array.from(files)
+      if (uploadFiles.length === 0) return
+      const changedSnapshotName = selectedSnapshot
+      const shouldReactivate = useSnapshotStore.getState().currentSnapshotName === changedSnapshotName
+
+      if (shouldReactivate) {
+        if (activateMutation.isPending || fileChangeInProgressRef.current !== null) {
+          setUploadError(t('snapshots.fileChangeBusy'))
+          return
+        }
+        fileChangeInProgressRef.current = changedSnapshotName
+        setFileChangeInProgressSnapshot(changedSnapshotName)
+        setFileReinitializeError('')
+      }
 
       setUploadError('')
-      Array.from(files).forEach((file) => {
+      let remainingUploads = uploadFiles.length
+      let requiresReinitialize = false
+      const finishUpload = () => {
+        remainingUploads -= 1
+        if (remainingUploads > 0) return
+
+        if (!shouldReactivate) return
+
+        if (!requiresReinitialize) {
+          fileChangeInProgressRef.current = null
+          setFileChangeInProgressSnapshot(null)
+          return
+        }
+
+        activateMutation.mutate(changedSnapshotName, {
+          onSuccess: () => {
+            setCurrentSnapshotName(changedSnapshotName)
+            setFileReinitializeError('')
+          },
+          onError: (error: unknown) => {
+            setFileReinitializeError(
+              extractErrorMessage(error, t('snapshots.reinitializeFailedAfterFileChange'))
+            )
+          },
+          onSettled: () => {
+            fileChangeInProgressRef.current = null
+            setFileChangeInProgressSnapshot(null)
+          },
+        })
+      }
+
+      uploadFiles.forEach((file) => {
         uploadMutation.mutate(
           {
-            name: selectedSnapshot,
+            name: changedSnapshotName,
             file,
           },
           {
+            onSuccess: (response) => {
+              if (response?.requires_reinitialize) {
+                requiresReinitialize = true
+              }
+              finishUpload()
+            },
             onError: (error: unknown) => {
               setUploadError((currentError) => (
                 currentError || extractErrorMessage(error, `Failed to upload file '${file.name}'`)
               ))
+              finishUpload()
             },
           }
         )
       })
     },
-    [selectedSnapshot, uploadMutation]
+    [activateMutation, selectedSnapshot, setCurrentSnapshotName, t, uploadMutation]
   )
 
   /**
@@ -875,6 +928,7 @@ export function SnapshotManagement() {
                     accept=".cfg,.conf,.txt,.log"
                     className="hidden"
                     onChange={(e) => handleFileUpload(e.target.files)}
+                    disabled={isSelectedSnapshotFileActionBlocked}
                     aria-label={t('snapshots.chooseFilesAria')}
                     aria-describedby="upload-instructions"
                   />
@@ -1036,6 +1090,8 @@ export function SnapshotManagement() {
                   <p className="text-sm mt-2 text-gray-700">{t('snapshots.uploadToStart')}</p>
                 </div>
               )}
+
+              <AdvancedArtifactPanel snapshotName={selectedSnapshot} />
             </>
           ) : (
             <div className="flex items-center justify-center h-full text-gray-700">

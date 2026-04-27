@@ -1171,6 +1171,7 @@
       "title": "ファイル削除",
       "message": "snapshot「{{snapshot}}」から「{{file}}」を削除しますか？この操作は元に戻せません。"
     },
+    "fileChangeBusy": "別のファイル変更を処理中です。完了してから追加でアップロードしてください。",
     "reinitializeFailedAfterFileChange": "ファイル変更後の snapshot 再読み込みに失敗しました。解析結果が古い可能性があります。",
     "noFiles": "まだファイルがアップロードされていません",
     "uploadToStart": "開始するには設定ファイルまたはログファイルをアップロードしてください",
@@ -1184,6 +1185,101 @@
     "deleteConfirm": {
       "title": "スナップショットを削除",
       "message": "「{{name}}」を削除してもよろしいですか？この操作は取り消せません。"
+    },
+    "artifacts": {
+      "title": "高度なアーティファクトデータ",
+      "summary": "{{count}} 件のアーティファクトを認識",
+      "helpTitle": "任意のBatfishレイアウトワークフロー",
+      "helpBody": "AWS、Azure、SONiC、Check Point管理、ホスト、補足JSONレイアウトが必要な場合だけ使用します。上の通常の設定/ログアップロードはそのまま利用できます。",
+      "uploadTitle": "種類付きアーティファクトをアップロード",
+      "typeLabel": "アーティファクト種別",
+      "fileLabel": "ファイル",
+      "preview": "保存先をプレビュー",
+      "previewRequired": "このアーティファクトをアップロードする前に保存先をプレビューしてください。",
+      "upload": "アーティファクトをアップロード",
+      "uploaded": "アーティファクトをアップロードしました。",
+      "uploadFailed": "アーティファクトのアップロードに失敗しました",
+      "previewFailed": "アーティファクト変更のプレビューに失敗しました",
+      "previewDestination": "保存先プレビュー",
+      "destinationExists": "保存先が既に存在します。既存アーティファクトの置換を使用してください。",
+      "treeTitle": "アーティファクトツリー",
+      "treeHelp": "Batfish snapshot layout から認識されたファイルです。",
+      "empty": "高度なアーティファクトはまだ認識されていません。",
+      "replaceFile": "ファイルを置換",
+      "replacing": "置換中...",
+      "replaced": "アーティファクト内容を置換しました。",
+      "replaceFailed": "アーティファクト内容の置換に失敗しました",
+      "deleteAria": "{{name}} のアーティファクトを削除",
+      "deleted": "アーティファクトを削除しました。",
+      "deleteFailed": "アーティファクト削除に失敗しました",
+      "validate": "検証",
+      "validateFailed": "アーティファクト検証に失敗しました",
+      "validationStatus": "検証 {{status}}: {{count}} 件のアーティファクトを確認",
+      "requiresReactivate": "アーティファクトを変更しました。解析結果を信頼する前にこのsnapshotを再有効化してください。",
+      "reactivated": "アーティファクト変更後に有効なsnapshotを再読み込みしました。",
+      "reactivateFailed": "アーティファクト変更後の有効なsnapshot再読み込みに失敗しました。",
+      "deleteConfirm": {
+        "title": "アーティファクト削除",
+        "message": "アーティファクト「{{path}}」を削除しますか？この操作は元に戻せません。"
+      },
+      "replaceConfirm": {
+        "title": "アーティファクトファイル置換",
+        "message": "アーティファクト「{{path}}」を「{{file}}」で置換しますか？解析結果を信頼する前にsnapshotの再有効化が必要です。"
+      },
+      "fields": {
+        "account": "アカウント",
+        "region": "リージョン",
+        "manager": "管理サーバー",
+        "domain": "ドメイン",
+        "package": "パッケージ",
+        "device": "デバイス"
+      },
+      "types": {
+        "network_config": {
+          "label": "ネットワーク機器コンフィグ（高度な配置）",
+          "description": "configs/ 配下に保存するテキスト形式の機器設定または運用ログです。"
+        },
+        "aws_config": {
+          "label": "AWS設定JSON",
+          "description": "AWS APIのJSON出力です。アカウント / リージョンを指定すると aws_configs/account/region のパスを作れます。"
+        },
+        "azure_config": {
+          "label": "AzureリソースJSON",
+          "description": "azure_configs/ 配下に保存する Azure リソースJSONビューです。ARMテンプレートは対象外です。"
+        },
+        "checkpoint_management": {
+          "label": "Check Point管理JSON",
+          "description": "checkpoint_management/manager/domain/package 配下に保存する管理APIのJSONです。"
+        },
+        "sonic_config": {
+          "label": "SONiCデバイスファイル",
+          "description": "sonic_configs/device/ 配下の config_db.json、frr.conf、resolv.conf、snmp.yml です。"
+        },
+        "host_model": {
+          "label": "ホストモデルJSON",
+          "description": "hosts/ 配下に保存するエンドホストモデルJSONです。"
+        },
+        "host_iptables": {
+          "label": "ホストiptablesファイル",
+          "description": "ホストモデルJSONから参照される iptables-save 出力です。"
+        },
+        "layer1_topology": {
+          "label": "Layer 1トポロジーJSON",
+          "description": "batfish/layer1_topology.json として保存する手動ケーブリング情報です。"
+        },
+        "isp_config": {
+          "label": "ISPモデリングJSON",
+          "description": "batfish/isp_config.json として保存するISPモデリングデータです。"
+        },
+        "runtime_data": {
+          "label": "ランタイムデータJSON",
+          "description": "batfish/runtime_data.json として保存するインターフェース実行時情報です。"
+        },
+        "external_bgp_announcements": {
+          "label": "外部BGPアナウンスJSON",
+          "description": "snapshot root に保存する外部BGP経路注入データです。"
+        }
+      }
     }
   },
   "layer1Editor": {

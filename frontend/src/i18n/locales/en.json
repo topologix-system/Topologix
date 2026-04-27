@@ -1171,6 +1171,7 @@
       "title": "Delete File",
       "message": "Delete \"{{file}}\" from snapshot \"{{snapshot}}\"? This action cannot be undone."
     },
+    "fileChangeBusy": "Another file change is already in progress. Wait for it to finish before uploading more files.",
     "reinitializeFailedAfterFileChange": "Failed to reload the snapshot after the file change. Analysis results may be stale.",
     "noFiles": "No files uploaded yet",
     "uploadToStart": "Upload configuration or log files to get started",
@@ -1184,6 +1185,101 @@
     "deleteConfirm": {
       "title": "Delete Snapshot",
       "message": "Are you sure you want to delete \"{{name}}\"? This action cannot be undone."
+    },
+    "artifacts": {
+      "title": "Advanced artifact data",
+      "summary": "{{count}} recognized artifacts",
+      "helpTitle": "Optional Batfish layout workflow",
+      "helpBody": "Use this only when you need AWS, Azure, SONiC, Check Point management, host, or supplemental JSON layouts. The standard config/log upload above remains unchanged.",
+      "uploadTitle": "Upload typed artifact",
+      "typeLabel": "Artifact type",
+      "fileLabel": "File",
+      "preview": "Preview path",
+      "previewRequired": "Preview the destination path before uploading this artifact.",
+      "upload": "Upload artifact",
+      "uploaded": "Artifact uploaded.",
+      "uploadFailed": "Failed to upload artifact",
+      "previewFailed": "Failed to preview artifact change",
+      "previewDestination": "Destination preview",
+      "destinationExists": "Destination already exists. Replace the existing artifact instead.",
+      "treeTitle": "Artifact tree",
+      "treeHelp": "Recognized files from the Batfish snapshot layout.",
+      "empty": "No advanced artifacts have been recognized yet.",
+      "replaceFile": "Replace file",
+      "replacing": "Replacing...",
+      "replaced": "Artifact content replaced.",
+      "replaceFailed": "Failed to replace artifact content",
+      "deleteAria": "Delete artifact {{name}}",
+      "deleted": "Artifact deleted.",
+      "deleteFailed": "Failed to delete artifact",
+      "validate": "Validate",
+      "validateFailed": "Failed to validate artifacts",
+      "validationStatus": "Validation {{status}}: {{count}} artifacts checked",
+      "requiresReactivate": "Artifact changed. Re-activate this snapshot before relying on analysis results.",
+      "reactivated": "Active snapshot reloaded after artifact change.",
+      "reactivateFailed": "Failed to reload the active snapshot after artifact change.",
+      "deleteConfirm": {
+        "title": "Delete Artifact",
+        "message": "Delete artifact \"{{path}}\"? This action cannot be undone."
+      },
+      "replaceConfirm": {
+        "title": "Replace Artifact File",
+        "message": "Replace artifact \"{{path}}\" with \"{{file}}\"? The snapshot must be re-activated before relying on analysis results."
+      },
+      "fields": {
+        "account": "Account",
+        "region": "Region",
+        "manager": "Manager",
+        "domain": "Domain",
+        "package": "Package",
+        "device": "Device"
+      },
+      "types": {
+        "network_config": {
+          "label": "Network device config (advanced placement)",
+          "description": "Text device configuration or operational log stored under configs/."
+        },
+        "aws_config": {
+          "label": "AWS config JSON",
+          "description": "AWS API JSON output. Account and region are optional but can create aws_configs/account/region paths."
+        },
+        "azure_config": {
+          "label": "Azure resource JSON",
+          "description": "Azure resource JSON views stored under azure_configs/. ARM templates are not accepted."
+        },
+        "checkpoint_management": {
+          "label": "Check Point management JSON",
+          "description": "Check Point Management API JSON under checkpoint_management/manager/domain/package."
+        },
+        "sonic_config": {
+          "label": "SONiC device file",
+          "description": "SONiC config_db.json, frr.conf, resolv.conf, or snmp.yml under sonic_configs/device/."
+        },
+        "host_model": {
+          "label": "Host model JSON",
+          "description": "End-host model JSON stored under hosts/."
+        },
+        "host_iptables": {
+          "label": "Host iptables file",
+          "description": "iptables-save output referenced by host model JSON."
+        },
+        "layer1_topology": {
+          "label": "Layer 1 topology JSON",
+          "description": "Manual cabling data stored as batfish/layer1_topology.json."
+        },
+        "isp_config": {
+          "label": "ISP modeling JSON",
+          "description": "ISP modeling data stored as batfish/isp_config.json."
+        },
+        "runtime_data": {
+          "label": "Runtime data JSON",
+          "description": "Runtime interface information stored as batfish/runtime_data.json."
+        },
+        "external_bgp_announcements": {
+          "label": "External BGP announcements JSON",
+          "description": "External BGP route injection data stored at snapshot root."
+        }
+      }
     }
   },
   "layer1Editor": {

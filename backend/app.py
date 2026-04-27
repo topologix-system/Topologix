@@ -344,6 +344,9 @@ def request_uses_batfish() -> bool:
     if path.startswith('/api/snapshots/') and '/files' in path and request.method in {'POST', 'PATCH', 'DELETE'}:
         return True
 
+    if path.startswith('/api/snapshots/') and '/artifacts' in path and request.method in {'POST', 'PUT', 'PATCH', 'DELETE'}:
+        return True
+
     if path.endswith('/interfaces') and path.startswith('/api/snapshots/'):
         return True
 
@@ -3574,6 +3577,193 @@ def delete_snapshot_file(name: str, filename: str):
         return error_response(str(e), 400)
     except Exception as e:
         logger.error(f"Failed to delete snapshot file: {e}")
+        return error_response(str(e), 500)
+
+
+@app.route('/api/snapshots/<name>/artifact-types', methods=['GET'])
+def get_snapshot_artifact_types(name: str):
+    """Get typed Batfish artifact definitions for an accessible snapshot."""
+    try:
+        artifact_types = snapshot_service.get_artifact_types(name, **get_snapshot_request_context())
+        return success_response(artifact_types, "Snapshot artifact types retrieved successfully")
+    except PermissionError as e:
+        return error_response(str(e), 403)
+    except FileNotFoundError as e:
+        return error_response(str(e), 404)
+    except ValueError as e:
+        return error_response(str(e), 400)
+    except Exception as e:
+        logger.error(f"Failed to get snapshot artifact types: {e}")
+        return error_response(str(e), 500)
+
+
+@app.route('/api/snapshots/<name>/artifact-tree', methods=['GET'])
+def get_snapshot_artifact_tree(name: str):
+    """Get indexed Batfish artifacts for a snapshot."""
+    try:
+        artifact_tree = snapshot_service.get_artifact_tree(name, **get_snapshot_request_context())
+        return success_response(artifact_tree, "Snapshot artifact tree retrieved successfully")
+    except PermissionError as e:
+        return error_response(str(e), 403)
+    except FileNotFoundError as e:
+        return error_response(str(e), 404)
+    except ValueError as e:
+        return error_response(str(e), 400)
+    except Exception as e:
+        logger.error(f"Failed to get snapshot artifact tree: {e}")
+        return error_response(str(e), 500)
+
+
+@app.route('/api/snapshots/<name>/artifacts/preview-change', methods=['POST'])
+def preview_snapshot_artifact_change(name: str):
+    """Preview a typed artifact mutation before writing to disk."""
+    try:
+        data = request.get_json(silent=True)
+        if not isinstance(data, dict):
+            return error_response("Request body must be a JSON object", 400)
+
+        preview = snapshot_service.preview_artifact_change(
+            name,
+            data,
+            **get_snapshot_request_context(),
+        )
+        return success_response(preview, "Snapshot artifact change previewed successfully")
+    except PermissionError as e:
+        return error_response(str(e), 403)
+    except FileNotFoundError as e:
+        return error_response(str(e), 404)
+    except ValueError as e:
+        return error_response(str(e), 400)
+    except Exception as e:
+        logger.error(f"Failed to preview snapshot artifact change: {e}")
+        return error_response(str(e), 500)
+
+
+@app.route('/api/snapshots/<name>/artifacts', methods=['POST'])
+def upload_snapshot_artifact(name: str):
+    """Upload a typed Batfish artifact to a snapshot."""
+    try:
+        if 'file' not in request.files:
+            return error_response("No artifact file provided", 400)
+
+        artifact_type = request.form.get('artifact_type')
+        metadata = request.form.get('metadata')
+        preview_token = request.form.get('preview_token')
+        artifact = snapshot_service.upload_artifact(
+            name,
+            artifact_type,
+            request.files['file'],
+            metadata=metadata,
+            preview_token=preview_token,
+            **get_snapshot_request_context(),
+        )
+        return success_response(artifact, "Snapshot artifact uploaded successfully")
+    except PermissionError as e:
+        return error_response(str(e), 403)
+    except FileNotFoundError as e:
+        return error_response(str(e), 404)
+    except ValueError as e:
+        return error_response(str(e), 400)
+    except Exception as e:
+        logger.error(f"Failed to upload snapshot artifact: {e}")
+        return error_response(str(e), 500)
+
+
+@app.route('/api/snapshots/<name>/artifacts/<artifact_id>', methods=['PATCH'])
+def update_snapshot_artifact(name: str, artifact_id: str):
+    """Update metadata for a typed artifact, relocating it when safe."""
+    try:
+        data = request.get_json(silent=True)
+        if not isinstance(data, dict):
+            return error_response("Request body must be a JSON object", 400)
+
+        artifact = snapshot_service.update_artifact_metadata(
+            name,
+            artifact_id,
+            data,
+            **get_snapshot_request_context(),
+        )
+        return success_response(artifact, "Snapshot artifact updated successfully")
+    except PermissionError as e:
+        return error_response(str(e), 403)
+    except FileNotFoundError as e:
+        return error_response(str(e), 404)
+    except ValueError as e:
+        return error_response(str(e), 400)
+    except Exception as e:
+        logger.error(f"Failed to update snapshot artifact: {e}")
+        return error_response(str(e), 500)
+
+
+@app.route('/api/snapshots/<name>/artifacts/<artifact_id>/content', methods=['PUT'])
+def replace_snapshot_artifact_content(name: str, artifact_id: str):
+    """Replace typed artifact file content without changing its destination."""
+    try:
+        if 'file' not in request.files:
+            return error_response("No artifact file provided", 400)
+
+        artifact = snapshot_service.replace_artifact_content(
+            name,
+            artifact_id,
+            request.files['file'],
+            preview_token=request.form.get('preview_token'),
+            **get_snapshot_request_context(),
+        )
+        return success_response(artifact, "Snapshot artifact content replaced successfully")
+    except PermissionError as e:
+        return error_response(str(e), 403)
+    except FileNotFoundError as e:
+        return error_response(str(e), 404)
+    except ValueError as e:
+        return error_response(str(e), 400)
+    except Exception as e:
+        logger.error(f"Failed to replace snapshot artifact content: {e}")
+        return error_response(str(e), 500)
+
+
+@app.route('/api/snapshots/<name>/artifacts/<artifact_id>', methods=['DELETE'])
+def delete_snapshot_artifact(name: str, artifact_id: str):
+    """Delete one typed artifact file from a snapshot."""
+    try:
+        data = request.get_json(silent=True) or {}
+        if not isinstance(data, dict):
+            return error_response("Request body must be a JSON object", 400)
+
+        result = snapshot_service.delete_artifact(
+            name,
+            artifact_id,
+            preview_token=data.get('preview_token'),
+            **get_snapshot_request_context(),
+        )
+        return success_response(result, "Snapshot artifact deleted successfully")
+    except PermissionError as e:
+        return error_response(str(e), 403)
+    except FileNotFoundError as e:
+        return error_response(str(e), 404)
+    except ValueError as e:
+        return error_response(str(e), 400)
+    except Exception as e:
+        logger.error(f"Failed to delete snapshot artifact: {e}")
+        return error_response(str(e), 500)
+
+
+@app.route('/api/snapshots/<name>/artifacts/validate', methods=['POST'])
+def validate_snapshot_artifacts(name: str):
+    """Validate typed artifact layout for a snapshot."""
+    try:
+        result = snapshot_service.validate_snapshot_artifacts(
+            name,
+            **get_snapshot_request_context(),
+        )
+        return success_response(result, "Snapshot artifacts validated successfully")
+    except PermissionError as e:
+        return error_response(str(e), 403)
+    except FileNotFoundError as e:
+        return error_response(str(e), 404)
+    except ValueError as e:
+        return error_response(str(e), 400)
+    except Exception as e:
+        logger.error(f"Failed to validate snapshot artifacts: {e}")
         return error_response(str(e), 500)
 
 

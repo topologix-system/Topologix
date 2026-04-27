@@ -4,7 +4,14 @@
  */
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { snapshotAPI } from '../services/api'
-import type { CreateSnapshotRequest, UpdateSnapshotRequest } from '../types'
+import type {
+  CreateSnapshotRequest,
+  ReplaceSnapshotArtifactContentRequest,
+  SnapshotArtifactPreviewRequest,
+  UpdateSnapshotArtifactRequest,
+  UpdateSnapshotRequest,
+  UploadSnapshotArtifactRequest,
+} from '../types'
 
 /**
  * Query key factory for snapshot-related React Query caches
@@ -14,6 +21,8 @@ export const snapshotKeys = {
   all: ['snapshots'] as const,
   list: () => [...snapshotKeys.all, 'list'] as const,
   files: (name: string) => [...snapshotKeys.all, name, 'files'] as const,
+  artifactTypes: (name: string) => [...snapshotKeys.all, name, 'artifact-types'] as const,
+  artifactTree: (name: string) => [...snapshotKeys.all, name, 'artifact-tree'] as const,
 }
 
 /**
@@ -44,6 +53,30 @@ export function useSnapshotFiles(name: string, enabled = true) {
     queryFn: () => snapshotAPI.getFiles(name),
     enabled: enabled && !!name,
     staleTime: 10000, // 10 seconds
+  })
+}
+
+/**
+ * Query typed Batfish artifact definitions available for a snapshot.
+ */
+export function useSnapshotArtifactTypes(name: string, enabled = true) {
+  return useQuery({
+    queryKey: snapshotKeys.artifactTypes(name),
+    queryFn: () => snapshotAPI.getArtifactTypes(name),
+    enabled: enabled && !!name,
+    staleTime: 60000,
+  })
+}
+
+/**
+ * Query recognized typed Batfish artifacts within a snapshot.
+ */
+export function useSnapshotArtifactTree(name: string, enabled = true) {
+  return useQuery({
+    queryKey: snapshotKeys.artifactTree(name),
+    queryFn: () => snapshotAPI.getArtifactTree(name),
+    enabled: enabled && !!name,
+    staleTime: 10000,
   })
 }
 
@@ -154,6 +187,91 @@ export function useDeleteSnapshotFile() {
       queryClient.invalidateQueries({ queryKey: snapshotKeys.files(variables.name) })
       queryClient.invalidateQueries({ queryKey: snapshotKeys.list() })
     },
+  })
+}
+
+/**
+ * Preview an artifact mutation before writing files.
+ */
+export function usePreviewSnapshotArtifactChange() {
+  return useMutation({
+    mutationFn: ({ name, request }: { name: string; request: SnapshotArtifactPreviewRequest }) =>
+      snapshotAPI.previewArtifactChange(name, request),
+  })
+}
+
+/**
+ * Upload a typed Batfish artifact and refresh snapshot views.
+ */
+export function useUploadSnapshotArtifact() {
+  const queryClient = useQueryClient()
+
+  return useMutation({
+    mutationFn: (request: UploadSnapshotArtifactRequest) => snapshotAPI.uploadArtifact(request),
+    onSuccess: (_, variables) => {
+      queryClient.invalidateQueries({ queryKey: snapshotKeys.artifactTree(variables.name) })
+      queryClient.invalidateQueries({ queryKey: snapshotKeys.files(variables.name) })
+      queryClient.invalidateQueries({ queryKey: snapshotKeys.list() })
+    },
+  })
+}
+
+/**
+ * Relocate or update same-type artifact metadata.
+ */
+export function useUpdateSnapshotArtifact() {
+  const queryClient = useQueryClient()
+
+  return useMutation({
+    mutationFn: (request: UpdateSnapshotArtifactRequest) => snapshotAPI.updateArtifact(request),
+    onSuccess: (_, variables) => {
+      queryClient.invalidateQueries({ queryKey: snapshotKeys.artifactTree(variables.name) })
+      queryClient.invalidateQueries({ queryKey: snapshotKeys.files(variables.name) })
+      queryClient.invalidateQueries({ queryKey: snapshotKeys.list() })
+    },
+  })
+}
+
+/**
+ * Replace one artifact's content without changing its destination.
+ */
+export function useReplaceSnapshotArtifactContent() {
+  const queryClient = useQueryClient()
+
+  return useMutation({
+    mutationFn: (request: ReplaceSnapshotArtifactContentRequest) =>
+      snapshotAPI.replaceArtifactContent(request),
+    onSuccess: (_, variables) => {
+      queryClient.invalidateQueries({ queryKey: snapshotKeys.artifactTree(variables.name) })
+      queryClient.invalidateQueries({ queryKey: snapshotKeys.files(variables.name) })
+      queryClient.invalidateQueries({ queryKey: snapshotKeys.list() })
+    },
+  })
+}
+
+/**
+ * Delete one typed artifact file.
+ */
+export function useDeleteSnapshotArtifact() {
+  const queryClient = useQueryClient()
+
+  return useMutation({
+    mutationFn: ({ name, artifactId, previewToken }: { name: string; artifactId: string; previewToken: string }) =>
+      snapshotAPI.deleteArtifact(name, artifactId, previewToken),
+    onSuccess: (_, variables) => {
+      queryClient.invalidateQueries({ queryKey: snapshotKeys.artifactTree(variables.name) })
+      queryClient.invalidateQueries({ queryKey: snapshotKeys.files(variables.name) })
+      queryClient.invalidateQueries({ queryKey: snapshotKeys.list() })
+    },
+  })
+}
+
+/**
+ * Validate artifact layout and lightweight schema expectations.
+ */
+export function useValidateSnapshotArtifacts() {
+  return useMutation({
+    mutationFn: (name: string) => snapshotAPI.validateArtifacts(name),
   })
 }
 

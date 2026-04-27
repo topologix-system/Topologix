@@ -46,10 +46,20 @@ import type {
   Snapshot,
   SnapshotFile,
   SnapshotFileMutationResponse,
+  SnapshotArtifactRecord,
+  SnapshotArtifactTree,
+  SnapshotArtifactTypeDefinition,
+  SnapshotArtifactPreview,
+  SnapshotArtifactPreviewRequest,
+  SnapshotArtifactValidationResult,
   CreateSnapshotRequest,
   UpdateSnapshotRequest,
   UpdateSnapshotFileFormatRequest,
   DeleteSnapshotFileResponse,
+  UploadSnapshotArtifactRequest,
+  UpdateSnapshotArtifactRequest,
+  ReplaceSnapshotArtifactContentRequest,
+  DeleteSnapshotArtifactResponse,
   IPSecSessionStatus,
   IPSecEdge,
   IPSecPeerConfiguration,
@@ -739,7 +749,7 @@ export const snapshotAPI = {
     const formData = new FormData()
     formData.append('file', file)
 
-    const response = await apiClient.post<APIResponse<SnapshotFile>>(
+    const response = await apiClient.post<APIResponse<SnapshotFileMutationResponse>>(
       `/snapshots/${name}/files`,
       formData,
       {
@@ -771,6 +781,99 @@ export const snapshotAPI = {
     const encodedFilename = encodeURIComponent(filename)
     const response = await apiClient.delete<APIResponse<DeleteSnapshotFileResponse>>(
       `/snapshots/${name}/files/${encodedFilename}`
+    )
+    return response.data.data
+  },
+
+  async getArtifactTypes(name: string) {
+    const response = await apiClient.get<APIResponse<SnapshotArtifactTypeDefinition[]>>(
+      `/snapshots/${name}/artifact-types`
+    )
+    return response.data.data
+  },
+
+  async getArtifactTree(name: string) {
+    const response = await apiClient.get<APIResponse<SnapshotArtifactTree>>(
+      `/snapshots/${name}/artifact-tree`
+    )
+    return response.data.data
+  },
+
+  async previewArtifactChange(name: string, request: SnapshotArtifactPreviewRequest) {
+    const response = await apiClient.post<APIResponse<SnapshotArtifactPreview>>(
+      `/snapshots/${name}/artifacts/preview-change`,
+      request
+    )
+    return response.data.data
+  },
+
+  async uploadArtifact({ name, artifactType, file, metadata, previewToken }: UploadSnapshotArtifactRequest) {
+    const formData = new FormData()
+    formData.append('artifact_type', artifactType)
+    formData.append('metadata', JSON.stringify(metadata))
+    formData.append('preview_token', previewToken)
+    formData.append('file', file)
+
+    const response = await apiClient.post<APIResponse<SnapshotArtifactRecord>>(
+      `/snapshots/${name}/artifacts`,
+      formData,
+      {
+        headers: {
+          'Content-Type': 'multipart/form-data',
+        },
+      }
+    )
+    return response.data.data
+  },
+
+  async updateArtifact({ name, artifactId, artifactType, filename, metadata, previewToken }: UpdateSnapshotArtifactRequest) {
+    const encodedArtifactId = encodeURIComponent(artifactId)
+    const response = await apiClient.patch<APIResponse<SnapshotArtifactRecord>>(
+      `/snapshots/${name}/artifacts/${encodedArtifactId}`,
+      {
+        artifact_type: artifactType,
+        filename,
+        metadata,
+        preview_token: previewToken,
+      }
+    )
+    return response.data.data
+  },
+
+  async replaceArtifactContent({ name, artifactId, file, previewToken }: ReplaceSnapshotArtifactContentRequest) {
+    const formData = new FormData()
+    formData.append('file', file)
+    formData.append('preview_token', previewToken)
+    const encodedArtifactId = encodeURIComponent(artifactId)
+
+    const response = await apiClient.put<APIResponse<SnapshotArtifactRecord>>(
+      `/snapshots/${name}/artifacts/${encodedArtifactId}/content`,
+      formData,
+      {
+        headers: {
+          'Content-Type': 'multipart/form-data',
+        },
+      }
+    )
+    return response.data.data
+  },
+
+  async deleteArtifact(name: string, artifactId: string, previewToken: string) {
+    const encodedArtifactId = encodeURIComponent(artifactId)
+    const response = await apiClient.delete<APIResponse<DeleteSnapshotArtifactResponse>>(
+      `/snapshots/${name}/artifacts/${encodedArtifactId}`,
+      {
+        data: {
+          preview_token: previewToken,
+        },
+      }
+    )
+    return response.data.data
+  },
+
+  async validateArtifacts(name: string) {
+    const response = await apiClient.post<APIResponse<SnapshotArtifactValidationResult>>(
+      `/snapshots/${name}/artifacts/validate`
     )
     return response.data.data
   },
