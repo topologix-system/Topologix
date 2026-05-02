@@ -156,6 +156,7 @@ See [.env.example](.env.example) for the full template. Key variables:
 | `AUTH_DEFAULT_ADMIN_PASS` | Default admin password | Leave empty for first-time setup, or set via local `.env`. Do not commit real values. |
 | `SECRET_KEY`, `JWT_SECRET_KEY`, `CSRF_SECRET_KEY` | Flask/JWT/CSRF secrets | Generate strong production values. Do not commit real values. |
 | `DATABASE_URL` | Auth database URL | Default Docker value is SQLite at `/app/data/topologix.db`; PostgreSQL/MySQL can be configured. |
+| `SQLALCHEMY_ECHO` | SQL statement logging | Default is `false`. Keep disabled because SQL values can include password hashes and sensitive operational data. |
 | `VITE_API_BASE_URL` | Frontend API base URL | Empty value uses nginx `/api` reverse proxy in the Docker frontend. |
 | `BEHIND_REVERSE_PROXY` | Enables proxy-aware request handling | Must match actual infrastructure to avoid trusting spoofed proxy headers. |
 | `TRUSTED_PROXY_COUNT` | Number of trusted proxy layers | Set according to the real proxy chain. |
@@ -248,6 +249,7 @@ snapshot を選択すると、file list のファイル名横に format dropdown
 
 - `AUTH_ENABLED` と `VITE_AUTH_ENABLED` は必ず一致させてください。
 - 本番運用では `SECRET_KEY`, `JWT_SECRET_KEY`, `CSRF_SECRET_KEY` を明示的に設定してください。
+- `SQLALCHEMY_ECHO` は既定の `false` のままにしてください。SQL 値には password hash などの機密性が高い運用情報が含まれる可能性があります。
 - reverse proxy を使う場合、`BEHIND_REVERSE_PROXY` と `TRUSTED_PROXY_COUNT` を実際の構成に合わせてください。
 
 ## License

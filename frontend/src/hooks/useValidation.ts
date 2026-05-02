@@ -2,8 +2,10 @@
  * React Query hooks for configuration validation data
  * Provides file parse status, init issues, parse warnings, and conversion status
  */
+import { useMemo } from 'react'
 import { useQuery, useMutation } from '@tanstack/react-query'
 import { validationAPI } from '../services/api'
+import { buildParseResultSummary } from '../lib/validation/parseResult'
 
 /**
  * Query key factory for validation-related React Query caches
@@ -57,6 +59,36 @@ export function useParseWarnings(enabled = true) {
     enabled,
     staleTime: 60000,
   })
+}
+
+/**
+ * Aggregate Batfish parse result queries into a compact UI summary.
+ * Uses React Query-backed data only; no effect-driven data fetching.
+ */
+export function useParseResultSummary(enabled = true) {
+  const fileParseStatus = useFileParseStatus(enabled)
+  const initIssues = useInitIssues(enabled)
+  const parseWarnings = useParseWarnings(enabled)
+
+  const summary = useMemo(
+    () =>
+      buildParseResultSummary(
+        fileParseStatus.data ?? [],
+        initIssues.data ?? [],
+        parseWarnings.data ?? []
+      ),
+    [fileParseStatus.data, initIssues.data, parseWarnings.data]
+  )
+
+  return {
+    summary,
+    fileParseStatus,
+    initIssues,
+    parseWarnings,
+    isLoading: fileParseStatus.isLoading || initIssues.isLoading || parseWarnings.isLoading,
+    isError: fileParseStatus.isError || initIssues.isError || parseWarnings.isError,
+    error: fileParseStatus.error || initIssues.error || parseWarnings.error,
+  }
 }
 
 /**

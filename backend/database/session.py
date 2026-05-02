@@ -190,7 +190,7 @@ def init_db(app):
 
     db_manager = DatabaseManager(
         database_url=config.SQLALCHEMY_DATABASE_URI,
-        echo=config.DEBUG
+        echo=config.SQLALCHEMY_ECHO
     )
 
     # Store in app context

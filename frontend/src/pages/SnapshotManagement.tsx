@@ -22,6 +22,7 @@ import {
   Loader2,
   GitCompare,
   Cable,
+  FileText,
 } from 'lucide-react'
 
 import {
@@ -34,11 +35,13 @@ import {
   useUpdateSnapshotFileFormat,
   useDeleteSnapshotFile,
   useActivateSnapshot,
+  useParseResultSummary,
 } from '../hooks'
 import { useSnapshotStore } from '../store'
 import { ConfirmDialog } from '../components/ConfirmDialog'
 import { SnapshotFolderCombobox } from '../components/SnapshotFolderCombobox'
 import { AdvancedArtifactPanel } from '../components/AdvancedArtifactPanel'
+import { ParseResultSummaryCard } from '../components/validation/ParseResultDetails'
 import type { Snapshot, SnapshotFile } from '../types'
 import { extractErrorMessage } from '../types/errors'
 
@@ -120,6 +123,7 @@ export function SnapshotManagement() {
    */
   const currentSnapshotName = useSnapshotStore((state) => state.currentSnapshotName)
   const setCurrentSnapshotName = useSnapshotStore((state) => state.setCurrentSnapshotName)
+  const isSelectedSnapshotActive = !!selectedSnapshot && selectedSnapshot === currentSnapshotName
 
   /**
    * React Query data fetching hooks
@@ -128,6 +132,7 @@ export function SnapshotManagement() {
    */
   const { data: snapshots, isLoading: loadingSnapshots } = useSnapshots()
   const { data: files } = useSnapshotFiles(selectedSnapshot || '', !!selectedSnapshot)
+  const parseResult = useParseResultSummary(isSelectedSnapshotActive)
 
   /**
    * React Query mutation hooks for snapshot operations
@@ -656,6 +661,17 @@ export function SnapshotManagement() {
   }
 
   const currentFolderValue = selectedSnapshotDetails?.folder_name || ''
+  const parseResultSubtitle =
+    selectedSnapshot && fileChangeInProgressSnapshot === selectedSnapshot
+      ? t('snapshots.parseResult.refreshing')
+      : fileReinitializeError
+      ? t('snapshots.parseResult.stale')
+      : parseResult.isError
+      ? t('snapshots.parseResult.loadFailed')
+      : t('snapshots.parseResult.activeHelp')
+  const parseResultSummaryForDisplay = parseResult.isError
+    ? { ...parseResult.summary, severity: 'error' as const }
+    : parseResult.summary
   const isFolderDirty = currentFolderValue !== (folderDraft.trim() || '')
   const isSnapshotActivationPending = activateMutation.isPending
   const isFileChangeInProgress = fileChangeInProgressSnapshot !== null
@@ -901,6 +917,32 @@ export function SnapshotManagement() {
                     {updateMutation.isPending ? t('snapshots.savingFolder') : t('snapshots.saveFolder')}
                   </button>
                 </div>
+              </div>
+
+              <div className="mb-6">
+                {isSelectedSnapshotActive ? (
+                  <>
+                    <ParseResultSummaryCard
+                      title={t('snapshots.parseResult.title')}
+                      subtitle={parseResultSubtitle}
+                      summary={parseResultSummaryForDisplay}
+                      isLoading={parseResult.isLoading || fileChangeInProgressSnapshot === selectedSnapshot}
+                      compact
+                    />
+                    {parseResult.isError && (
+                      <p className="mt-2 rounded-lg border border-yellow-200 bg-yellow-50 px-4 py-3 text-sm font-medium text-yellow-800" role="alert">
+                        {t('snapshots.parseResult.loadFailed')}
+                      </p>
+                    )}
+                  </>
+                ) : (
+                  <div className="rounded-lg border border-gray-200 bg-white p-4 text-sm text-gray-700">
+                    <div className="flex items-center gap-2">
+                      <FileText className="h-5 w-5 text-gray-500" aria-hidden="true" />
+                      <span className="font-medium">{t('snapshots.parseResult.inactive')}</span>
+                    </div>
+                  </div>
+                )}
               </div>
 
               {/* Upload area */}

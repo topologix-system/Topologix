@@ -9,7 +9,7 @@
  * - Each section shows data count badge and JSON-formatted results
  * - Used for deep dive analysis and debugging network configurations
  */
-import { useState } from 'react'
+import { useState, type KeyboardEvent } from 'react'
 import { useTranslation } from 'react-i18next'
 import {
   useVRRPProperties,
@@ -84,6 +84,7 @@ import {
   Search,
 } from 'lucide-react'
 import { BatfishFeatureTools } from './BatfishFeatureTools'
+import { IPSearchPanel } from './IPSearchPanel'
 
 interface SectionProps {
   title: string
@@ -849,12 +850,48 @@ export function NetworkAnalysisPanel() {
     { id: 'acl' as const, label: t('analysis.tabs.acl'), icon: Shield },
   ]
 
+  const handleTabListKeyDown = (event: KeyboardEvent<HTMLDivElement>) => {
+    const currentIndex = tabs.findIndex((tab) => tab.id === activeTab)
+    let nextIndex = currentIndex
+
+    switch (event.key) {
+      case 'ArrowRight':
+      case 'ArrowDown':
+        nextIndex = (currentIndex + 1) % tabs.length
+        break
+      case 'ArrowLeft':
+      case 'ArrowUp':
+        nextIndex = (currentIndex - 1 + tabs.length) % tabs.length
+        break
+      case 'Home':
+        nextIndex = 0
+        break
+      case 'End':
+        nextIndex = tabs.length - 1
+        break
+      default:
+        return
+    }
+
+    event.preventDefault()
+    const nextTab = tabs[nextIndex]
+    setActiveTab(nextTab.id)
+    window.requestAnimationFrame(() => {
+      document.getElementById(`analysis-tab-${nextTab.id}`)?.focus()
+    })
+  }
+
   return (
     <div className="space-y-4" role="region" aria-label={t('analysis.title')}>
       <h2 className="text-lg font-semibold text-gray-900">{t('analysis.title')}</h2>
 
       {/* Tab Navigation */}
-      <div className="flex space-x-1 bg-gray-100 p-1 rounded-lg" role="tablist" aria-label={t('analysis.categoriesLabel')}>
+      <div
+        className="flex space-x-1 bg-gray-100 p-1 rounded-lg"
+        role="tablist"
+        aria-label={t('analysis.categoriesLabel')}
+        onKeyDown={handleTabListKeyDown}
+      >
         {tabs.map((tab) => {
           const Icon = tab.icon
           return (
@@ -925,6 +962,12 @@ export function NetworkAnalysisPanel() {
 
         {activeTab === 'network' && (
           <>
+            <IPSearchPanel
+              ipOwners={ipOwners.data}
+              interfaces={interfaces.data}
+              isLoading={ipOwners.isLoading || interfaces.isLoading}
+              error={ipOwners.error || interfaces.error}
+            />
             <Section
               title={t('analysis.sections.nodes')}
               icon={<Server className="w-5 h-5 text-blue-600" />}

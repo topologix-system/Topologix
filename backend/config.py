@@ -206,6 +206,7 @@ class Config:
         'DATABASE_URL',
         f'sqlite:///{BASE_DIR}/topologix.db'
     )
+    SQLALCHEMY_ECHO: bool = os.getenv('SQLALCHEMY_ECHO', 'false').lower() == 'true'
     SQLALCHEMY_TRACK_MODIFICATIONS: bool = False
 
     # Redis (for caching and session storage in production)

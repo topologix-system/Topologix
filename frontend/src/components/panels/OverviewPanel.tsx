@@ -9,6 +9,8 @@
 import { useTranslation } from 'react-i18next'
 import { useAllNetworkData, useUnusedStructures, useUndefinedReferences, useForwardingLoops } from '../../hooks'
 import { Server, Link, GitBranch, AlertTriangle } from 'lucide-react'
+import { ParseResultSummaryCard } from '../validation/ParseResultDetails'
+import { buildFileParseStatusView, buildParseResultSummary } from '../../lib/validation/parseResult'
 
 export function OverviewPanel() {
   const { t } = useTranslation()
@@ -44,6 +46,18 @@ export function OverviewPanel() {
     (unusedStructures?.length || 0) +
     (undefinedRefs?.length || 0) +
     (forwardingLoops?.length || 0)
+  const parseResultSummary = buildParseResultSummary(
+    data.file_parse_status,
+    data.init_issues,
+    data.parse_warnings
+  )
+  const abnormalParseFiles = buildFileParseStatusView(
+    data.file_parse_status,
+    data.init_issues,
+    data.parse_warnings
+  )
+    .filter((file) => file.statusBucket !== 'passed' || file.relatedIssueCount > 0 || file.relatedWarningCount > 0)
+    .slice(0, 5)
 
   /**
    * Statistics card configuration for overview dashboard
@@ -166,25 +180,35 @@ export function OverviewPanel() {
         </div>
       )}
 
-      {/* File Parse Status */}
-      <div className="bg-gray-50 rounded-lg p-4">
-        <h3 className="font-medium text-gray-900 mb-2">{t('overview.configFiles.title')}</h3>
-        <div className="space-y-2">
-          {data.file_parse_status.map((file, index) => (
-            <div key={index} className="flex items-center justify-between text-sm">
-              <span className="text-gray-700 truncate flex-1">{file.file_name}</span>
-              <span
-                className={`px-2 py-1 rounded text-xs font-medium ${
-                  file.status === 'PASSED'
-                    ? 'bg-green-100 text-green-800'
-                    : 'bg-red-100 text-red-800'
-                }`}
-              >
-                {file.status === 'PASSED' ? t('overview.configFiles.status.passed') : t('overview.configFiles.status.failed')}
-              </span>
+      {/* Configuration parsing summary */}
+      <div className="space-y-3">
+        <ParseResultSummaryCard
+          title={t('overview.configFiles.title')}
+          subtitle={t('overview.configFiles.summaryHelp')}
+          summary={parseResultSummary}
+          compact
+        />
+        {abnormalParseFiles.length > 0 && (
+          <div className="rounded-lg bg-gray-50 p-4">
+            <h3 className="font-medium text-gray-900 mb-2">{t('overview.configFiles.abnormalTitle')}</h3>
+            <div className="space-y-2">
+              {abnormalParseFiles.map((file) => (
+                <div key={file.file_name} className="flex items-center justify-between gap-3 text-sm">
+                  <span className="min-w-0 flex-1 truncate text-gray-700">{file.file_name}</span>
+                  <span className="rounded bg-white px-2 py-1 text-xs font-medium text-gray-700">
+                    {file.status || t('common.unknown')}
+                  </span>
+                  <span className="whitespace-nowrap text-xs text-gray-600">
+                    {t('overview.configFiles.relatedCounts', {
+                      warnings: file.relatedWarningCount,
+                      issues: file.relatedIssueCount,
+                    })}
+                  </span>
+                </div>
+              ))}
             </div>
-          ))}
-        </div>
+          </div>
+        )}
       </div>
     </div>
   )

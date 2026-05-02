@@ -76,6 +76,8 @@ services:
       # Database configuration (only used when AUTH_ENABLED=true)
       # SQLite (default - stored in Docker volume for persistence)
       - DATABASE_URL=${DATABASE_URL:-sqlite:////app/data/topologix.db}
+      # SQL statement logging is disabled by default because SQL values can contain sensitive hashes.
+      - SQLALCHEMY_ECHO=${SQLALCHEMY_ECHO:-false}
 
       # Snapshot storage path (must match the snapshots-data mount below)
       - SNAPSHOTS_DIR=${SNAPSHOTS_DIR:-/app/snapshots}

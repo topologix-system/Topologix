@@ -40,11 +40,19 @@ class BatfishService:
     """Service for interacting with Batfish network analysis"""
 
     def __init__(self):
-        self.session = Session(host=config.BATFISH_HOST, port=config.BATFISH_PORT)
+        self._session: Session | None = None
         self.network_name = config.BATFISH_NETWORK
         self.current_snapshot_name: str | None = None
         self.reference_snapshot_name: str | None = None
         self._initialized = False
+
+    @property
+    def session(self) -> Session:
+        """Create the pybatfish session on first use so backend startup does not depend on Batfish readiness."""
+        if self._session is None:
+            logger.info("Creating Batfish session: %s:%s", config.BATFISH_HOST, config.BATFISH_PORT)
+            self._session = Session(host=config.BATFISH_HOST, port=config.BATFISH_PORT)
+        return self._session
 
     def set_network_context(self, network_name: str) -> None:
         """Switch Batfish network namespace for the current request context."""
@@ -787,7 +795,6 @@ class BatfishService:
             source_lines_raw = row.get("Source_Lines", [])
             source_lines = []
             if source_lines_raw:
-                logger.debug(f"source_lines_raw type: {type(source_lines_raw)}, value: {source_lines_raw}")
                 # Convert FileLines object to string list
                 if hasattr(source_lines_raw, '__class__') and 'FileLines' in str(source_lines_raw.__class__):
                     # Convert FileLines type to string format

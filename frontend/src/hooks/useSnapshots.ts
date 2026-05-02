@@ -4,6 +4,7 @@
  */
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { snapshotAPI } from '../services/api'
+import { validationKeys } from './useValidation'
 import type {
   CreateSnapshotRequest,
   ReplaceSnapshotArtifactContentRequest,
@@ -287,7 +288,11 @@ export function useActivateSnapshot() {
 
   return useMutation({
     mutationFn: (name: string) => snapshotAPI.activate(name),
-    onSuccess: () => {
+    onSuccess: (activationResult) => {
+      queryClient.setQueryData(validationKeys.fileParseStatus(), activationResult?.file_parse_status ?? [])
+      queryClient.setQueryData(validationKeys.initIssues(), activationResult?.init_issues ?? [])
+      queryClient.setQueryData(validationKeys.parseWarnings(), activationResult?.parse_warnings ?? [])
+
       // Refetch ALL Batfish-related queries immediately
       // refetchQueries() provides guaranteed immediate refetch (vs invalidateQueries)
       // This ensures data updates immediately when switching snapshots

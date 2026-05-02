@@ -9,7 +9,7 @@
  * - Multipath consistency: ECMP path validation
  * - Color-coded sections: red (error), yellow (warning), gray (info)
  */
-import { useState } from 'react'
+import { useMemo, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import {
   AlertTriangle,
@@ -34,6 +34,8 @@ import {
   useLoopbackMultipathConsistency,
   useSubnetMultipathConsistency,
 } from '../../hooks'
+import { ParseResultDetails } from '../validation/ParseResultDetails'
+import { buildParseResultSummary } from '../../lib/validation/parseResult'
 
 interface SectionProps {
   title: string
@@ -235,10 +237,24 @@ export function ValidationPanel() {
   const forwardingLoops = useForwardingLoops()
   const multipathConsistency = useMultipathConsistency()
   const loopbackMultipathConsistency = useLoopbackMultipathConsistency()
+  const parseResultError =
+    fileParseStatus.error || initIssues.error || parseWarnings.error
+  const hasParseResultQueryError =
+    fileParseStatus.isError || initIssues.isError || parseWarnings.isError
+  const parseResultSummary = useMemo(
+    () =>
+      buildParseResultSummary(
+        fileParseStatus.data ?? [],
+        initIssues.data ?? [],
+        parseWarnings.data ?? []
+      ),
+    [fileParseStatus.data, initIssues.data, parseWarnings.data]
+  )
 
   // Calculate overall validation status
   const hasErrors =
-    (initIssues.data && Array.isArray(initIssues.data) && initIssues.data.length > 0) ||
+    hasParseResultQueryError ||
+    parseResultSummary.severity === 'error' ||
     (undefinedRefs.data && Array.isArray(undefinedRefs.data) && undefinedRefs.data.length > 0) ||
     (forwardingLoops.data && Array.isArray(forwardingLoops.data) && forwardingLoops.data.length > 0) ||
     (multipathConsistency.data && Array.isArray(multipathConsistency.data) && multipathConsistency.data.length > 0) ||
@@ -249,6 +265,7 @@ export function ValidationPanel() {
    * Includes: parse warnings, unused structures
    */
   const hasWarnings =
+    parseResultSummary.severity === 'warning' ||
     (parseWarnings.data && Array.isArray(parseWarnings.data) && parseWarnings.data.length > 0) ||
     (unusedStructures.data && Array.isArray(unusedStructures.data) && unusedStructures.data.length > 0)
 
@@ -299,16 +316,16 @@ export function ValidationPanel() {
 
       {/* Validation Sections */}
       <div className="space-y-3">
-        {/* Critical Issues */}
-        <Section
-          title={t('validation.sections.initIssues')}
-          icon={<XCircle className="w-5 h-5 text-red-600" />}
-          isLoading={initIssues.isLoading}
-          data={initIssues.data}
-          defaultOpen={hasErrors}
-          severity="error"
+        <ParseResultDetails
+          fileStatuses={fileParseStatus.data}
+          initIssues={initIssues.data}
+          parseWarnings={parseWarnings.data}
+          isLoading={fileParseStatus.isLoading || initIssues.isLoading || parseWarnings.isLoading}
+          isError={hasParseResultQueryError}
+          errorMessage={parseResultError ? String(parseResultError) : undefined}
         />
 
+        {/* Critical Issues */}
         <Section
           title={t('validation.sections.undefinedReferences')}
           icon={<AlertCircle className="w-5 h-5 text-red-600" />}
@@ -343,30 +360,12 @@ export function ValidationPanel() {
 
         <SubnetMultipathSection />
 
-        {/* Warnings */}
-        <Section
-          title={t('validation.sections.parseWarnings')}
-          icon={<AlertTriangle className="w-5 h-5 text-yellow-600" />}
-          isLoading={parseWarnings.isLoading}
-          data={parseWarnings.data}
-          defaultOpen={!hasErrors && hasWarnings}
-          severity="warning"
-        />
-
         <Section
           title={t('validation.sections.unusedStructures')}
           icon={<AlertTriangle className="w-5 h-5 text-yellow-600" />}
           isLoading={unusedStructures.isLoading}
           data={unusedStructures.data}
           severity="warning"
-        />
-
-        {/* Informational */}
-        <Section
-          title={t('validation.sections.fileParseStatus')}
-          icon={<FileText className="w-5 h-5 text-blue-600" />}
-          isLoading={fileParseStatus.isLoading}
-          data={fileParseStatus.data}
         />
 
         <Section

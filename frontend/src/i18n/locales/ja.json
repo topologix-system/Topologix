@@ -77,10 +77,57 @@
     },
     "configFiles": {
       "title": "設定ファイル",
+      "summaryHelp": "Batfishが有効なスナップショット入力を正常に解析できたかを表示します。",
+      "abnormalTitle": "確認が必要なファイル",
+      "relatedCounts": "警告 {{warnings}} 件 / 問題 {{issues}} 件",
       "status": {
         "passed": "成功",
         "failed": "失敗"
       }
+    }
+  },
+  "ipSearch": {
+    "title": "IP検索",
+    "description": "検索したIPアドレスの完全一致(/32)の所有者と、そのIPを含むインターフェースネットワークを表示します。",
+    "inputLabel": "IPアドレス",
+    "placeholder": "192.0.2.10 または 192.0.2.10/32",
+    "help": "ホストアドレス検索のみ対応します。曖昧な結果を避けるため、/32以外のCIDRは受け付けません。",
+    "search": "検索",
+    "clear": "IP検索をクリア",
+    "includeInactive": "非アクティブな所有者とインターフェースも含める",
+    "empty": "IPv4ホストアドレスを入力すると、IP所有者と一致するインターフェースネットワークを検索できます。",
+    "summary": "ホスト所有者 {{hostCount}} 件 / インターフェースネットワーク {{networkCount}} 件",
+    "dataUnavailable": "IP所有者またはインターフェースデータを利用できません。解析済みスナップショットを有効化してから再実行してください。",
+    "errorBlocksResults": "誤って「結果なし」と表示しないよう、参照元データを利用できない間は検索結果を非表示にします。",
+    "hostOwners": "ホスト所有者",
+    "interfaceNetworks": "インターフェースネットワーク",
+    "noHostOwners": "完全一致するホスト所有者は見つかりませんでした。",
+    "noInterfaceNetworks": "このIPを含むインターフェースネットワークは見つかりませんでした。",
+    "errors": {
+      "invalidIp": "有効なIPv4アドレスを入力してください。",
+      "nonHostCidr": "ホストアドレスまたは/32を入力してください。この検索ではネットワークCIDR入力は対応していません。"
+    },
+    "columns": {
+      "ip": "IP",
+      "mask": "マスク",
+      "node": "ノード",
+      "interface": "インターフェース",
+      "vrf": "VRF",
+      "prefix": "プレフィックス",
+      "primaryAddress": "プライマリアドレス",
+      "primaryNetwork": "プライマリネットワーク",
+      "source": "情報源",
+      "status": "状態"
+    },
+    "status": {
+      "active": "アクティブ",
+      "inactive": "非アクティブ",
+      "adminUp": "管理Up",
+      "adminDown": "管理Down"
+    },
+    "source": {
+      "primaryNetwork": "プライマリネットワーク",
+      "allPrefixes": "全プレフィックス"
     }
   },
   "nodeDetails": {
@@ -464,7 +511,59 @@
         "results": "サブネットマルチパス整合性の結果"
       }
     },
-    "itemCount": "{{count}} 項目"
+    "itemCount": "{{count}} 項目",
+    "parseResult": {
+      "title": "Batfish解析結果",
+      "subtitle": "トポロジーや検証結果を信頼する前に、Batfishが有効なスナップショット入力をどう解析したかを確認します。",
+      "loading": "解析結果を更新中...",
+      "fileStatusTitle": "ファイル解析状態",
+      "fileStatusHelp": "失敗または部分解析のファイルを確認し、警告や初期化問題と突き合わせます。",
+      "initIssuesTitle": "初期化問題",
+      "parseWarningsTitle": "パース警告",
+      "loadFailed": "解析結果データの読み込みに失敗しました。サマリーは不完全な可能性があります。",
+      "searchFiles": "ファイル、フォーマット、ノードで検索...",
+      "searchIssues": "問題を検索...",
+      "searchWarnings": "警告を検索...",
+      "statusFilter": "解析状態で絞り込み",
+      "rawJson": "解析結果の生JSON",
+      "noRows": "現在のフィルターに一致する行はありません",
+      "severity": {
+        "success": "すべて解析済み",
+        "warning": "警告あり",
+        "error": "エラーあり"
+      },
+      "statuses": {
+        "all": "すべての状態",
+        "passed": "成功",
+        "partial": "部分解析",
+        "failed": "失敗",
+        "unknown": "不明"
+      },
+      "metrics": {
+        "totalFiles": "総ファイル数",
+        "passed": "成功",
+        "partial": "部分解析",
+        "failed": "失敗",
+        "initIssues": "初期化問題",
+        "parseWarnings": "パース警告",
+        "warningFiles": "警告ファイル",
+        "detectedFormats": "検出フォーマット"
+      },
+      "columns": {
+        "file": "ファイル",
+        "status": "状態",
+        "format": "検出フォーマット",
+        "nodes": "ノード",
+        "relatedWarnings": "関連警告",
+        "relatedIssues": "関連問題",
+        "severity": "重大度",
+        "type": "種別",
+        "details": "詳細",
+        "line": "行",
+        "text": "本文",
+        "comment": "コメント"
+      }
+    }
   },
   "analysis": {
     "title": "ネットワーク分析",
@@ -1176,6 +1275,14 @@
     },
     "fileChangeBusy": "別のファイル変更を処理中です。完了してから追加でアップロードしてください。",
     "reinitializeFailedAfterFileChange": "ファイル変更後の snapshot 再読み込みに失敗しました。解析結果が古い可能性があります。",
+    "parseResult": {
+      "title": "有効スナップショットの解析状態",
+      "activeHelp": "このサマリーは現在有効なスナップショットの結果です。",
+      "inactive": "このスナップショットが有効になると解析状態を表示します。",
+      "refreshing": "ファイル変更を反映するため再読み込み中です。結果は更新中です。",
+      "stale": "ファイル変更後の再読み込みに失敗しました。結果が古い可能性があります。",
+      "loadFailed": "解析結果詳細の読み込みに失敗しました。"
+    },
     "noFiles": "まだファイルがアップロードされていません",
     "uploadToStart": "開始するには設定ファイルまたはログファイルをアップロードしてください",
     "selectSnapshot": "ファイルを管理するにはスナップショットを選択",

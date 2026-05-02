@@ -13,6 +13,12 @@ services:
     networks:
       - topologix-network
     restart: unless-stopped
+    healthcheck:
+      test: ["CMD-SHELL", "timeout 5 bash -c '</dev/tcp/localhost/9996' || exit 1"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 120s
 
   # Backend API Service (Python + Flask)
   backend:
@@ -46,6 +52,7 @@ services:
       - ACCOUNT_LOCKOUT_THRESHOLD=${ACCOUNT_LOCKOUT_THRESHOLD:-5}
       - LOGIN_LOCKOUT_DURATION_MINUTES=${LOGIN_LOCKOUT_DURATION_MINUTES:-30}
       - DATABASE_URL=${DATABASE_URL:-sqlite:////app/data/topologix.db}
+      - SQLALCHEMY_ECHO=${SQLALCHEMY_ECHO:-false}
       - EMAIL_PROVIDER=${EMAIL_PROVIDER:-console}
       - EMAIL_FROM=${EMAIL_FROM:-noreply@topologix.local}
       - EMAIL_FROM_NAME=${EMAIL_FROM_NAME:-Topologix}
@@ -67,7 +74,8 @@ services:
     networks:
       - topologix-network
     depends_on:
-      - batfish
+      batfish:
+        condition: service_healthy
     restart: unless-stopped
     healthcheck:
       test: ["CMD", "python3", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:5000/api/health')"]
@@ -91,7 +99,8 @@ services:
     networks:
       - topologix-network
     depends_on:
-      - backend
+      backend:
+        condition: service_healthy
     restart: unless-stopped
     stdin_open: true
     tty: true

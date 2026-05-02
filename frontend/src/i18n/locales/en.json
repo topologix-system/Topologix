@@ -77,10 +77,57 @@
     },
     "configFiles": {
       "title": "Configuration Files",
+      "summaryHelp": "Shows whether Batfish parsed the active snapshot input cleanly.",
+      "abnormalTitle": "Files needing attention",
+      "relatedCounts": "{{warnings}} warnings / {{issues}} issues",
       "status": {
         "passed": "PASSED",
         "failed": "FAILED"
       }
+    }
+  },
+  "ipSearch": {
+    "title": "IP Search",
+    "description": "Find exact /32 IP owners and interface networks containing the searched IP address.",
+    "inputLabel": "IP address",
+    "placeholder": "192.0.2.10 or 192.0.2.10/32",
+    "help": "Host address search only. CIDR other than /32 is rejected to avoid ambiguous results.",
+    "search": "Search",
+    "clear": "Clear IP search",
+    "includeInactive": "Include inactive owners and interfaces",
+    "empty": "Enter an IPv4 host address to search IP ownership and matching interface networks.",
+    "summary": "{{hostCount}} host owners / {{networkCount}} interface networks",
+    "dataUnavailable": "IP owner or interface data is not available yet. Activate a parsed snapshot and try again.",
+    "errorBlocksResults": "Search results are hidden while source data is unavailable to avoid reporting false negatives.",
+    "hostOwners": "Host owners",
+    "interfaceNetworks": "Interface networks",
+    "noHostOwners": "No exact host owners found.",
+    "noInterfaceNetworks": "No containing interface networks found.",
+    "errors": {
+      "invalidIp": "Enter a valid IPv4 address.",
+      "nonHostCidr": "Enter a host address or /32. Network CIDR input is not supported here."
+    },
+    "columns": {
+      "ip": "IP",
+      "mask": "Mask",
+      "node": "Node",
+      "interface": "Interface",
+      "vrf": "VRF",
+      "prefix": "Prefix",
+      "primaryAddress": "Primary address",
+      "primaryNetwork": "Primary network",
+      "source": "Source",
+      "status": "Status"
+    },
+    "status": {
+      "active": "Active",
+      "inactive": "Inactive",
+      "adminUp": "Admin up",
+      "adminDown": "Admin down"
+    },
+    "source": {
+      "primaryNetwork": "Primary network",
+      "allPrefixes": "All prefixes"
     }
   },
   "nodeDetails": {
@@ -464,7 +511,59 @@
         "results": "Subnet multipath consistency results"
       }
     },
-    "itemCount": "{{count}} items"
+    "itemCount": "{{count}} items",
+    "parseResult": {
+      "title": "Batfish Parse Result",
+      "subtitle": "Review how Batfish parsed the active snapshot input before relying on topology and validation results.",
+      "loading": "Refreshing parse result...",
+      "fileStatusTitle": "File parse status",
+      "fileStatusHelp": "Use this table to find files that failed or partially parsed, then correlate them with warnings and initialization issues.",
+      "initIssuesTitle": "Initialization issues",
+      "parseWarningsTitle": "Parse warnings",
+      "loadFailed": "Failed to load parse result data. The summary may be incomplete.",
+      "searchFiles": "Search files, formats, or nodes...",
+      "searchIssues": "Search issues...",
+      "searchWarnings": "Search warnings...",
+      "statusFilter": "Filter by parse status",
+      "rawJson": "Raw parse result JSON",
+      "noRows": "No rows match the current filters",
+      "severity": {
+        "success": "All parsed",
+        "warning": "Warnings",
+        "error": "Errors"
+      },
+      "statuses": {
+        "all": "All statuses",
+        "passed": "Passed",
+        "partial": "Partial",
+        "failed": "Failed",
+        "unknown": "Unknown"
+      },
+      "metrics": {
+        "totalFiles": "Total files",
+        "passed": "Passed",
+        "partial": "Partial",
+        "failed": "Failed",
+        "initIssues": "Init issues",
+        "parseWarnings": "Parse warnings",
+        "warningFiles": "Warning files",
+        "detectedFormats": "Detected formats"
+      },
+      "columns": {
+        "file": "File",
+        "status": "Status",
+        "format": "Detected format",
+        "nodes": "Nodes",
+        "relatedWarnings": "Related warnings",
+        "relatedIssues": "Related issues",
+        "severity": "Severity",
+        "type": "Type",
+        "details": "Details",
+        "line": "Line",
+        "text": "Text",
+        "comment": "Comment"
+      }
+    }
   },
   "analysis": {
     "title": "Network Analysis",
@@ -1176,6 +1275,14 @@
     },
     "fileChangeBusy": "Another file change is already in progress. Wait for it to finish before uploading more files.",
     "reinitializeFailedAfterFileChange": "Failed to reload the snapshot after the file change. Analysis results may be stale.",
+    "parseResult": {
+      "title": "Active snapshot parse health",
+      "activeHelp": "This summary reflects the current active snapshot.",
+      "inactive": "Parse health is shown after this snapshot becomes active.",
+      "refreshing": "A file change is being reloaded. Results are updating.",
+      "stale": "The snapshot reload failed after a file change. Results may be stale.",
+      "loadFailed": "Failed to load parse result details."
+    },
     "noFiles": "No files uploaded yet",
     "uploadToStart": "Upload configuration or log files to get started",
     "selectSnapshot": "Select a snapshot to manage files",
