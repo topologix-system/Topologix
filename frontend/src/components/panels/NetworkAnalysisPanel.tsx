@@ -85,13 +85,46 @@ import {
 } from 'lucide-react'
 import { BatfishFeatureTools } from './BatfishFeatureTools'
 import { IPSearchPanel } from './IPSearchPanel'
+import { getStructuredApiError, type StructuredApiError } from '../../utils/apiError'
 
 interface SectionProps {
   title: string
   icon: React.ReactNode
   isLoading: boolean
   data: any
+  error?: unknown
   defaultOpen?: boolean
+}
+
+function StructuredErrorNotice({ error }: { error: StructuredApiError }) {
+  const { t } = useTranslation()
+
+  return (
+    <div className="mt-3 rounded-md border border-red-200 bg-red-50 p-3 text-sm text-red-800">
+      <p className="font-medium">{error.message}</p>
+      {error.code && (
+        <p className="mt-2 text-xs">
+          <span className="font-semibold">{t('batfishTools.resultStatus.errorCode')}:</span> {error.code}
+        </p>
+      )}
+      {error.hints && error.hints.length > 0 && (
+        <div className="mt-2">
+          <p className="text-xs font-semibold">{t('batfishTools.resultStatus.hints')}</p>
+          <ul className="mt-1 list-disc space-y-1 pl-5 text-xs">
+            {error.hints.map((hint) => <li key={hint}>{hint}</li>)}
+          </ul>
+        </div>
+      )}
+      {error.details !== undefined && (
+        <details className="mt-2 text-xs">
+          <summary className="cursor-pointer font-semibold">{t('batfishTools.resultStatus.details')}</summary>
+          <pre className="mt-2 overflow-x-auto rounded bg-white/70 p-2">
+            {JSON.stringify(error.details, null, 2)}
+          </pre>
+        </details>
+      )}
+    </div>
+  )
 }
 
 /**
@@ -102,10 +135,11 @@ interface SectionProps {
  * - Loading/empty states: handles loading spinner and "no data" message
  * - Accessibility: ARIA expanded/controls attributes for screen readers
  */
-function Section({ title, icon, isLoading, data, defaultOpen = false }: SectionProps) {
+function Section({ title, icon, isLoading, data, error, defaultOpen = false }: SectionProps) {
   const { t } = useTranslation()
   const [isOpen, setIsOpen] = useState(defaultOpen)
   const sectionId = `section-${title.toLowerCase().replace(/\s+/g, '-')}`
+  const structuredError = error ? getStructuredApiError(error) : null
 
   const unavailable = Array.isArray(data) && data.length === 1 && data[0]?.available === false
   const hasData = data && (unavailable || (Array.isArray(data) ? data.length > 0 : Object.keys(data).length > 0))
@@ -150,6 +184,8 @@ function Section({ title, icon, isLoading, data, defaultOpen = false }: SectionP
               <span className="sr-only">{t('analysis.loading', { section: title })}</span>
               {t('common.loading')}
             </p>
+          ) : structuredError ? (
+            <StructuredErrorNotice error={structuredError} />
           ) : unavailable ? (
             <div className="py-2 text-sm text-gray-700">
               <p>{data[0].reason}</p>
@@ -177,11 +213,12 @@ function Section({ title, icon, isLoading, data, defaultOpen = false }: SectionP
  * - Filter by node name (partial match)
  * - Filter by action (PERMIT/DENY)
  */
-function RoutePoliciesSection({ data, isLoading }: { data: any; isLoading: boolean }) {
+function RoutePoliciesSection({ data, isLoading, error }: { data: any; isLoading: boolean; error?: unknown }) {
   const { t } = useTranslation()
   const [isOpen, setIsOpen] = useState(false)
   const [nodeFilter, setNodeFilter] = useState('')
   const [actionFilter, setActionFilter] = useState<'' | 'PERMIT' | 'DENY'>('')
+  const structuredError = error ? getStructuredApiError(error) : null
 
   const filteredData = data?.filter((item: any) => {
     const matchesNode = !nodeFilter || item.node?.toLowerCase().includes(nodeFilter.toLowerCase())
@@ -240,6 +277,8 @@ function RoutePoliciesSection({ data, isLoading }: { data: any; isLoading: boole
 
           {isLoading ? (
             <p className="text-sm text-gray-700 py-2">{t('common.loading')}</p>
+          ) : structuredError ? (
+            <StructuredErrorNotice error={structuredError} />
           ) : !hasData ? (
             <p className="text-sm text-gray-700 py-2">{t('common.noData')}</p>
           ) : (
@@ -314,7 +353,7 @@ function FilterLineReachabilitySection() {
               ) : t('analysis.acl.execute')}
             </button>
           </div>
-          {mutation.isError && <p className="text-sm text-red-600 mb-2">{String(mutation.error)}</p>}
+          {mutation.isError && <StructuredErrorNotice error={getStructuredApiError(mutation.error)} />}
           {mutation.isSuccess && (
             hasData ? (
               <div className="max-h-96 overflow-y-auto">
@@ -419,7 +458,7 @@ function TestFiltersSection() {
               ) : t('analysis.acl.execute')}
             </button>
           </div>
-          {mutation.isError && <p className="text-sm text-red-600 mb-2">{String(mutation.error)}</p>}
+          {mutation.isError && <StructuredErrorNotice error={getStructuredApiError(mutation.error)} />}
           {mutation.isSuccess && (
             hasData ? (
               <div className="max-h-96 overflow-y-auto">
@@ -512,7 +551,7 @@ function FindMatchingFilterLinesSection() {
               </button>
             </div>
           </div>
-          {mutation.isError && <p className="text-sm text-red-600 mb-2">{String(mutation.error)}</p>}
+          {mutation.isError && <StructuredErrorNotice error={getStructuredApiError(mutation.error)} />}
           {mutation.isSuccess && (
             hasData ? (
               <div className="max-h-96 overflow-y-auto">
@@ -596,7 +635,7 @@ function SearchFiltersSection() {
               ) : t('analysis.acl.execute')}
             </button>
           </div>
-          {mutation.isError && <p className="text-sm text-red-600 mb-2">{String(mutation.error)}</p>}
+          {mutation.isError && <StructuredErrorNotice error={getStructuredApiError(mutation.error)} />}
           {mutation.isSuccess && (
             hasData ? (
               <div className="max-h-96 overflow-y-auto">
@@ -675,7 +714,7 @@ function SearchRoutePoliciesInteractiveSection() {
               ) : t('analysis.acl.execute')}
             </button>
           </div>
-          {mutation.isError && <p className="text-sm text-red-600 mb-2">{String(mutation.error)}</p>}
+          {mutation.isError && <StructuredErrorNotice error={getStructuredApiError(mutation.error)} />}
           {mutation.isSuccess && (
             hasData ? (
               <div className="max-h-96 overflow-y-auto">
@@ -757,7 +796,7 @@ function ReduceReachabilitySection() {
               ) : t('analysis.acl.execute')}
             </button>
           </div>
-          {mutation.isError && <p className="text-sm text-red-600 mb-2">{String(mutation.error)}</p>}
+          {mutation.isError && <StructuredErrorNotice error={getStructuredApiError(mutation.error)} />}
           {mutation.isSuccess && (
             hasData ? (
               <div className="max-h-96 overflow-y-auto">
@@ -950,6 +989,7 @@ export function NetworkAnalysisPanel() {
               icon={<Shield className="w-5 h-5 text-yellow-600" />}
               isLoading={duplicateRouterIds.isLoading}
               data={duplicateRouterIds.data}
+              error={duplicateRouterIds.error}
             />
             <Section
               title={t('analysis.sections.switchingProperties')}
@@ -1021,6 +1061,7 @@ export function NetworkAnalysisPanel() {
               icon={<GitBranch className="w-5 h-5 text-purple-600" />}
               isLoading={bgpEdges.isLoading}
               data={bgpEdges.data}
+              error={bgpEdges.error}
               defaultOpen={true}
             />
             <Section
@@ -1028,30 +1069,35 @@ export function NetworkAnalysisPanel() {
               icon={<Server className="w-5 h-5 text-purple-500" />}
               isLoading={bgpProcessConfig.isLoading}
               data={bgpProcessConfig.data}
+              error={bgpProcessConfig.error}
             />
             <Section
               title={t('analysis.sections.bgpPeerConfiguration')}
               icon={<Network className="w-5 h-5 text-purple-400" />}
               isLoading={bgpPeerConfig.isLoading}
               data={bgpPeerConfig.data}
+              error={bgpPeerConfig.error}
             />
             <Section
               title={t('analysis.sections.bgpSessionStatus')}
               icon={<Activity className="w-5 h-5 text-purple-600" />}
               isLoading={bgpSessionStatus.isLoading}
               data={bgpSessionStatus.data}
+              error={bgpSessionStatus.error}
             />
             <Section
               title={t('analysis.sections.bgpSessionCompatibility')}
               icon={<CheckCircle className="w-5 h-5 text-purple-500" />}
               isLoading={bgpSessionCompat.isLoading}
               data={bgpSessionCompat.data}
+              error={bgpSessionCompat.error}
             />
             <Section
               title={t('analysis.sections.bgpRib')}
               icon={<Info className="w-5 h-5 text-purple-400" />}
               isLoading={bgpRib.isLoading}
               data={bgpRib.data}
+              error={bgpRib.error}
             />
             <Section
               title={t('analysis.sections.ospfEdges')}
@@ -1230,6 +1276,7 @@ export function NetworkAnalysisPanel() {
             <RoutePoliciesSection
               data={routePolicies.data}
               isLoading={routePolicies.isLoading}
+              error={routePolicies.error}
             />
             <SearchRoutePoliciesInteractiveSection />
             <ReduceReachabilitySection />

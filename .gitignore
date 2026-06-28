@@ -11,6 +11,7 @@ backend/.env
 .claude/*
 ai/*
 .codex
+.agent-workbench/
 codex-docs/*
 
 # 認証情報・証明書

@@ -17,7 +17,7 @@ import gc
 import logging
 import re
 import sys
-from typing import Any
+from typing import Any, Callable
 from pathlib import Path
 
 import pandas as pd
@@ -36,8 +36,42 @@ from models import (
 logger = logging.getLogger(__name__)
 
 
+class BatfishQueryError(RuntimeError):
+    """Structured Batfish query failure for API callers."""
+
+    def __init__(
+        self,
+        query_name: str,
+        message: str,
+        error_type: str = "query_error",
+        details: dict[str, Any] | None = None,
+        hints: list[str] | None = None,
+        status_code: int = 400,
+    ):
+        super().__init__(message)
+        self.query_name = query_name
+        self.message = message
+        self.error_type = error_type
+        self.details = details or {"query": query_name}
+        self.hints = hints or []
+        self.status_code = status_code
+
+
 class BatfishService:
     """Service for interacting with Batfish network analysis"""
+
+    _ROUTE_POLICY_QUERY_NAMES = {
+        "searchRoutePolicies",
+        "testRoutePolicies",
+        "transferBDDValidation",
+        "comparePeerGroupPolicies",
+        "compareRoutePolicies",
+    }
+
+    _SECRET_ERROR_KEY_PATTERN = re.compile(
+        r"""(["']?[A-Za-z0-9_.-]*(?:password|secret|token|communities|community)[A-Za-z0-9_.-]*["']?)(\s*(?::|=)\s*|\s+)""",
+        re.IGNORECASE,
+    )
 
     def __init__(self):
         self._session: Session | None = None
@@ -135,7 +169,13 @@ class BatfishService:
         if not self._initialized:
             raise RuntimeError("Batfish session not initialized. Call initialize_network() first.")
 
-    def _execute_query(self, query: Any, query_name: str, raise_on_error: bool = False) -> pd.DataFrame | None:
+    def _execute_query(
+        self,
+        query: Any,
+        query_name: str,
+        raise_on_error: bool = False,
+        query_params: dict[str, Any] | None = None,
+    ) -> pd.DataFrame | None:
         """
         Execute a Batfish query with error handling
 
@@ -154,10 +194,223 @@ class BatfishService:
                 return None
             return result
         except Exception as e:
-            logger.warning(f"Query '{query_name}' failed: {e}")
+            query_error = self._build_query_error(query_name, e, query_params=query_params)
+            logger.warning("Query '%s' failed: %s", query_name, query_error.message)
             if raise_on_error:
-                raise
+                raise query_error from e
             return None
+
+    def _execute_query_factory(
+        self,
+        query_factory: Callable[[], Any],
+        query_name: str,
+        raise_on_error: bool = False,
+        query_params: dict[str, Any] | None = None,
+    ) -> pd.DataFrame | None:
+        try:
+            query = query_factory()
+        except Exception as e:
+            query_error = self._build_query_error(query_name, e, query_params=query_params)
+            logger.warning("Query '%s' failed before execution: %s", query_name, query_error.message)
+            if raise_on_error:
+                raise query_error from e
+            return None
+        return self._execute_query(
+            query,
+            query_name,
+            raise_on_error=raise_on_error,
+            query_params=query_params,
+        )
+
+    def _sanitize_error_message(self, message: str) -> str:
+        """Redact common secret-like values from Batfish exception strings."""
+        return self._redact_secret_text(message)
+
+    @classmethod
+    def _redact_secret_text(cls, message: str) -> str:
+        parts: list[str] = []
+        cursor = 0
+        search_pos = 0
+
+        while True:
+            match = cls._SECRET_ERROR_KEY_PATTERN.search(message, search_pos)
+            if match is None:
+                break
+
+            if match.start() > 0 and (message[match.start() - 1].isalnum() or message[match.start() - 1] == "_"):
+                search_pos = match.end()
+                continue
+
+            delimiter = match.group(2)
+            value_start = match.end()
+            if not cls._should_redact_secret_value(match.group(1), delimiter, message, value_start):
+                search_pos = match.end()
+                continue
+
+            value_end = cls._secret_value_end(message, value_start)
+            if value_end <= value_start:
+                search_pos = match.end()
+                continue
+
+            parts.append(message[cursor:value_start])
+            parts.append("[redacted]")
+            cursor = value_end
+            search_pos = value_end
+
+        parts.append(message[cursor:])
+        return cls._redact_standalone_bgp_communities("".join(parts))
+
+    @staticmethod
+    def _redact_standalone_bgp_communities(message: str) -> str:
+        return re.sub(r"(?<![A-Za-z0-9_.:-])(?:\d{1,10}:){1,2}\d{1,10}(?![A-Za-z0-9_.:-])", "[redacted]", message)
+
+    @staticmethod
+    def _should_redact_secret_value(marker: str, delimiter: str, message: str, value_start: int) -> bool:
+        if ":" in delimiter or "=" in delimiter:
+            return True
+        if value_start >= len(message):
+            return False
+        if message[value_start] in ("'", '"', "[", "{"):
+            return True
+        return "communit" in marker.lower() and BatfishService._starts_with_bgp_community(message, value_start)
+
+    @staticmethod
+    def _starts_with_bgp_community(message: str, value_start: int) -> bool:
+        return re.match(r"(?:\d{1,10}:){1,2}\d{1,10}(?=$|[\s,;}\]])", message[value_start:]) is not None
+
+    @classmethod
+    def _secret_value_end(cls, message: str, start: int) -> int:
+        if start >= len(message):
+            return start
+
+        first = message[start]
+        if first in ("'", '"'):
+            return cls._consume_quoted_value(message, start, first)
+        if first in ("[", "{"):
+            return cls._consume_balanced_value(message, start)
+
+        index = start
+        while index < len(message) and not message[index].isspace() and message[index] not in ",;}]":
+            index += 1
+        return index
+
+    @staticmethod
+    def _consume_quoted_value(message: str, start: int, quote: str) -> int:
+        index = start + 1
+        escaped = False
+        while index < len(message):
+            char = message[index]
+            if escaped:
+                escaped = False
+            elif char == "\\":
+                escaped = True
+            elif char == quote:
+                return index + 1
+            index += 1
+        return len(message)
+
+    @classmethod
+    def _consume_balanced_value(cls, message: str, start: int) -> int:
+        pairs = {"[": "]", "{": "}"}
+        stack = [pairs[message[start]]]
+        index = start + 1
+        quote: str | None = None
+        escaped = False
+
+        while index < len(message):
+            char = message[index]
+            if quote:
+                if escaped:
+                    escaped = False
+                elif char == "\\":
+                    escaped = True
+                elif char == quote:
+                    quote = None
+            elif char in ("'", '"'):
+                quote = char
+            elif char in pairs:
+                stack.append(pairs[char])
+            elif stack and char == stack[-1]:
+                stack.pop()
+                if not stack:
+                    return index + 1
+            index += 1
+
+        return len(message)
+
+    def _sanitize_error_detail(self, value: Any) -> Any:
+        """Redact common secret-like values from structured error details."""
+        if isinstance(value, str):
+            return self._sanitize_error_message(value)
+        if isinstance(value, list):
+            return [self._sanitize_error_detail(item) for item in value]
+        if isinstance(value, tuple):
+            return [self._sanitize_error_detail(item) for item in value]
+        if isinstance(value, dict):
+            sanitized: dict[Any, Any] = {}
+            for key, item in value.items():
+                key_text = str(key).lower()
+                if any(secret_key in key_text for secret_key in ("password", "secret", "token", "community", "communities")):
+                    sanitized[key] = "[redacted]"
+                else:
+                    sanitized[key] = self._sanitize_error_detail(item)
+            return sanitized
+        return value
+
+    def _build_query_error(
+        self,
+        query_name: str,
+        error: Exception,
+        query_params: dict[str, Any] | None = None,
+    ) -> BatfishQueryError:
+        raw_message = str(error).strip() or error.__class__.__name__
+        message = self._sanitize_error_message(raw_message)
+        normalized = message.lower()
+        error_type = "query_error"
+        status_code = 400
+        hints = [
+            "Check that the active snapshot is initialized and the query inputs use Batfish syntax.",
+        ]
+
+        if any(token in normalized for token in ("timed out", "timeout")):
+            error_type = "query_timeout"
+            status_code = 504
+            hints = [
+                "Reduce the query scope and retry.",
+                "Check Batfish service health if the query repeatedly times out.",
+            ]
+        elif "does not match any strings" in normalized:
+            error_type = "specifier_no_match"
+            hints = [
+                "Check node, policy, filter, or location specifiers before running the query.",
+                "For route policy tools, the nodes field must contain Batfish node names or node regex, not an ASN.",
+                "Leave the nodes field blank to query all nodes, or run Resolve Nodes first.",
+            ]
+
+        if query_name in self._ROUTE_POLICY_QUERY_NAMES:
+            if error_type == "query_error":
+                error_type = "route_policy_query_error"
+            hints.append(
+                "For route policy queries, verify policy names, route constraints, and BGP route-policy syntax in the active snapshot."
+            )
+            if "as-path" in normalized or "as path" in normalized or "regex" in normalized:
+                error_type = "route_policy_regex_conversion_error"
+                hints.append(
+                    "Some Batfish versions can fail when converting specific route-policy AS-path regex expressions; inspect parse warnings and retry after narrowing nodes or policies."
+                )
+
+        details: dict[str, Any] = {"query": query_name}
+        if query_params:
+            details["parameters"] = self._sanitize_error_detail(self._safe_serialize(query_params))
+
+        return BatfishQueryError(
+            query_name=query_name,
+            message=message,
+            error_type=error_type,
+            details=details,
+            hints=hints,
+            status_code=status_code,
+        )
 
     # ========== Helper Functions for Safe Serialization ==========
     def _convert_interfaces_to_strings(self, interfaces):
@@ -216,6 +469,7 @@ class BatfishService:
         query: Any,
         query_name: str,
         answer_kwargs: dict[str, Any] | None = None,
+        query_params: dict[str, Any] | None = None,
     ) -> list[dict[str, Any]]:
         """Execute a query and return dynamic records while preserving errors."""
         try:
@@ -225,8 +479,88 @@ class BatfishService:
                 return []
             return self._dataframe_to_records(result)
         except Exception as e:
-            logger.warning(f"Query '{query_name}' failed: {e}")
-            raise RuntimeError(f"{query_name} query failed: {e}") from e
+            query_error = self._build_query_error(query_name, e, query_params=query_params)
+            logger.warning("Query '%s' failed: %s", query_name, query_error.message)
+            raise query_error from e
+
+    def _execute_query_records_factory(
+        self,
+        query_factory: Callable[[], Any],
+        query_name: str,
+        answer_kwargs: dict[str, Any] | None = None,
+        query_params: dict[str, Any] | None = None,
+    ) -> list[dict[str, Any]]:
+        try:
+            query = query_factory()
+        except Exception as e:
+            query_error = self._build_query_error(query_name, e, query_params=query_params)
+            logger.warning("Query '%s' failed before execution: %s", query_name, query_error.message)
+            raise query_error from e
+        return self._execute_query_records(
+            query,
+            query_name,
+            answer_kwargs=answer_kwargs,
+            query_params=query_params,
+        )
+
+    def _validate_route_policy_node_specifier(self, nodes: str | None, query_name: str) -> None:
+        """Fail route-policy queries early when a provided node specifier resolves to no nodes."""
+        if nodes is None:
+            return
+
+        query_params = {"nodes": nodes}
+        try:
+            df = self._execute_query_factory(
+                lambda: self.session.q.resolveNodeSpecifier(nodes=nodes),
+                f"{query_name}.resolveNodeSpecifier",
+                raise_on_error=True,
+            )
+        except BatfishQueryError as e:
+            if e.error_type != "specifier_no_match":
+                raise BatfishQueryError(
+                    query_name=query_name,
+                    message=e.message,
+                    error_type=e.error_type,
+                    details={
+                        "query": query_name,
+                        "preflight": self._sanitize_error_detail(e.details),
+                        "parameters": self._sanitize_error_detail(query_params),
+                    },
+                    hints=[
+                        *e.hints,
+                        "Node specifier preflight could not complete before running the route-policy query.",
+                    ],
+                    status_code=e.status_code,
+                ) from e
+
+            raise BatfishQueryError(
+                query_name=query_name,
+                message="The provided node specifier did not match any nodes in the active snapshot.",
+                error_type="node_specifier_no_match",
+                details={"query": query_name, "parameters": self._sanitize_error_detail(query_params)},
+                hints=[
+                    "The nodes field must match existing Batfish node names or node regex.",
+                    "Do not enter an ASN in the nodes field; leave nodes blank to query all nodes.",
+                    "Run Resolve Nodes first to confirm the node specifier.",
+                ],
+                status_code=400,
+            ) from e
+
+        if df is None or df.empty:
+            raise BatfishQueryError(
+                query_name=query_name,
+                message="The provided node specifier did not match any nodes in the active snapshot.",
+                error_type="node_specifier_no_match",
+                details={"query": query_name, "parameters": self._sanitize_error_detail(query_params)},
+                hints=[
+                    "Use a Batfish node name or node regex in the nodes field.",
+                    "If this value is an ASN, move it into route constraints instead of nodes.",
+                    "Leave nodes blank to query all nodes.",
+                ],
+                status_code=400,
+            )
+
+        del df
 
     def _unavailable_capability(
         self,
@@ -949,6 +1283,7 @@ class BatfishService:
         outputConstraints: dict[str, Any] | None = None,
         perPath: bool | None = None,
         pathOption: str | None = None,
+        raise_on_error: bool = True,
     ) -> list[dict[str, Any]]:
         """
         Search route policies
@@ -973,10 +1308,19 @@ class BatfishService:
         if pathOption is not None:
             query_params["pathOption"] = pathOption
 
-        df = self._execute_query(
-            self.session.q.searchRoutePolicies(**query_params),
+        try:
+            self._validate_route_policy_node_specifier(nodes, "searchRoutePolicies")
+        except BatfishQueryError as e:
+            if raise_on_error:
+                raise
+            logger.warning("searchRoutePolicies preflight failed: %s", e.message)
+            return []
+
+        df = self._execute_query_factory(
+            lambda: self.session.q.searchRoutePolicies(**query_params),
             "searchRoutePolicies",
-            raise_on_error=True,
+            raise_on_error=raise_on_error,
+            query_params=query_params,
         )
         if df is None:
             return []
@@ -1032,11 +1376,15 @@ class BatfishService:
             return []
 
     # ========== Query 23-27: BGP Analysis ==========
-    def get_bgp_edges(self) -> list[dict[str, Any]]:
+    def get_bgp_edges(self, raise_on_error: bool = True) -> list[dict[str, Any]]:
         """Get BGP adjacencies/neighbors topology"""
         self._ensure_initialized()
 
-        df = self._execute_query(self.session.q.bgpEdges(), "bgpEdges")
+        df = self._execute_query_factory(
+            lambda: self.session.q.bgpEdges(),
+            "bgpEdges",
+            raise_on_error=raise_on_error,
+        )
         if df is None:
             return []
 
@@ -1059,11 +1407,15 @@ class BatfishService:
         del df  # Free DataFrame memory
         return edges
 
-    def get_bgp_peer_configuration(self) -> list[dict[str, Any]]:
+    def get_bgp_peer_configuration(self, raise_on_error: bool = True) -> list[dict[str, Any]]:
         """Get BGP peer settings and configurations"""
         self._ensure_initialized()
 
-        df = self._execute_query(self.session.q.bgpPeerConfiguration(), "bgpPeerConfiguration")
+        df = self._execute_query_factory(
+            lambda: self.session.q.bgpPeerConfiguration(),
+            "bgpPeerConfiguration",
+            raise_on_error=raise_on_error,
+        )
         if df is None:
             return []
 
@@ -1095,11 +1447,15 @@ class BatfishService:
         del df  # Free DataFrame memory
         return peers
 
-    def get_bgp_process_configuration(self) -> list[dict[str, Any]]:
+    def get_bgp_process_configuration(self, raise_on_error: bool = True) -> list[dict[str, Any]]:
         """Get BGP process-wide settings"""
         self._ensure_initialized()
 
-        df = self._execute_query(self.session.q.bgpProcessConfiguration(), "bgpProcessConfiguration")
+        df = self._execute_query_factory(
+            lambda: self.session.q.bgpProcessConfiguration(),
+            "bgpProcessConfiguration",
+            raise_on_error=raise_on_error,
+        )
         if df is None:
             return []
 
@@ -1122,11 +1478,15 @@ class BatfishService:
         del df  # Free DataFrame memory
         return processes
 
-    def get_bgp_session_status(self) -> list[dict[str, Any]]:
+    def get_bgp_session_status(self, raise_on_error: bool = True) -> list[dict[str, Any]]:
         """Get BGP session operational status"""
         self._ensure_initialized()
 
-        df = self._execute_query(self.session.q.bgpSessionStatus(), "bgpSessionStatus")
+        df = self._execute_query_factory(
+            lambda: self.session.q.bgpSessionStatus(),
+            "bgpSessionStatus",
+            raise_on_error=raise_on_error,
+        )
         if df is None:
             return []
 
@@ -1150,11 +1510,15 @@ class BatfishService:
         del df  # Free DataFrame memory
         return sessions
 
-    def get_bgp_session_compatibility(self) -> list[dict[str, Any]]:
+    def get_bgp_session_compatibility(self, raise_on_error: bool = True) -> list[dict[str, Any]]:
         """Get BGP session configuration validation"""
         self._ensure_initialized()
 
-        df = self._execute_query(self.session.q.bgpSessionCompatibility(), "bgpSessionCompatibility")
+        df = self._execute_query_factory(
+            lambda: self.session.q.bgpSessionCompatibility(),
+            "bgpSessionCompatibility",
+            raise_on_error=raise_on_error,
+        )
         if df is None:
             return []
 
@@ -1178,11 +1542,15 @@ class BatfishService:
         del df  # Free DataFrame memory
         return compatibility
 
-    def get_bgp_rib(self) -> list[dict[str, Any]]:
+    def get_bgp_rib(self, raise_on_error: bool = True) -> list[dict[str, Any]]:
         """Get BGP Routing Information Base entries"""
         self._ensure_initialized()
 
-        df = self._execute_query(self.session.q.bgpRib(), "bgpRib")
+        df = self._execute_query_factory(
+            lambda: self.session.q.bgpRib(),
+            "bgpRib",
+            raise_on_error=raise_on_error,
+        )
         if df is None:
             return []
 
@@ -1721,17 +2089,19 @@ class BatfishService:
                     results.append(duplicate)
 
         # 2. Check BGP sessions for duplicate router IDs
-        bgp_df = self._execute_query(
-            self.session.q.bgpSessionCompatibility(),
-            "bgpSessionCompatibility"
+        bgp_df = self._execute_query_factory(
+            lambda: self.session.q.bgpSessionCompatibility(),
+            "bgpSessionCompatibility",
+            raise_on_error=True,
         )
 
         if bgp_df is not None:
             # Get BGP process configurations to lookup router IDs
             bgp_processes = {}  # key: (node, vrf), value: router_id
-            bgp_proc_df = self._execute_query(
-                self.session.q.bgpProcessConfiguration(),
-                "bgpProcessConfiguration"
+            bgp_proc_df = self._execute_query_factory(
+                lambda: self.session.q.bgpProcessConfiguration(),
+                "bgpProcessConfiguration",
+                raise_on_error=True,
             )
             if bgp_proc_df is not None:
                 for _, row in bgp_proc_df.iterrows():
@@ -2583,8 +2953,14 @@ class BatfishService:
         if bgpSessionProperties is not None:
             query_params["bgpSessionProperties"] = bgpSessionProperties
 
-        query = self.session.q.testRoutePolicies(**query_params)
-        df = self._execute_query(query, "testRoutePolicies", raise_on_error=True)
+        self._validate_route_policy_node_specifier(nodes, "testRoutePolicies")
+
+        df = self._execute_query_factory(
+            lambda: self.session.q.testRoutePolicies(**query_params),
+            "testRoutePolicies",
+            raise_on_error=True,
+            query_params=query_params,
+        )
         if df is None:
             return []
 
@@ -2625,9 +3001,12 @@ class BatfishService:
         if seed is not None:
             query_params["seed"] = seed
 
-        return self._execute_query_records(
-            self.session.q.transferBDDValidation(**query_params),
+        self._validate_route_policy_node_specifier(nodes, "transferBDDValidation")
+
+        return self._execute_query_records_factory(
+            lambda: self.session.q.transferBDDValidation(**query_params),
             "transferBDDValidation",
+            query_params=query_params,
         )
 
     def compare_peer_group_policies(
@@ -2642,10 +3021,11 @@ class BatfishService:
         if snapshot:
             answer_kwargs["snapshot"] = snapshot
 
-        return self._execute_query_records(
-            self.session.q.comparePeerGroupPolicies(),
+        return self._execute_query_records_factory(
+            lambda: self.session.q.comparePeerGroupPolicies(),
             "comparePeerGroupPolicies",
             answer_kwargs=answer_kwargs,
+            query_params=answer_kwargs,
         )
 
     def compare_route_policies(
@@ -2666,16 +3046,19 @@ class BatfishService:
         if nodes is not None:
             query_params["nodes"] = nodes
 
+        self._validate_route_policy_node_specifier(nodes, "compareRoutePolicies")
+
         answer_kwargs: dict[str, Any] | None = None
         if reference_snapshot:
             answer_kwargs = {"reference_snapshot": reference_snapshot}
             if snapshot:
                 answer_kwargs["snapshot"] = snapshot
 
-        return self._execute_query_records(
-            self.session.q.compareRoutePolicies(**query_params),
+        return self._execute_query_records_factory(
+            lambda: self.session.q.compareRoutePolicies(**query_params),
             "compareRoutePolicies",
             answer_kwargs=answer_kwargs,
+            query_params={**query_params, **(answer_kwargs or {})},
         )
 
     def get_questions(self) -> list[dict[str, Any]]:
@@ -3077,7 +3460,7 @@ class BatfishService:
             logger.debug("Fetching reachability...")
             data["reachability"] = [f.to_dict() for f in self.get_reachability()]
             logger.debug("Fetching search_route_policies...")
-            data["search_route_policies"] = self.get_search_route_policies()
+            data["search_route_policies"] = self.get_search_route_policies(raise_on_error=False)
             logger.debug("Fetching aaa_authentication_login...")
             data["aaa_authentication_login"] = self.get_aaa_authentication_login()
             logger.debug("Fetching snmp_community_clients...")
@@ -3085,17 +3468,17 @@ class BatfishService:
 
             # BGP Protocol Analysis
             logger.debug("Fetching bgp_edges...")
-            data["bgp_edges"] = self.get_bgp_edges()
+            data["bgp_edges"] = self.get_bgp_edges(raise_on_error=False)
             logger.debug("Fetching bgp_peer_configuration...")
-            data["bgp_peer_configuration"] = self.get_bgp_peer_configuration()
+            data["bgp_peer_configuration"] = self.get_bgp_peer_configuration(raise_on_error=False)
             logger.debug("Fetching bgp_process_configuration...")
-            data["bgp_process_configuration"] = self.get_bgp_process_configuration()
+            data["bgp_process_configuration"] = self.get_bgp_process_configuration(raise_on_error=False)
             logger.debug("Fetching bgp_session_status...")
-            data["bgp_session_status"] = self.get_bgp_session_status()
+            data["bgp_session_status"] = self.get_bgp_session_status(raise_on_error=False)
             logger.debug("Fetching bgp_session_compatibility...")
-            data["bgp_session_compatibility"] = self.get_bgp_session_compatibility()
+            data["bgp_session_compatibility"] = self.get_bgp_session_compatibility(raise_on_error=False)
             logger.debug("Fetching bgp_rib...")
-            data["bgp_rib"] = self.get_bgp_rib()
+            data["bgp_rib"] = self.get_bgp_rib(raise_on_error=False)
 
             # ACL/Firewall Analysis
             logger.debug("Fetching filter_line_reachability...")

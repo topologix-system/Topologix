@@ -14,6 +14,7 @@
 import { logger } from '../utils/logger';
 import axios from 'axios';
 import { runtimeConfig } from '../config/runtimeConfig';
+import { getSafeApiErrorLog } from '../utils/apiError';
 
 const API_BASE_URL = runtimeConfig.apiBaseUrl || '';
 
@@ -21,6 +22,11 @@ export class CSRFService {
   private static readonly COOKIE_NAME = 'csrf_token';
   private static readonly HEADER_NAME = 'X-CSRF-Token';
   private static memoryToken: string | null = null;
+
+  private static getSafeErrorMessage(error: unknown): string {
+    const safeError = getSafeApiErrorLog(error);
+    return typeof safeError.message === 'string' ? safeError.message : 'unknown error';
+  }
 
   /**
    * Store CSRF token in memory for immediate availability
@@ -53,7 +59,7 @@ export class CSRFService {
 
       if (name === this.COOKIE_NAME) {
         const decodedValue = decodeURIComponent(value);
-        logger.debug(`[CSRFService] Token found in cookie: ${decodedValue.substring(0, 20)}...`);
+        logger.debug('[CSRFService] Token found in cookie');
         return decodedValue;
       }
     }
@@ -98,7 +104,7 @@ export class CSRFService {
       logger.debug(`[CSRFService] Token valid (expires: ${expires.toISOString()})`);
       return true;
     } catch (error) {
-      logger.warn('[CSRFService] Token validation error:', error);
+      logger.warn('[CSRFService] Token validation error:', getSafeApiErrorLog(error));
       return false;
     }
   }
@@ -130,8 +136,9 @@ export class CSRFService {
       logger.info('[CSRFService] CSRF token refreshed successfully');
       return newToken;
     } catch (error) {
-      logger.error('[CSRFService] Failed to refresh CSRF token:', error);
-      throw new Error(`Failed to refresh CSRF token: ${error}`);
+      const safeMessage = this.getSafeErrorMessage(error);
+      logger.error('[CSRFService] Failed to refresh CSRF token:', getSafeApiErrorLog(error));
+      throw new Error(`Failed to refresh CSRF token: ${safeMessage}`);
     }
   }
 
@@ -187,8 +194,9 @@ export class CSRFService {
         return this.getToken(retryCount + 1);
       }
 
+      const safeMessage = this.getSafeErrorMessage(error);
       logger.error(`[CSRFService] Token refresh failed after ${MAX_RETRIES} retries`);
-      throw new Error(`Failed to obtain CSRF token after ${MAX_RETRIES} retries: ${error}`);
+      throw new Error(`Failed to obtain CSRF token after ${MAX_RETRIES} retries: ${safeMessage}`);
     }
   }
 
@@ -264,8 +272,9 @@ export class CSRFService {
         await new Promise(resolve => setTimeout(resolve, backoffMs));
         return this.forceRefresh(retryCount + 1);
       }
+      const safeMessage = this.getSafeErrorMessage(error);
       logger.error(`[CSRFService] Force-refresh failed after ${MAX_RETRIES} retries`);
-      throw new Error(`Failed to force-refresh CSRF token after ${MAX_RETRIES} retries: ${error}`);
+      throw new Error(`Failed to force-refresh CSRF token after ${MAX_RETRIES} retries: ${safeMessage}`);
     }
   }
 

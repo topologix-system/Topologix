@@ -27,6 +27,9 @@ export interface APISuccessResponse<T> {
 export interface APIErrorResponse {
   status: 'error'
   message: string
+  code?: string
+  details?: unknown
+  hints?: string[]
   data?: never
 }
 

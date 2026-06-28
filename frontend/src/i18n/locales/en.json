@@ -1608,6 +1608,9 @@
       "running": "Running",
       "runningText": "Running...",
       "error": "Error",
+      "errorCode": "Error code",
+      "hints": "Hints",
+      "details": "Details",
       "noData": "No data",
       "done": "Done"
     },

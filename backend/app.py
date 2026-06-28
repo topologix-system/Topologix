@@ -24,7 +24,7 @@ from flask_compress import Compress
 from werkzeug.middleware.proxy_fix import ProxyFix
 
 from config import config
-from services import BatfishService, SnapshotService
+from services import BatfishQueryError, BatfishService, SnapshotService
 from security.validation import validate_path
 
 # Configure logging early so it's available during conditional imports
@@ -505,9 +505,169 @@ def success_response(data: Any, message: str = "Success", cache_time: int = 0, u
     return response
 
 
-def error_response(message: str, status_code: int = 400) -> tuple:
+_SECRET_RESPONSE_KEY_PATTERN = re.compile(r"password|secret|token|communities|community", re.IGNORECASE)
+_SECRET_RESPONSE_MARKER_PATTERN = re.compile(
+    r"""(["']?[A-Za-z0-9_.-]*(?:password|secret|token|communities|community)[A-Za-z0-9_.-]*["']?)(\s*(?::|=)\s*|\s+)""",
+    re.IGNORECASE,
+)
+
+
+def sanitize_error_text(value: str) -> str:
+    """Redact secret-like values before returning API error payloads."""
+    parts: list[str] = []
+    cursor = 0
+    search_pos = 0
+
+    while True:
+        match = _SECRET_RESPONSE_MARKER_PATTERN.search(value, search_pos)
+        if match is None:
+            break
+
+        if match.start() > 0 and (value[match.start() - 1].isalnum() or value[match.start() - 1] == "_"):
+            search_pos = match.end()
+            continue
+
+        delimiter = match.group(2)
+        value_start = match.end()
+        if not should_redact_secret_value(match.group(1), delimiter, value, value_start):
+            search_pos = match.end()
+            continue
+
+        value_end = secret_value_end(value, value_start)
+        if value_end <= value_start:
+            search_pos = match.end()
+            continue
+
+        parts.append(value[cursor:value_start])
+        parts.append("[redacted]")
+        cursor = value_end
+        search_pos = value_end
+
+    parts.append(value[cursor:])
+    return redact_standalone_bgp_communities("".join(parts))
+
+
+def redact_standalone_bgp_communities(value: str) -> str:
+    return re.sub(r"(?<![A-Za-z0-9_.:-])(?:\d{1,10}:){1,2}\d{1,10}(?![A-Za-z0-9_.:-])", "[redacted]", value)
+
+
+def should_redact_secret_value(marker: str, delimiter: str, value: str, value_start: int) -> bool:
+    if ":" in delimiter or "=" in delimiter:
+        return True
+    if value_start >= len(value):
+        return False
+    if value[value_start] in ("'", '"', "[", "{"):
+        return True
+    return "communit" in marker.lower() and starts_with_bgp_community(value, value_start)
+
+
+def starts_with_bgp_community(value: str, value_start: int) -> bool:
+    return re.match(r"(?:\d{1,10}:){1,2}\d{1,10}(?=$|[\s,;}\]])", value[value_start:]) is not None
+
+
+def secret_value_end(value: str, start: int) -> int:
+    if start >= len(value):
+        return start
+
+    first = value[start]
+    if first in ("'", '"'):
+        return consume_quoted_secret_value(value, start, first)
+    if first in ("[", "{"):
+        return consume_balanced_secret_value(value, start)
+
+    index = start
+    while index < len(value) and not value[index].isspace() and value[index] not in ",;}]":
+        index += 1
+    return index
+
+
+def consume_quoted_secret_value(value: str, start: int, quote: str) -> int:
+    index = start + 1
+    escaped = False
+    while index < len(value):
+        char = value[index]
+        if escaped:
+            escaped = False
+        elif char == "\\":
+            escaped = True
+        elif char == quote:
+            return index + 1
+        index += 1
+    return len(value)
+
+
+def consume_balanced_secret_value(value: str, start: int) -> int:
+    pairs = {"[": "]", "{": "}"}
+    stack = [pairs[value[start]]]
+    index = start + 1
+    quote: str | None = None
+    escaped = False
+
+    while index < len(value):
+        char = value[index]
+        if quote:
+            if escaped:
+                escaped = False
+            elif char == "\\":
+                escaped = True
+            elif char == quote:
+                quote = None
+        elif char in ("'", '"'):
+            quote = char
+        elif char in pairs:
+            stack.append(pairs[char])
+        elif stack and char == stack[-1]:
+            stack.pop()
+            if not stack:
+                return index + 1
+        index += 1
+
+    return len(value)
+
+
+def sanitize_error_payload(value: Any) -> Any:
+    """Recursively redact secret-like values from structured API error payloads."""
+    if isinstance(value, str):
+        return sanitize_error_text(value)
+    if isinstance(value, list):
+        return [sanitize_error_payload(item) for item in value]
+    if isinstance(value, tuple):
+        return [sanitize_error_payload(item) for item in value]
+    if isinstance(value, dict):
+        return {
+            key: "[redacted]" if _SECRET_RESPONSE_KEY_PATTERN.search(str(key)) else sanitize_error_payload(item)
+            for key, item in value.items()
+        }
+    return value
+
+
+def error_response(
+    message: str,
+    status_code: int = 400,
+    code: str | None = None,
+    details: Any | None = None,
+    hints: list[str] | None = None,
+) -> tuple:
     """Create error response"""
-    return jsonify({"status": "error", "message": message}), status_code
+    payload: dict[str, Any] = {"status": "error", "message": sanitize_error_text(message)}
+    if code:
+        payload["code"] = code
+    if details is not None:
+        payload["details"] = sanitize_error_payload(details)
+    if hints:
+        payload["hints"] = sanitize_error_payload(hints)
+    return jsonify(payload), status_code
+
+
+def batfish_query_error_response(error: BatfishQueryError) -> tuple:
+    """Create a structured Batfish query error response."""
+    return error_response(
+        error.message,
+        error.status_code,
+        code=error.error_type,
+        details=error.details,
+        hints=error.hints,
+    )
 
 
 def get_snapshot_request_context() -> dict[str, Any]:
@@ -1975,11 +2135,13 @@ def get_route_policies():
     - action: Action to search for (default: "permit")
     """
     try:
-        nodes = request.args.get('nodes', '.*')
-        action = request.args.get('action', 'permit')
+        nodes = get_query_specifier('nodes') or '.*'
+        action = request.args.get('action') or 'permit'
 
         policies = batfish_service.get_search_route_policies(nodes, action)
         return success_response(policies)
+    except BatfishQueryError as e:
+        return batfish_query_error_response(e)
     except RuntimeError as e:
         return error_response(str(e), 400)
     except Exception as e:
@@ -2020,6 +2182,8 @@ def get_bgp_edges():
     try:
         edges = batfish_service.get_bgp_edges()
         return success_response(edges)
+    except BatfishQueryError as e:
+        return batfish_query_error_response(e)
     except RuntimeError as e:
         return error_response(str(e), 400)
     except Exception as e:
@@ -2033,6 +2197,8 @@ def get_bgp_peer_configuration():
     try:
         peers = batfish_service.get_bgp_peer_configuration()
         return success_response(peers)
+    except BatfishQueryError as e:
+        return batfish_query_error_response(e)
     except RuntimeError as e:
         return error_response(str(e), 400)
     except Exception as e:
@@ -2046,6 +2212,8 @@ def get_bgp_process_configuration():
     try:
         processes = batfish_service.get_bgp_process_configuration()
         return success_response(processes)
+    except BatfishQueryError as e:
+        return batfish_query_error_response(e)
     except RuntimeError as e:
         return error_response(str(e), 400)
     except Exception as e:
@@ -2059,6 +2227,8 @@ def get_bgp_session_status():
     try:
         sessions = batfish_service.get_bgp_session_status()
         return success_response(sessions)
+    except BatfishQueryError as e:
+        return batfish_query_error_response(e)
     except RuntimeError as e:
         return error_response(str(e), 400)
     except Exception as e:
@@ -2072,6 +2242,8 @@ def get_bgp_session_compatibility():
     try:
         compatibility = batfish_service.get_bgp_session_compatibility()
         return success_response(compatibility)
+    except BatfishQueryError as e:
+        return batfish_query_error_response(e)
     except RuntimeError as e:
         return error_response(str(e), 400)
     except Exception as e:
@@ -2085,6 +2257,8 @@ def get_bgp_rib():
     try:
         rib = batfish_service.get_bgp_rib()
         return success_response(rib)
+    except BatfishQueryError as e:
+        return batfish_query_error_response(e)
     except RuntimeError as e:
         return error_response(str(e), 400)
     except Exception as e:
@@ -2568,6 +2742,8 @@ def get_duplicate_router_ids():
     try:
         duplicates = batfish_service.get_duplicate_router_ids()
         return success_response([d.to_dict() for d in duplicates])
+    except BatfishQueryError as e:
+        return batfish_query_error_response(e)
     except RuntimeError as e:
         return error_response(str(e), 400)
     except Exception as e:
@@ -3156,6 +3332,8 @@ def test_route_policies():
             bgpSessionProperties=bgpSessionProperties,
         )
         return success_response(results)
+    except BatfishQueryError as e:
+        return batfish_query_error_response(e)
     except RuntimeError as e:
         return error_response(str(e), 400)
     except Exception as e:
@@ -3190,6 +3368,8 @@ def transfer_bdd_validation():
             seed=seed,
         )
         return success_response(results)
+    except BatfishQueryError as e:
+        return batfish_query_error_response(e)
     except RuntimeError as e:
         return error_response(str(e), 400)
     except Exception as e:
@@ -3216,6 +3396,8 @@ def compare_peer_group_policies():
             snapshot=snapshot,
         )
         return success_response(results)
+    except BatfishQueryError as e:
+        return batfish_query_error_response(e)
     except RuntimeError as e:
         return error_response(str(e), 400)
     except PermissionError:
@@ -3256,6 +3438,8 @@ def compare_route_policies():
             snapshot=snapshot,
         )
         return success_response(results)
+    except BatfishQueryError as e:
+        return batfish_query_error_response(e)
     except RuntimeError as e:
         return error_response(str(e), 400)
     except PermissionError:
@@ -3342,6 +3526,8 @@ def advanced_search_route_policies():
             pathOption=path_option,
         )
         return success_response(results)
+    except BatfishQueryError as e:
+        return batfish_query_error_response(e)
     except RuntimeError as e:
         return error_response(str(e), 400)
     except Exception as e:

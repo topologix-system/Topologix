@@ -30,6 +30,7 @@ import {
   useTransferBDDValidation,
   useUserProvidedLayer1Edges,
 } from '../../hooks'
+import { getStructuredApiError, type StructuredApiError } from '../../utils/apiError'
 
 type MutationLike = {
   data?: unknown
@@ -44,6 +45,9 @@ type ResultLabels = {
   running: string
   runningText: string
   error: string
+  errorCode: string
+  hints: string
+  details: string
   noData: string
   done: string
 }
@@ -138,6 +142,8 @@ function parseIntegerString(value: string, fieldKey: string, messages: Validatio
   return { value: trimmed }
 }
 
+const getStructuredMutationError = getStructuredApiError as (error: unknown) => StructuredApiError
+
 function ResultBlock({ title, mutation, labels }: { title: string; mutation: MutationLike; labels: ResultLabels }) {
   const hasData = mutation.data !== undefined && mutation.data !== null && (
     Array.isArray(mutation.data)
@@ -160,13 +166,37 @@ function ResultBlock({ title, mutation, labels }: { title: string; mutation: Mut
   }
 
   if (mutation.isError) {
+    const error = getStructuredMutationError(mutation.error)
     return (
       <section className="border-t border-gray-100 pt-4">
         <div className="mb-2 flex items-center justify-between gap-2">
           <h4 className="text-sm font-semibold text-gray-900">{labels.resultPrefix}: {title}</h4>
           <span className="rounded-full bg-red-50 px-2 py-0.5 text-xs font-medium text-red-700">{labels.error}</span>
         </div>
-        <p className="text-sm text-red-600">{String(mutation.error)}</p>
+        <div className="space-y-3 rounded-md border border-red-100 bg-red-50/50 p-3">
+          <p className="text-sm text-red-700">{error.message}</p>
+          {error.code && (
+            <p className="text-xs text-red-700">
+              <span className="font-semibold">{labels.errorCode}:</span> {error.code}
+            </p>
+          )}
+          {error.hints && error.hints.length > 0 && (
+            <div>
+              <p className="text-xs font-semibold text-red-800">{labels.hints}</p>
+              <ul className="mt-1 list-disc space-y-1 pl-5 text-xs text-red-700">
+                {error.hints.map((hint) => <li key={hint}>{hint}</li>)}
+              </ul>
+            </div>
+          )}
+          {error.details !== undefined && (
+            <details className="text-xs text-red-800">
+              <summary className="cursor-pointer font-semibold">{labels.details}</summary>
+              <pre className="mt-2 max-h-52 overflow-auto rounded bg-white/80 p-2 text-[11px] text-red-900">
+                {JSON.stringify(error.details, null, 2)}
+              </pre>
+            </details>
+          )}
+        </div>
       </section>
     )
   }
@@ -393,6 +423,9 @@ export function BatfishFeatureTools() {
     running: t('batfishTools.resultStatus.running'),
     runningText: t('batfishTools.resultStatus.runningText'),
     error: t('batfishTools.resultStatus.error'),
+    errorCode: t('batfishTools.resultStatus.errorCode'),
+    hints: t('batfishTools.resultStatus.hints'),
+    details: t('batfishTools.resultStatus.details'),
     noData: t('batfishTools.resultStatus.noData'),
     done: t('batfishTools.resultStatus.done'),
   }

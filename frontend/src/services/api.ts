@@ -11,6 +11,7 @@ import axios, { AxiosInstance, AxiosError, AxiosRequestConfig } from 'axios'
 import { runtimeConfig } from '../config/runtimeConfig'
 // isTokenExpired removed — expiry now checked via stored tokenExpiresAt timestamp
 import { logger } from '../utils/logger'
+import { getSafeApiErrorLog } from '../utils/apiError'
 import { CSRFService } from './csrfService'
 import type {
   APIResponse,
@@ -170,9 +171,11 @@ if (AUTH_ENABLED) {
           config.headers['X-CSRF-Token'] = csrfToken
           logger.debug('[API] CSRF token added to request (async)')
         } catch (error) {
-          logger.error('[API] Failed to obtain CSRF token for request:', error)
+          const safeError = getSafeApiErrorLog(error)
+          const safeMessage = typeof safeError.message === 'string' ? safeError.message : 'unknown error'
+          logger.error('[API] Failed to obtain CSRF token for request:', safeError)
           // Fail fast - reject the request instead of proceeding without token
-          return Promise.reject(new Error(`CSRF token unavailable: ${error}`))
+          return Promise.reject(new Error(`CSRF token unavailable: ${safeMessage}`))
         }
       }
 
@@ -241,12 +244,12 @@ apiClient.interceptors.response.use(
               logger.error('[API] Request headers not available for retry')
             }
           } catch (csrfError) {
-            logger.error('[API] Failed to refresh CSRF token:', csrfError)
+            logger.error('[API] Failed to refresh CSRF token:', getSafeApiErrorLog(csrfError))
             // Let the error propagate to React Query error handler
             return Promise.reject(csrfError)
           }
         } else {
-          logger.error('[API] Permission denied:', message)
+          logger.error('[API] Permission denied:', getSafeApiErrorLog(error))
         }
       }
 
@@ -257,11 +260,11 @@ apiClient.interceptors.response.use(
     }
 
     if (error.response) {
-      logger.error('API Error:', error.response.status, error.response.data)
+      logger.error('API Error:', getSafeApiErrorLog(error))
     } else if (error.request) {
       logger.error('Network Error: No response from server')
     } else {
-      logger.error('Request Error:', error.message)
+      logger.error('Request Error:', getSafeApiErrorLog(error))
     }
 
     return Promise.reject(error)
@@ -332,7 +335,7 @@ export const authAPI = {
     try {
       await apiClient.post('/auth/logout')
     } catch (e) {
-      logger.error('Logout error:', e)
+      logger.error('Logout error:', getSafeApiErrorLog(e))
     } finally {
       authState.csrfToken = null
       authState.tokenExpiresAt = null
