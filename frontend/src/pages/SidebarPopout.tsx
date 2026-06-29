@@ -7,7 +7,7 @@
  * - Includes NodeSelector for consistent node filtering across windows
  * - Full feature parity with main window sidebar panels
  */
-import { useEffect, lazy, Suspense } from 'react'
+import { useEffect, lazy, Suspense, useMemo, useState } from 'react'
 import { Info, Router, Link, AlertCircle, Search, Network } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
 import { useUIStore, type SidebarTab } from '../store'
@@ -31,6 +31,15 @@ function isSupportedSidebarTab(value: string | null): value is SidebarTab {
     || value === 'validation'
 }
 
+function getInitialSidebarTab(fallback: SidebarTab): SidebarTab {
+  const params = new URLSearchParams(window.location.search)
+  const requestedTab = params.get('tab')
+  if (isSupportedSidebarTab(requestedTab)) return requestedTab
+  if (params.get('node')) return 'node-details'
+  if (params.get('edge')) return 'edge-details'
+  return fallback
+}
+
 export function SidebarPopout() {
   const { t } = useTranslation()
   const sidebarTab = useUIStore((state) => state.sidebarTab)
@@ -38,21 +47,22 @@ export function SidebarPopout() {
   const setSelectedNode = useUIStore((state) => state.setSelectedNode)
   const setSelectedEdge = useUIStore((state) => state.setSelectedEdge)
   const clearSelection = useUIStore((state) => state.clearSelection)
+  const [localTab, setLocalTab] = useState<SidebarTab>(() => getInitialSidebarTab(sidebarTab))
 
   /**
    * Tab configuration array for popout window
    * Matches main window sidebar tabs for consistent UX
    * Each tab maps to a lazy-loaded panel component
    */
-  const tabs: Array<{ id: SidebarTab; label: string; icon: React.ReactNode }> = [
+  const tabs: Array<{ id: SidebarTab; label: string; icon: React.ReactNode }> = useMemo(() => [
     { id: 'overview', label: t('sidebar.tabs.overview'), icon: <Info className="w-4 h-4" /> },
     { id: 'node-details', label: t('sidebar.tabs.nodeDetails'), icon: <Router className="w-4 h-4" /> },
     { id: 'edge-details', label: t('sidebar.tabs.edgeDetails'), icon: <Link className="w-4 h-4" /> },
     { id: 'analysis', label: t('sidebar.tabs.analysis'), icon: <Search className="w-4 h-4" /> },
     { id: 'traceroute', label: t('sidebar.tabs.traceroute'), icon: <Network className="w-4 h-4" /> },
     { id: 'validation', label: t('sidebar.tabs.validation'), icon: <AlertCircle className="w-4 h-4" /> },
-  ]
-  const activeTab = tabs.some((tab) => tab.id === sidebarTab) ? sidebarTab : 'overview'
+  ], [t])
+  const activeTab = tabs.some((tab) => tab.id === localTab) ? localTab : 'overview'
 
   useEffect(() => {
     const params = new URLSearchParams(window.location.search)
@@ -69,7 +79,12 @@ export function SidebarPopout() {
     }
 
     if (isSupportedSidebarTab(requestedTab)) {
+      setLocalTab(requestedTab)
       setSidebarTab(requestedTab)
+    } else if (requestedNode) {
+      setLocalTab('node-details')
+    } else if (requestedEdge) {
+      setLocalTab('edge-details')
     }
   }, [clearSelection, setSelectedEdge, setSelectedNode, setSidebarTab])
 
@@ -78,7 +93,7 @@ export function SidebarPopout() {
     const tabLabel = tabs.find((tab) => tab.id === activeTab)?.label || 'Sidebar'
     document.title = `Topologix - ${tabLabel}`
     logger.log('[SidebarPopout] Active tab changed to:', activeTab)
-  }, [activeTab, tabs, t])
+  }, [activeTab, tabs])
 
   return (
     <div className="h-screen flex flex-col bg-white">
@@ -102,7 +117,10 @@ export function SidebarPopout() {
         {tabs.map((tab) => (
           <button
             key={tab.id}
-            onClick={() => setSidebarTab(tab.id)}
+            onClick={() => {
+              setLocalTab(tab.id)
+              setSidebarTab(tab.id)
+            }}
             role="tab"
             aria-selected={activeTab === tab.id}
             aria-controls={`tabpanel-${tab.id}`}

@@ -9,7 +9,7 @@
  * - Each section shows data count badge and JSON-formatted results
  * - Used for deep dive analysis and debugging network configurations
  */
-import { useState, type KeyboardEvent } from 'react'
+import { Fragment, useState, type KeyboardEvent } from 'react'
 import { useTranslation } from 'react-i18next'
 import {
   useVRRPProperties,
@@ -86,6 +86,7 @@ import {
 import { BatfishFeatureTools } from './BatfishFeatureTools'
 import { IPSearchPanel } from './IPSearchPanel'
 import { getStructuredApiError, type StructuredApiError } from '../../utils/apiError'
+import { useSnapshotStore } from '../../store'
 
 interface SectionProps {
   title: string
@@ -815,66 +816,73 @@ function ReduceReachabilitySection() {
 export function NetworkAnalysisPanel() {
   const { t } = useTranslation()
   const [activeTab, setActiveTab] = useState<'protocols' | 'ha' | 'network' | 'topology' | 'advanced' | 'acl'>('protocols')
+  const currentSnapshotName = useSnapshotStore((state) => state.currentSnapshotName)
+  const hasActiveSnapshot = Boolean(currentSnapshotName)
+  const protocolsEnabled = hasActiveSnapshot && activeTab === 'protocols'
+  const haEnabled = hasActiveSnapshot && activeTab === 'ha'
+  const networkEnabled = hasActiveSnapshot && activeTab === 'network'
+  const topologyEnabled = hasActiveSnapshot && activeTab === 'topology'
+  const advancedEnabled = hasActiveSnapshot && activeTab === 'advanced'
 
   // OSPF queries
-  const ospfProcesses = useOSPFProcesses()
-  const ospfAreas = useOSPFAreas()
-  const ospfInterfaces = useOSPFInterfaces()
-  const ospfSessions = useOSPFSessions()
-  const ospfEdges = useOSPFEdges()
+  const ospfProcesses = useOSPFProcesses(protocolsEnabled)
+  const ospfAreas = useOSPFAreas(protocolsEnabled)
+  const ospfInterfaces = useOSPFInterfaces(protocolsEnabled)
+  const ospfSessions = useOSPFSessions(protocolsEnabled)
+  const ospfEdges = useOSPFEdges(protocolsEnabled)
 
   // Network queries
-  const nodes = useNodes()
-  const interfaces = useInterfaces()
-  const routes = useRoutes()
-  const vlans = useVlans()
-  const ipOwners = useIPOwners()
+  const nodes = useNodes(networkEnabled)
+  const interfaces = useInterfaces(networkEnabled)
+  const routes = useRoutes(networkEnabled)
+  const vlans = useVlans(networkEnabled)
+  const ipOwners = useIPOwners(networkEnabled)
 
   // Edge queries
-  const physicalEdges = usePhysicalEdges()
-  const layer3Edges = useLayer3Edges()
+  const physicalEdges = usePhysicalEdges(topologyEnabled)
+  const layer3Edges = useLayer3Edges(topologyEnabled)
 
   // High Availability queries
-  const vrrpProperties = useVRRPProperties()
-  const hsrpProperties = useHSRPProperties()
-  const mlagProperties = useMLAGProperties()
-  const duplicateRouterIds = useDuplicateRouterIDs()
-  const switchingProperties = useSwitchingProperties()
+  const vrrpProperties = useVRRPProperties(haEnabled)
+  const hsrpProperties = useHSRPProperties(haEnabled)
+  const mlagProperties = useMLAGProperties(haEnabled)
+  const duplicateRouterIds = useDuplicateRouterIDs(haEnabled)
+  const switchingProperties = useSwitchingProperties(haEnabled)
 
   // Protocols queries
-  const bgpEdges = useBGPEdges()
-  const bgpProcessConfig = useBGPProcessConfiguration()
-  const bgpPeerConfig = useBGPPeerConfiguration()
-  const bgpSessionStatus = useBGPSessionStatus()
-  const bgpSessionCompat = useBGPSessionCompatibility()
-  const bgpRib = useBGPRib()
-  const eigrpEdges = useEIGRPEdges()
-  const eigrpInterfaces = useEIGRPInterfaces()
-  const isisEdges = useISISEdges()
-  const isisInterfaces = useISISInterfaces()
-  const isisLoopbackInterfaces = useISISLoopbackInterfaces()
-  const bfdSessionStatus = useBFDSessionStatus()
+  const bgpEdges = useBGPEdges(protocolsEnabled)
+  const bgpProcessConfig = useBGPProcessConfiguration(protocolsEnabled)
+  const bgpPeerConfig = useBGPPeerConfiguration(protocolsEnabled)
+  const bgpSessionStatus = useBGPSessionStatus(protocolsEnabled)
+  const bgpSessionCompat = useBGPSessionCompatibility(protocolsEnabled)
+  const bgpRib = useBGPRib(protocolsEnabled)
+  const eigrpEdges = useEIGRPEdges(protocolsEnabled)
+  const eigrpInterfaces = useEIGRPInterfaces(protocolsEnabled)
+  const isisEdges = useISISEdges(protocolsEnabled)
+  const isisInterfaces = useISISInterfaces(protocolsEnabled)
+  const isisLoopbackInterfaces = useISISLoopbackInterfaces(protocolsEnabled)
+  const bfdSessionStatus = useBFDSessionStatus(protocolsEnabled)
 
   // Topology queries
-  const layer1Topology = useLayer1Topology()
-  const layer2Topology = useLayer2Topology()
-  const vxlanVNI = useVXLANVNIProperties()
-  const vxlanEdges = useVXLANEdges()
-  const ipsecSessionStatus = useIPSecSessionStatus()
-  const ipsecEdges = useIPSecEdges()
-  const ipsecPeerConfig = useIPSecPeerConfiguration()
+  const layer1Topology = useLayer1Topology(topologyEnabled)
+  const layer2Topology = useLayer2Topology(topologyEnabled)
+  const vxlanVNI = useVXLANVNIProperties(topologyEnabled)
+  const vxlanEdges = useVXLANEdges(topologyEnabled)
+  const ipsecSessionStatus = useIPSecSessionStatus(topologyEnabled)
+  const ipsecEdges = useIPSecEdges(topologyEnabled)
+  const ipsecPeerConfig = useIPSecPeerConfiguration(topologyEnabled)
 
   // Advanced queries
-  const f5VIPs = useF5VIPs()
-  const viModel = useVIModel()
-  const evpnRib = useEVPNRib()
-  const interfaceMTU = useInterfaceMTU()
-  const ipSpaceAssignment = useIPSpaceAssignment()
-  const definedStructures = useDefinedStructures()
-  const referencedStructures = useReferencedStructures()
-  const namedStructures = useNamedStructures()
-  const aaaAuthentication = useAAAAuthentication()
-  const routePolicies = useRoutePolicies({})
+  const f5VIPs = useF5VIPs(advancedEnabled)
+  const viModel = useVIModel(advancedEnabled)
+  const evpnRib = useEVPNRib(protocolsEnabled)
+  const interfaceMTU = useInterfaceMTU(networkEnabled)
+  const ipSpaceAssignment = useIPSpaceAssignment(networkEnabled)
+  const definedStructures = useDefinedStructures(advancedEnabled)
+  const referencedStructures = useReferencedStructures(advancedEnabled)
+  const namedStructures = useNamedStructures(advancedEnabled)
+  const aaaAuthentication = useAAAAuthentication(advancedEnabled)
+  const routePolicies = useRoutePolicies({}, advancedEnabled)
 
   /**
    * Tab navigation configuration for analysis categories
@@ -918,6 +926,17 @@ export function NetworkAnalysisPanel() {
     window.requestAnimationFrame(() => {
       document.getElementById(`analysis-tab-${nextTab.id}`)?.focus()
     })
+  }
+
+  if (!hasActiveSnapshot) {
+    return (
+      <div className="space-y-3" role="region" aria-label={t('analysis.title')}>
+        <h2 className="text-lg font-semibold text-gray-900">{t('analysis.title')}</h2>
+        <p className="text-sm text-gray-700" role="status" aria-live="polite">
+          {t('analysis.noActiveSnapshot')}
+        </p>
+      </div>
+    )
   }
 
   return (
@@ -1235,7 +1254,7 @@ export function NetworkAnalysisPanel() {
         )}
 
         {activeTab === 'advanced' && (
-          <>
+          <Fragment key={`advanced-${currentSnapshotName}`}>
             <Section
               title={t('analysis.sections.f5Vips')}
               icon={<Server className="w-5 h-5 text-blue-600" />}
@@ -1281,17 +1300,17 @@ export function NetworkAnalysisPanel() {
             <SearchRoutePoliciesInteractiveSection />
             <ReduceReachabilitySection />
             <BatfishFeatureTools />
-          </>
+          </Fragment>
         )}
 
         {activeTab === 'acl' && (
-          <>
+          <Fragment key={`acl-${currentSnapshotName}`}>
             <p className="text-sm text-gray-600 mb-1">{t('analysis.acl.description')}</p>
             <FilterLineReachabilitySection />
             <TestFiltersSection />
             <FindMatchingFilterLinesSection />
             <SearchFiltersSection />
-          </>
+          </Fragment>
         )}
       </div>
     </div>

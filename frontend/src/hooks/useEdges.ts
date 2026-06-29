@@ -4,6 +4,10 @@
  */
 import { useQuery } from '@tanstack/react-query'
 import { edgesAPI } from '../services/api'
+import { useSnapshotStore } from '../store'
+
+const inactiveSnapshotKey = 'no-active-snapshot'
+const snapshotSegment = (snapshotName: string | null) => snapshotName ?? inactiveSnapshotKey
 
 /**
  * Query key factory for edges-related React Query caches
@@ -11,10 +15,10 @@ import { edgesAPI } from '../services/api'
  */
 export const edgesKeys = {
   all: ['edges'] as const,
-  ospf: () => [...edgesKeys.all, 'ospf'] as const,
-  physical: () => [...edgesKeys.all, 'physical'] as const,
-  layer3: () => [...edgesKeys.all, 'layer3'] as const,
-  bgp: () => [...edgesKeys.all, 'bgp'] as const,
+  ospf: (snapshotName: string | null) => [...edgesKeys.all, snapshotSegment(snapshotName), 'ospf'] as const,
+  physical: (snapshotName: string | null) => [...edgesKeys.all, snapshotSegment(snapshotName), 'physical'] as const,
+  layer3: (snapshotName: string | null) => [...edgesKeys.all, snapshotSegment(snapshotName), 'layer3'] as const,
+  bgp: (snapshotName: string | null) => [...edgesKeys.all, snapshotSegment(snapshotName), 'bgp'] as const,
 }
 
 /**
@@ -24,10 +28,12 @@ export const edgesKeys = {
  * @param enabled - Optional flag to conditionally enable query (default: true)
  */
 export function useOSPFEdges(enabled = true) {
+  const currentSnapshotName = useSnapshotStore((state) => state.currentSnapshotName)
+
   return useQuery({
-    queryKey: edgesKeys.ospf(),
+    queryKey: edgesKeys.ospf(currentSnapshotName),
     queryFn: () => edgesAPI.getOSPFEdges(),
-    enabled,
+    enabled: enabled && !!currentSnapshotName,
     staleTime: 60000,
   })
 }
@@ -38,10 +44,12 @@ export function useOSPFEdges(enabled = true) {
  * @param enabled - Optional flag to conditionally enable query (default: true)
  */
 export function usePhysicalEdges(enabled = true) {
+  const currentSnapshotName = useSnapshotStore((state) => state.currentSnapshotName)
+
   return useQuery({
-    queryKey: edgesKeys.physical(),
+    queryKey: edgesKeys.physical(currentSnapshotName),
     queryFn: () => edgesAPI.getPhysicalEdges(),
-    enabled,
+    enabled: enabled && !!currentSnapshotName,
     staleTime: 60000,
   })
 }
@@ -52,10 +60,12 @@ export function usePhysicalEdges(enabled = true) {
  * @param enabled - Optional flag to conditionally enable query (default: true)
  */
 export function useLayer3Edges(enabled = true) {
+  const currentSnapshotName = useSnapshotStore((state) => state.currentSnapshotName)
+
   return useQuery({
-    queryKey: edgesKeys.layer3(),
+    queryKey: edgesKeys.layer3(currentSnapshotName),
     queryFn: () => edgesAPI.getLayer3Edges(),
-    enabled,
+    enabled: enabled && !!currentSnapshotName,
     staleTime: 60000,
   })
 }
@@ -67,10 +77,12 @@ export function useLayer3Edges(enabled = true) {
  * @param enabled - Optional flag to conditionally enable query (default: true)
  */
 export function useBGPEdges(enabled = true) {
+  const currentSnapshotName = useSnapshotStore((state) => state.currentSnapshotName)
+
   return useQuery({
-    queryKey: edgesKeys.bgp(),
+    queryKey: edgesKeys.bgp(currentSnapshotName),
     queryFn: () => edgesAPI.getBGPEdges(),
-    enabled,
+    enabled: enabled && !!currentSnapshotName,
     staleTime: 60000,
   })
 }

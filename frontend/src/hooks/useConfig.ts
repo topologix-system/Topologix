@@ -4,6 +4,10 @@
  */
 import { useQuery } from '@tanstack/react-query'
 import { configAPI } from '../services/api'
+import { useSnapshotStore } from '../store'
+
+const inactiveSnapshotKey = 'no-active-snapshot'
+const snapshotSegment = (snapshotName: string | null) => snapshotName ?? inactiveSnapshotKey
 
 /**
  * Query key factory for configuration structures-related React Query caches
@@ -11,10 +15,10 @@ import { configAPI } from '../services/api'
  */
 export const configKeys = {
   all: ['config'] as const,
-  definedStructures: () => [...configKeys.all, 'defined-structures'] as const,
-  referencedStructures: () => [...configKeys.all, 'referenced-structures'] as const,
-  namedStructures: () => [...configKeys.all, 'named-structures'] as const,
-  aaaAuthentication: () => [...configKeys.all, 'aaa-authentication'] as const,
+  definedStructures: (snapshotName: string | null) => [...configKeys.all, snapshotSegment(snapshotName), 'defined-structures'] as const,
+  referencedStructures: (snapshotName: string | null) => [...configKeys.all, snapshotSegment(snapshotName), 'referenced-structures'] as const,
+  namedStructures: (snapshotName: string | null) => [...configKeys.all, snapshotSegment(snapshotName), 'named-structures'] as const,
+  aaaAuthentication: (snapshotName: string | null) => [...configKeys.all, snapshotSegment(snapshotName), 'aaa-authentication'] as const,
 }
 
 /**
@@ -24,10 +28,12 @@ export const configKeys = {
  * @param enabled - Optional flag to conditionally enable query (default: true)
  */
 export function useDefinedStructures(enabled = true) {
+  const currentSnapshotName = useSnapshotStore((state) => state.currentSnapshotName)
+
   return useQuery({
-    queryKey: configKeys.definedStructures(),
+    queryKey: configKeys.definedStructures(currentSnapshotName),
     queryFn: () => configAPI.getDefinedStructures(),
-    enabled,
+    enabled: enabled && !!currentSnapshotName,
     staleTime: 60000,
   })
 }
@@ -39,10 +45,12 @@ export function useDefinedStructures(enabled = true) {
  * @param enabled - Optional flag to conditionally enable query (default: true)
  */
 export function useReferencedStructures(enabled = true) {
+  const currentSnapshotName = useSnapshotStore((state) => state.currentSnapshotName)
+
   return useQuery({
-    queryKey: configKeys.referencedStructures(),
+    queryKey: configKeys.referencedStructures(currentSnapshotName),
     queryFn: () => configAPI.getReferencedStructures(),
-    enabled,
+    enabled: enabled && !!currentSnapshotName,
     staleTime: 60000,
   })
 }
@@ -54,10 +62,12 @@ export function useReferencedStructures(enabled = true) {
  * @param enabled - Optional flag to conditionally enable query (default: true)
  */
 export function useNamedStructures(enabled = true) {
+  const currentSnapshotName = useSnapshotStore((state) => state.currentSnapshotName)
+
   return useQuery({
-    queryKey: configKeys.namedStructures(),
+    queryKey: configKeys.namedStructures(currentSnapshotName),
     queryFn: () => configAPI.getNamedStructures(),
-    enabled,
+    enabled: enabled && !!currentSnapshotName,
     staleTime: 60000,
   })
 }
@@ -69,10 +79,12 @@ export function useNamedStructures(enabled = true) {
  * @param enabled - Optional flag to conditionally enable query (default: true)
  */
 export function useAAAAuthentication(enabled = true) {
+  const currentSnapshotName = useSnapshotStore((state) => state.currentSnapshotName)
+
   return useQuery({
-    queryKey: configKeys.aaaAuthentication(),
+    queryKey: configKeys.aaaAuthentication(currentSnapshotName),
     queryFn: () => configAPI.getAAAAuthentication(),
-    enabled,
+    enabled: enabled && !!currentSnapshotName,
     staleTime: 60000,
   })
 }

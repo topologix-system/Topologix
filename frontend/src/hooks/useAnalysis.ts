@@ -6,6 +6,10 @@ import { useQuery, useMutation } from '@tanstack/react-query'
 import type { AxiosError } from 'axios'
 import { analysisAPI } from '../services/api'
 import type { ReachabilityRequest, TracerouteRequest, TracerouteResponse, BidirectionalTracerouteResponse } from '../types'
+import { useSnapshotStore } from '../store'
+
+const inactiveSnapshotKey = 'no-active-snapshot'
+const snapshotSegment = (snapshotName: string | null) => snapshotName ?? inactiveSnapshotKey
 
 /**
  * Query key factory for network analysis-related React Query caches
@@ -14,8 +18,8 @@ import type { ReachabilityRequest, TracerouteRequest, TracerouteResponse, Bidire
 export const analysisKeys = {
   all: ['analysis'] as const,
   reachability: (request?: ReachabilityRequest) => [...analysisKeys.all, 'reachability', request] as const,
-  routePolicies: (params?: { nodes?: string; action?: string }) =>
-    [...analysisKeys.all, 'route-policies', params] as const,
+  routePolicies: (snapshotName: string | null, params?: { nodes?: string; action?: string }) =>
+    [...analysisKeys.all, snapshotSegment(snapshotName), 'route-policies', params] as const,
   traceroute: (request?: TracerouteRequest) => [...analysisKeys.all, 'traceroute', request] as const,
   bidirectionalTraceroute: (request?: TracerouteRequest) =>
     [...analysisKeys.all, 'bidirectional-traceroute', request] as const,
@@ -41,10 +45,12 @@ export function useReachability() {
  * @param enabled - Optional flag to conditionally enable query (default: true)
  */
 export function useRoutePolicies(params?: { nodes?: string; action?: string }, enabled = true) {
+  const currentSnapshotName = useSnapshotStore((state) => state.currentSnapshotName)
+
   return useQuery({
-    queryKey: analysisKeys.routePolicies(params),
+    queryKey: analysisKeys.routePolicies(currentSnapshotName, params),
     queryFn: () => analysisAPI.getRoutePolicies(params),
-    enabled,
+    enabled: enabled && !!currentSnapshotName,
     staleTime: 60000,
   })
 }
@@ -57,7 +63,7 @@ export function useRoutePolicies(params?: { nodes?: string; action?: string }, e
  */
 export function useTraceroute() {
   return useMutation<TracerouteResponse[], AxiosError, TracerouteRequest | undefined>({
-    mutationFn: (request) => analysisAPI.traceroute(request),
+    mutationFn: async (request) => (await analysisAPI.traceroute(request)) ?? [],
     retry: (failureCount, error) => {
       if (error?.response?.status && error.response.status >= 500 && failureCount < 2) return true
       return false
@@ -73,7 +79,7 @@ export function useTraceroute() {
  */
 export function useBidirectionalTraceroute() {
   return useMutation<BidirectionalTracerouteResponse[], AxiosError, TracerouteRequest | undefined>({
-    mutationFn: (request) => analysisAPI.bidirectionalTraceroute(request),
+    mutationFn: async (request) => (await analysisAPI.bidirectionalTraceroute(request)) ?? [],
     retry: (failureCount, error) => {
       if (error?.response?.status && error.response.status >= 500 && failureCount < 2) return true
       return false

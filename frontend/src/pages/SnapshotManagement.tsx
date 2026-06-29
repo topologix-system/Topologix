@@ -123,6 +123,8 @@ export function SnapshotManagement() {
    */
   const currentSnapshotName = useSnapshotStore((state) => state.currentSnapshotName)
   const setCurrentSnapshotName = useSnapshotStore((state) => state.setCurrentSnapshotName)
+  const isSnapshotActivationInProgress = useSnapshotStore((state) => state.isSnapshotActivationInProgress)
+  const activatingSnapshotName = useSnapshotStore((state) => state.activatingSnapshotName)
   const isSelectedSnapshotActive = !!selectedSnapshot && selectedSnapshot === currentSnapshotName
 
   /**
@@ -148,6 +150,7 @@ export function SnapshotManagement() {
   const updateFileFormatMutation = useUpdateSnapshotFileFormat()
   const deleteFileMutation = useDeleteSnapshotFile()
   const activateMutation = useActivateSnapshot()
+  const snapshotActivationPending = isSnapshotActivationInProgress || activateMutation.isPending
 
   const selectedSnapshotDetails = useMemo(
     () => snapshots?.find((snapshot) => snapshot.name === selectedSnapshot) ?? null,
@@ -349,7 +352,7 @@ export function SnapshotManagement() {
       const shouldReactivate = useSnapshotStore.getState().currentSnapshotName === changedSnapshotName
 
       if (shouldReactivate) {
-        if (activateMutation.isPending || fileChangeInProgressRef.current !== null) {
+        if (snapshotActivationPending || fileChangeInProgressRef.current !== null) {
           setUploadError(t('snapshots.fileChangeBusy'))
           return
         }
@@ -413,7 +416,7 @@ export function SnapshotManagement() {
         )
       })
     },
-    [activateMutation, selectedSnapshot, setCurrentSnapshotName, t, uploadMutation]
+    [activateMutation, selectedSnapshot, setCurrentSnapshotName, snapshotActivationPending, t, uploadMutation]
   )
 
   /**
@@ -447,13 +450,14 @@ export function SnapshotManagement() {
    */
   const handleActivate = useCallback(
     (name: string) => {
+      if (snapshotActivationPending) return
       activateMutation.mutate(name, {
         onSuccess: () => {
           setCurrentSnapshotName(name)
         },
       })
     },
-    [activateMutation, setCurrentSnapshotName]
+    [activateMutation, setCurrentSnapshotName, snapshotActivationPending]
   )
 
   const startFileChangeOperation = useCallback((snapshotName: string) => {
@@ -509,7 +513,7 @@ export function SnapshotManagement() {
   const handleFileFormatChange = useCallback(
     (file: SnapshotFile, value: string) => {
       if (!selectedSnapshot || value.startsWith(UNSUPPORTED_FORMAT_PREFIX)) return
-      if (activateMutation.isPending) return
+      if (snapshotActivationPending) return
       if (!startFileChangeOperation(selectedSnapshot)) return
 
       setFileFormatError('')
@@ -542,7 +546,7 @@ export function SnapshotManagement() {
       )
     },
     [
-      activateMutation.isPending,
+      snapshotActivationPending,
       finishFileChangeOperation,
       reactivateCurrentSnapshotAfterFileChange,
       selectedSnapshot,
@@ -558,7 +562,7 @@ export function SnapshotManagement() {
   const handleFileDelete = useCallback(
     (file: SnapshotFile) => {
       if (!selectedSnapshot) return
-      if (activateMutation.isPending) return
+      if (snapshotActivationPending) return
       if (fileChangeInProgressRef.current !== null) return
 
       setFileDeleteError('')
@@ -566,7 +570,7 @@ export function SnapshotManagement() {
       setFileToDelete({ snapshotName: selectedSnapshot, file })
       setFileDeleteConfirmOpen(true)
     },
-    [activateMutation.isPending, selectedSnapshot]
+    [selectedSnapshot, snapshotActivationPending]
   )
 
   /**
@@ -574,7 +578,7 @@ export function SnapshotManagement() {
    */
   const confirmFileDelete = useCallback(() => {
     if (!fileToDelete) return
-    if (activateMutation.isPending) return
+    if (snapshotActivationPending) return
     if (!startFileChangeOperation(fileToDelete.snapshotName)) return
 
     const changedSnapshotName = fileToDelete.snapshotName
@@ -606,11 +610,11 @@ export function SnapshotManagement() {
       }
     )
   }, [
-    activateMutation.isPending,
     deleteFileMutation,
     fileToDelete,
     finishFileChangeOperation,
     reactivateCurrentSnapshotAfterFileChange,
+    snapshotActivationPending,
     startFileChangeOperation,
     t,
   ])
@@ -629,6 +633,7 @@ export function SnapshotManagement() {
   const handleSnapshotSelection = useCallback(
     (snapshot: Snapshot) => {
       if (fileChangeInProgressRef.current !== null) return
+      if (snapshotActivationPending) return
 
       setSelectedSnapshot(snapshot.name)
       setFolderDraft(snapshot.folder_name || '')
@@ -643,7 +648,7 @@ export function SnapshotManagement() {
         handleActivate(snapshot.name)
       }
     },
-    [currentSnapshotName, handleActivate]
+    [currentSnapshotName, handleActivate, snapshotActivationPending]
   )
 
   /**
@@ -673,8 +678,9 @@ export function SnapshotManagement() {
     ? { ...parseResult.summary, severity: 'error' as const }
     : parseResult.summary
   const isFolderDirty = currentFolderValue !== (folderDraft.trim() || '')
-  const isSnapshotActivationPending = activateMutation.isPending
+  const isSnapshotActivationPending = snapshotActivationPending
   const isFileChangeInProgress = fileChangeInProgressSnapshot !== null
+  const isSnapshotCardDisabled = isFileChangeInProgress || isSnapshotActivationPending
   const isFileDeleteDialogOpenForSelectedSnapshot = !!(
     selectedSnapshot &&
     fileDeleteConfirmOpen &&
@@ -788,24 +794,24 @@ export function SnapshotManagement() {
                             key={snapshot.name}
                             role="button"
                             className={`p-4 rounded-lg border-2 ${
-                              isFileChangeInProgress ? 'cursor-not-allowed opacity-75' : 'cursor-pointer'
+                              isSnapshotCardDisabled ? 'cursor-not-allowed opacity-75' : 'cursor-pointer'
                             } transition-colors focus-within:ring-2 focus-within:ring-primary-600 ${
                               currentSnapshotName === snapshot.name
                                 ? 'border-green-500 bg-green-50'
-                                : activateMutation.isPending && activateMutation.variables === snapshot.name
+                                : isSnapshotActivationPending && activatingSnapshotName === snapshot.name
                                 ? 'border-blue-400 bg-blue-50 opacity-75'
                                 : selectedSnapshot === snapshot.name
                                 ? 'border-blue-500 bg-blue-50'
                                 : 'border-gray-200 hover:border-gray-300 hover:shadow-sm'
                             }`}
                             onClick={() => handleSnapshotSelection(snapshot)}
-                            tabIndex={0}
+                            tabIndex={isSnapshotCardDisabled ? -1 : 0}
                             aria-pressed={selectedSnapshot === snapshot.name}
-                            aria-disabled={isFileChangeInProgress}
+                            aria-disabled={isSnapshotCardDisabled}
                             aria-label={`Snapshot ${snapshot.name} in folder ${getFolderDisplayName(snapshot.folder_name)} with ${snapshot.file_count} files${
                               currentSnapshotName === snapshot.name
                                 ? ' - currently active'
-                                : activateMutation.isPending && activateMutation.variables === snapshot.name
+                                : isSnapshotActivationPending && activatingSnapshotName === snapshot.name
                                 ? ' - activating...'
                                 : ''
                             }. Click to activate and view files`}
@@ -825,7 +831,7 @@ export function SnapshotManagement() {
                               </div>
                               {currentSnapshotName === snapshot.name ? (
                                 <CheckCircle className="w-5 h-5 text-green-600 flex-shrink-0" aria-hidden="true" />
-                              ) : activateMutation.isPending && activateMutation.variables === snapshot.name ? (
+                              ) : isSnapshotActivationPending && activatingSnapshotName === snapshot.name ? (
                                 <Loader2 className="w-5 h-5 text-blue-600 flex-shrink-0 animate-spin" aria-hidden="true" />
                               ) : null}
                             </div>

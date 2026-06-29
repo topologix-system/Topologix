@@ -36,12 +36,15 @@ import {
 } from '../../hooks'
 import { ParseResultDetails } from '../validation/ParseResultDetails'
 import { buildParseResultSummary } from '../../lib/validation/parseResult'
+import { useSnapshotStore } from '../../store'
 
 interface SectionProps {
   title: string
   icon: React.ReactNode
   isLoading: boolean
   data: any
+  isError?: boolean
+  errorMessage?: string
   defaultOpen?: boolean
   severity?: 'error' | 'warning' | 'info'
 }
@@ -53,7 +56,16 @@ interface SectionProps {
  * - Badge: shows item count with severity-appropriate colors
  * - Displays JSON data or "No issues found" message
  */
-function Section({ title, icon, isLoading, data, defaultOpen = false, severity = 'info' }: SectionProps) {
+function Section({
+  title,
+  icon,
+  isLoading,
+  data,
+  isError = false,
+  errorMessage,
+  defaultOpen = false,
+  severity = 'info',
+}: SectionProps) {
   const { t } = useTranslation()
   const [isOpen, setIsOpen] = useState(defaultOpen)
   const sectionId = `validation-section-${title.toLowerCase().replace(/\s+/g, '-')}`
@@ -130,6 +142,11 @@ function Section({ title, icon, isLoading, data, defaultOpen = false, severity =
             <div className="flex items-center gap-2 text-sm text-gray-700 py-3" role="status" aria-live="polite">
               <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-primary-600" aria-hidden="true"></div>
               <span>{t('validation.loading', { section: title })}</span>
+            </div>
+          ) : isError ? (
+            <div className="flex items-start gap-2 text-sm text-red-700 py-3" role="alert">
+              <XCircle className="w-4 h-4 text-red-600 flex-shrink-0 mt-0.5" aria-hidden="true" />
+              <span>{errorMessage || t('common.error')}</span>
             </div>
           ) : !hasData ? (
             <div className="flex items-center gap-2 text-sm text-gray-700 py-3">
@@ -226,21 +243,42 @@ function SubnetMultipathSection() {
 
 export function ValidationPanel() {
   const { t } = useTranslation()
+  const currentSnapshotName = useSnapshotStore((state) => state.currentSnapshotName)
+  const hasActiveSnapshot = Boolean(currentSnapshotName)
 
   // Validation-specific queries
-  const fileParseStatus = useFileParseStatus()
-  const initIssues = useInitIssues()
-  const parseWarnings = useParseWarnings()
-  const viConversionStatus = useVIConversionStatus()
-  const unusedStructures = useUnusedStructures()
-  const undefinedRefs = useUndefinedReferences()
-  const forwardingLoops = useForwardingLoops()
-  const multipathConsistency = useMultipathConsistency()
-  const loopbackMultipathConsistency = useLoopbackMultipathConsistency()
+  const fileParseStatus = useFileParseStatus(hasActiveSnapshot)
+  const initIssues = useInitIssues(hasActiveSnapshot)
+  const parseWarnings = useParseWarnings(hasActiveSnapshot)
+  const viConversionStatus = useVIConversionStatus(hasActiveSnapshot)
+  const unusedStructures = useUnusedStructures(hasActiveSnapshot)
+  const undefinedRefs = useUndefinedReferences(hasActiveSnapshot)
+  const forwardingLoops = useForwardingLoops(hasActiveSnapshot)
+  const multipathConsistency = useMultipathConsistency(hasActiveSnapshot)
+  const loopbackMultipathConsistency = useLoopbackMultipathConsistency(hasActiveSnapshot)
   const parseResultError =
     fileParseStatus.error || initIssues.error || parseWarnings.error
   const hasParseResultQueryError =
-    fileParseStatus.isError || initIssues.isError || parseWarnings.isError
+    fileParseStatus.isError ||
+    fileParseStatus.isRefetchError ||
+    initIssues.isError ||
+    initIssues.isRefetchError ||
+    parseWarnings.isError ||
+    parseWarnings.isRefetchError
+  const validationQueries = [
+    fileParseStatus,
+    initIssues,
+    parseWarnings,
+    viConversionStatus,
+    unusedStructures,
+    undefinedRefs,
+    forwardingLoops,
+    multipathConsistency,
+    loopbackMultipathConsistency,
+  ]
+  const hasValidationQueryError = validationQueries.some(
+    (query) => query.isError || query.isRefetchError || query.error
+  )
   const parseResultSummary = useMemo(
     () =>
       buildParseResultSummary(
@@ -253,6 +291,7 @@ export function ValidationPanel() {
 
   // Calculate overall validation status
   const hasErrors =
+    hasValidationQueryError ||
     hasParseResultQueryError ||
     parseResultSummary.severity === 'error' ||
     (undefinedRefs.data && Array.isArray(undefinedRefs.data) && undefinedRefs.data.length > 0) ||
@@ -274,15 +313,18 @@ export function ValidationPanel() {
    * Aggregates loading state from all validation data sources
    */
   const isLoading =
-    fileParseStatus.isLoading ||
-    initIssues.isLoading ||
-    parseWarnings.isLoading ||
-    viConversionStatus.isLoading ||
-    unusedStructures.isLoading ||
-    undefinedRefs.isLoading ||
-    forwardingLoops.isLoading ||
-    multipathConsistency.isLoading ||
-    loopbackMultipathConsistency.isLoading
+    validationQueries.some((query) => query.isLoading || query.isFetching)
+
+  if (!hasActiveSnapshot) {
+    return (
+      <div className="space-y-4" role="region" aria-label={t('validation.title')}>
+        <h2 className="text-lg font-semibold text-gray-900">{t('validation.title')}</h2>
+        <p className="text-sm text-gray-700" role="status" aria-live="polite">
+          {t('validation.noActiveSnapshot')}
+        </p>
+      </div>
+    )
+  }
 
   return (
     <div className="space-y-4" role="region" aria-label={t('validation.title')}>
@@ -320,7 +362,14 @@ export function ValidationPanel() {
           fileStatuses={fileParseStatus.data}
           initIssues={initIssues.data}
           parseWarnings={parseWarnings.data}
-          isLoading={fileParseStatus.isLoading || initIssues.isLoading || parseWarnings.isLoading}
+          isLoading={
+            fileParseStatus.isLoading ||
+            fileParseStatus.isFetching ||
+            initIssues.isLoading ||
+            initIssues.isFetching ||
+            parseWarnings.isLoading ||
+            parseWarnings.isFetching
+          }
           isError={hasParseResultQueryError}
           errorMessage={parseResultError ? String(parseResultError) : undefined}
         />
@@ -329,50 +378,66 @@ export function ValidationPanel() {
         <Section
           title={t('validation.sections.undefinedReferences')}
           icon={<AlertCircle className="w-5 h-5 text-red-600" />}
-          isLoading={undefinedRefs.isLoading}
+          isLoading={undefinedRefs.isLoading || undefinedRefs.isFetching}
           data={undefinedRefs.data}
+          isError={undefinedRefs.isError || undefinedRefs.isRefetchError || !!undefinedRefs.error}
+          errorMessage={undefinedRefs.error ? String(undefinedRefs.error) : undefined}
           severity="error"
         />
 
         <Section
           title={t('validation.sections.forwardingLoops')}
           icon={<GitBranch className="w-5 h-5 text-red-600" />}
-          isLoading={forwardingLoops.isLoading}
+          isLoading={forwardingLoops.isLoading || forwardingLoops.isFetching}
           data={forwardingLoops.data}
+          isError={forwardingLoops.isError || forwardingLoops.isRefetchError || !!forwardingLoops.error}
+          errorMessage={forwardingLoops.error ? String(forwardingLoops.error) : undefined}
           severity="error"
         />
 
         <Section
           title={t('validation.sections.multipathConsistency')}
           icon={<AlertCircle className="w-5 h-5 text-red-600" />}
-          isLoading={multipathConsistency.isLoading}
+          isLoading={multipathConsistency.isLoading || multipathConsistency.isFetching}
           data={multipathConsistency.data}
+          isError={multipathConsistency.isError || multipathConsistency.isRefetchError || !!multipathConsistency.error}
+          errorMessage={multipathConsistency.error ? String(multipathConsistency.error) : undefined}
           severity="error"
         />
 
         <Section
           title={t('validation.sections.loopbackMultipathConsistency')}
           icon={<AlertCircle className="w-5 h-5 text-red-600" />}
-          isLoading={loopbackMultipathConsistency.isLoading}
+          isLoading={loopbackMultipathConsistency.isLoading || loopbackMultipathConsistency.isFetching}
           data={loopbackMultipathConsistency.data}
+          isError={
+            loopbackMultipathConsistency.isError ||
+            loopbackMultipathConsistency.isRefetchError ||
+            !!loopbackMultipathConsistency.error
+          }
+          errorMessage={loopbackMultipathConsistency.error ? String(loopbackMultipathConsistency.error) : undefined}
           severity="error"
         />
 
-        <SubnetMultipathSection />
+        <SubnetMultipathSection key={currentSnapshotName} />
 
         <Section
           title={t('validation.sections.unusedStructures')}
           icon={<AlertTriangle className="w-5 h-5 text-yellow-600" />}
-          isLoading={unusedStructures.isLoading}
+          isLoading={unusedStructures.isLoading || unusedStructures.isFetching}
           data={unusedStructures.data}
+          isError={unusedStructures.isError || unusedStructures.isRefetchError || !!unusedStructures.error}
+          errorMessage={unusedStructures.error ? String(unusedStructures.error) : undefined}
           severity="warning"
         />
 
         <Section
           title={t('validation.sections.viConversionStatus')}
           icon={<FileText className="w-5 h-5 text-blue-600" />}
-          isLoading={viConversionStatus.isLoading}
+          isLoading={viConversionStatus.isLoading || viConversionStatus.isFetching}
           data={viConversionStatus.data}
+          isError={viConversionStatus.isError || viConversionStatus.isRefetchError || !!viConversionStatus.error}
+          errorMessage={viConversionStatus.error ? String(viConversionStatus.error) : undefined}
         />
       </div>
     </div>

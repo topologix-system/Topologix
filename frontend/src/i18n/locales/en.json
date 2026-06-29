@@ -39,6 +39,7 @@
     "title": "Network Overview",
     "loading": "Loading network overview data...",
     "noData": "No data available",
+    "noActiveSnapshot": "Activate a snapshot to view network overview data.",
     "stats": {
       "nodes": "Nodes",
       "interfaces": "Interfaces",
@@ -446,7 +447,8 @@
     "label": "Select node",
     "placeholder": "Select a node...",
     "loading": "Loading nodes...",
-    "error": "Failed to load nodes"
+    "error": "Failed to load nodes",
+    "noActiveSnapshot": "No active snapshot"
   },
   "edgeDetails": {
     "title": "Edge Details",
@@ -490,6 +492,7 @@
     "description": "Review configuration validation results, parse issues, and structural problems.",
     "loading": "Loading {{section}}...",
     "noIssues": "No issues found",
+    "noActiveSnapshot": "Activate a snapshot to review validation results.",
     "dataJsonFormat": "{{title}} data in JSON format",
     "status": {
       "errorsFound": "Errors Found",
@@ -574,6 +577,7 @@
     "description": "Explore network topology structure, routing protocols, and configuration details.",
     "loading": "Loading {{section}}...",
     "noData": "No data available",
+    "noActiveSnapshot": "Activate a snapshot to explore network analysis data.",
     "dataJsonFormat": "{{title}} data in JSON format",
     "categoriesLabel": "Analysis categories",
     "tabs": {
@@ -804,6 +808,7 @@
     "loading": "Loading topology...",
     "loadingDetail": "Loading network topology data, please wait",
     "noData": "No topology data available",
+    "noActiveSnapshot": "Activate a snapshot to view the topology.",
     "layoutOptions": "Layout Options",
     "layouts": {
       "cose": "CoSE (Compound Spring Embedder)",
@@ -1066,6 +1071,7 @@
   "traceroute": {
     "title": "Network Traceroute",
     "description": "Simulate packet flow through your network to analyze reachability, routing paths, and potential issues.",
+    "noActiveSnapshot": "Activate a snapshot to run traceroute analysis.",
     "sections": {
       "configuration": "Configuration",
       "pathConstraints": "Path Constraints",

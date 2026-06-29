@@ -5,6 +5,7 @@
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { snapshotAPI } from '../services/api'
 import { validationKeys } from './useValidation'
+import { useSnapshotStore } from '../store'
 import type {
   CreateSnapshotRequest,
   ReplaceSnapshotArtifactContentRequest,
@@ -25,6 +26,21 @@ export const snapshotKeys = {
   artifactTypes: (name: string) => [...snapshotKeys.all, name, 'artifact-types'] as const,
   artifactTree: (name: string) => [...snapshotKeys.all, name, 'artifact-tree'] as const,
 }
+
+export const batfishQueryFamilies = [
+  ['network'],
+  ['ospf'],
+  ['edges'],
+  ['config'],
+  ['validation'],
+  ['topology'],
+  ['protocols'],
+  ['ha'],
+  ['advanced'],
+  ['analysis'],
+  ['bgp'],
+  ['snmp-security'],
+] as const
 
 /**
  * Query all available snapshots
@@ -278,36 +294,57 @@ export function useValidateSnapshotArtifacts() {
 
 /**
  * Mutation to activate snapshot for Batfish analysis
- * Initializes Batfish with snapshot and refetches all network data
- * Uses refetchQueries (not invalidateQueries) for immediate data refresh
+ * Initializes Batfish with snapshot and marks snapshot-dependent caches stale
  * Critical mutation that triggers full topology reload
  * Used in Header dropdown and SnapshotManagement page
  */
 export function useActivateSnapshot() {
   const queryClient = useQueryClient()
+  const setCurrentSnapshotName = useSnapshotStore((state) => state.setCurrentSnapshotName)
+  const setSnapshotActivationState = useSnapshotStore((state) => state.setSnapshotActivationState)
+  const cancelBatfishQueries = () =>
+    Promise.all(batfishQueryFamilies.map((queryKey) => queryClient.cancelQueries({ queryKey })))
+  const invalidateBatfishQueriesWithoutRefetch = () =>
+    Promise.all(
+      batfishQueryFamilies.map((queryKey) =>
+        queryClient.invalidateQueries({ queryKey, refetchType: 'none' })
+      )
+    )
 
   return useMutation({
-    mutationFn: (name: string) => snapshotAPI.activate(name),
-    onSuccess: (activationResult) => {
-      queryClient.setQueryData(validationKeys.fileParseStatus(), activationResult?.file_parse_status ?? [])
-      queryClient.setQueryData(validationKeys.initIssues(), activationResult?.init_issues ?? [])
-      queryClient.setQueryData(validationKeys.parseWarnings(), activationResult?.parse_warnings ?? [])
+    mutationFn: async (snapshotName: string) => {
+      const snapshotState = useSnapshotStore.getState()
+      if (snapshotState.isSnapshotActivationInProgress) {
+        throw new Error('Snapshot activation is already in progress.')
+      }
 
-      // Refetch ALL Batfish-related queries immediately
-      // refetchQueries() provides guaranteed immediate refetch (vs invalidateQueries)
-      // This ensures data updates immediately when switching snapshots
-      queryClient.refetchQueries({ queryKey: ['network'] })
-      queryClient.refetchQueries({ queryKey: ['ospf'] })
-      queryClient.refetchQueries({ queryKey: ['edges'] })
-      queryClient.refetchQueries({ queryKey: ['config'] })
-      queryClient.refetchQueries({ queryKey: ['validation'] })
-      queryClient.refetchQueries({ queryKey: ['topology'] })
-      queryClient.refetchQueries({ queryKey: ['protocols'] })
-      queryClient.refetchQueries({ queryKey: ['ha'] })
-      queryClient.refetchQueries({ queryKey: ['advanced'] })
-      queryClient.refetchQueries({ queryKey: ['analysis'] })
-      queryClient.refetchQueries({ queryKey: ['bgp'] })
-      queryClient.refetchQueries({ queryKey: ['snmp-security'] })
+      const previousSnapshotName = snapshotState.currentSnapshotName
+      let backendActivated = false
+
+      setSnapshotActivationState(true, snapshotName)
+
+      try {
+        await cancelBatfishQueries()
+        setCurrentSnapshotName(null)
+
+        const activationResult = await snapshotAPI.activate(snapshotName)
+        backendActivated = true
+
+        await cancelBatfishQueries()
+        await invalidateBatfishQueriesWithoutRefetch()
+
+        queryClient.setQueryData(validationKeys.fileParseStatus(snapshotName), activationResult?.file_parse_status ?? [])
+        queryClient.setQueryData(validationKeys.initIssues(snapshotName), activationResult?.init_issues ?? [])
+        queryClient.setQueryData(validationKeys.parseWarnings(snapshotName), activationResult?.parse_warnings ?? [])
+        setCurrentSnapshotName(snapshotName)
+
+        return activationResult
+      } catch (error) {
+        setCurrentSnapshotName(backendActivated ? snapshotName : previousSnapshotName)
+        throw error
+      } finally {
+        setSnapshotActivationState(false)
+      }
     },
   })
 }

@@ -14,7 +14,10 @@ import { persist } from 'zustand/middleware'
  */
 interface SnapshotState {
   currentSnapshotName: string | null
+  isSnapshotActivationInProgress: boolean
+  activatingSnapshotName: string | null
   setCurrentSnapshotName: (name: string | null) => void
+  setSnapshotActivationState: (isInProgress: boolean, name?: string | null) => void
 }
 
 /**
@@ -26,10 +29,18 @@ export const useSnapshotStore = create<SnapshotState>()(
   persist(
     (set) => ({
       currentSnapshotName: null,
+      isSnapshotActivationInProgress: false,
+      activatingSnapshotName: null,
       setCurrentSnapshotName: (name) => set({ currentSnapshotName: name }),
+      setSnapshotActivationState: (isInProgress, name = null) =>
+        set({
+          isSnapshotActivationInProgress: isInProgress,
+          activatingSnapshotName: isInProgress ? name : null,
+        }),
     }),
     {
       name: 'topologix-snapshot-storage',
+      partialize: (state) => ({ currentSnapshotName: state.currentSnapshotName }),
     }
   )
 )

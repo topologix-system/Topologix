@@ -11,13 +11,25 @@ import { useAllNetworkData, useUnusedStructures, useUndefinedReferences, useForw
 import { Server, Link, GitBranch, AlertTriangle } from 'lucide-react'
 import { ParseResultSummaryCard } from '../validation/ParseResultDetails'
 import { buildFileParseStatusView, buildParseResultSummary } from '../../lib/validation/parseResult'
+import { useSnapshotStore } from '../../store'
 
 export function OverviewPanel() {
   const { t } = useTranslation()
-  const { data, isLoading } = useAllNetworkData()
-  const { data: unusedStructures } = useUnusedStructures()
-  const { data: undefinedRefs } = useUndefinedReferences()
-  const { data: forwardingLoops } = useForwardingLoops()
+  const currentSnapshotName = useSnapshotStore((state) => state.currentSnapshotName)
+  const hasActiveSnapshot = Boolean(currentSnapshotName)
+  const { data, isLoading } = useAllNetworkData(hasActiveSnapshot)
+  const { data: unusedStructures } = useUnusedStructures(hasActiveSnapshot)
+  const { data: undefinedRefs } = useUndefinedReferences(hasActiveSnapshot)
+  const { data: forwardingLoops } = useForwardingLoops(hasActiveSnapshot)
+
+  if (!hasActiveSnapshot) {
+    return (
+      <div className="space-y-3" role="status" aria-live="polite">
+        <h2 className="text-lg font-semibold text-gray-900">{t('overview.title')}</h2>
+        <p className="text-sm text-gray-700">{t('overview.noActiveSnapshot')}</p>
+      </div>
+    )
+  }
 
   if (isLoading) {
     return (

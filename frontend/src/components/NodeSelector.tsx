@@ -1,7 +1,7 @@
 import { useTranslation } from 'react-i18next'
 import { Router } from 'lucide-react'
 import { useNodes } from '../hooks'
-import { useUIStore } from '../store'
+import { useSnapshotStore, useUIStore } from '../store'
 import { logger } from '../utils/logger'
 
 /**
@@ -14,7 +14,10 @@ export function NodeSelector() {
   const { t } = useTranslation()
   const selectedNodeId = useUIStore((state) => state.selectedNodeId)
   const setSelectedNode = useUIStore((state) => state.setSelectedNode)
-  const { data: nodes, isLoading, isError } = useNodes()
+  const currentSnapshotName = useSnapshotStore((state) => state.currentSnapshotName)
+  const hasActiveSnapshot = Boolean(currentSnapshotName)
+  const { data: nodes, isLoading, isError } = useNodes(hasActiveSnapshot)
+  const selectableNodes = hasActiveSnapshot ? nodes : []
 
   /**
    * Handle node selection change from dropdown
@@ -47,16 +50,20 @@ export function NodeSelector() {
         id="node-selector"
         value={selectedNodeId || ''}
         onChange={handleNodeChange}
-        disabled={isLoading}
+        disabled={!hasActiveSnapshot || isLoading}
         className="flex-1 px-3 py-1.5 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-primary-600 focus:ring-offset-1 disabled:opacity-50 disabled:cursor-not-allowed"
         aria-label={t('nodeSelector.label', 'Select node')}
       >
         <option value="">
-          {isLoading
-            ? t('nodeSelector.loading', 'Loading nodes...')
-            : t('nodeSelector.placeholder', 'Select a node...')}
+          {
+            !hasActiveSnapshot
+              ? t('nodeSelector.noActiveSnapshot', 'No active snapshot')
+              : isLoading
+                ? t('nodeSelector.loading', 'Loading nodes...')
+                : t('nodeSelector.placeholder', 'Select a node...')
+          }
         </option>
-        {nodes?.map((node) => (
+        {selectableNodes?.map((node) => (
           <option key={node.node} value={node.node}>
             {node.node}
           </option>

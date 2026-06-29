@@ -31,8 +31,30 @@ import {
   Info,
 } from 'lucide-react'
 import { ProtocolSelector } from '../ProtocolSelector'
+import { useSnapshotStore } from '../../store'
 
 export function TraceroutePanel() {
+  const { t } = useTranslation()
+  const currentSnapshotName = useSnapshotStore((state) => state.currentSnapshotName)
+
+  if (!currentSnapshotName) {
+    return (
+      <div className="space-y-4" role="region" aria-label={t('traceroute.title')}>
+        <div>
+          <h2 className="text-xl font-semibold text-gray-900">{t('traceroute.title')}</h2>
+          <p className="text-sm text-gray-600 mt-1">{t('traceroute.description')}</p>
+        </div>
+        <p className="text-sm text-gray-700" role="status" aria-live="polite">
+          {t('traceroute.noActiveSnapshot')}
+        </p>
+      </div>
+    )
+  }
+
+  return <TraceroutePanelContent key={currentSnapshotName} />
+}
+
+function TraceroutePanelContent() {
   const { t } = useTranslation()
   const [tracerouteMode, setTracerouteMode] = useState<'unidirectional' | 'bidirectional'>(
     'unidirectional'

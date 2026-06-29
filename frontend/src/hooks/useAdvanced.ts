@@ -4,6 +4,10 @@
  */
 import { useQuery, useMutation } from '@tanstack/react-query'
 import { advancedAPI } from '../services/api'
+import { useSnapshotStore } from '../store'
+
+const inactiveSnapshotKey = 'no-active-snapshot'
+const snapshotSegment = (snapshotName: string | null) => snapshotName ?? inactiveSnapshotKey
 
 /**
  * Query key factory for advanced features-related React Query caches
@@ -11,8 +15,8 @@ import { advancedAPI } from '../services/api'
  */
 export const advancedKeys = {
   all: ['advanced'] as const,
-  f5vips: () => [...advancedKeys.all, 'f5-vips'] as const,
-  viModel: () => [...advancedKeys.all, 'vi-model'] as const,
+  f5vips: (snapshotName: string | null) => [...advancedKeys.all, snapshotSegment(snapshotName), 'f5-vips'] as const,
+  viModel: (snapshotName: string | null) => [...advancedKeys.all, snapshotSegment(snapshotName), 'vi-model'] as const,
 }
 
 /**
@@ -22,10 +26,12 @@ export const advancedKeys = {
  * @param enabled - Optional flag to conditionally enable query (default: true)
  */
 export function useF5VIPs(enabled = true) {
+  const currentSnapshotName = useSnapshotStore((state) => state.currentSnapshotName)
+
   return useQuery({
-    queryKey: advancedKeys.f5vips(),
+    queryKey: advancedKeys.f5vips(currentSnapshotName),
     queryFn: () => advancedAPI.getF5VIPs(),
-    enabled,
+    enabled: enabled && !!currentSnapshotName,
     staleTime: 60000,
   })
 }
@@ -37,10 +43,12 @@ export function useF5VIPs(enabled = true) {
  * @param enabled - Optional flag to conditionally enable query (default: true)
  */
 export function useVIModel(enabled = true) {
+  const currentSnapshotName = useSnapshotStore((state) => state.currentSnapshotName)
+
   return useQuery({
-    queryKey: advancedKeys.viModel(),
+    queryKey: advancedKeys.viModel(currentSnapshotName),
     queryFn: () => advancedAPI.getVIModel(),
-    enabled,
+    enabled: enabled && !!currentSnapshotName,
     staleTime: 60000,
   })
 }

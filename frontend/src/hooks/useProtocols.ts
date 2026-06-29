@@ -4,6 +4,10 @@
  */
 import { useQuery } from '@tanstack/react-query'
 import { protocolsAPI } from '../services/api'
+import { useSnapshotStore } from '../store'
+
+const inactiveSnapshotKey = 'no-active-snapshot'
+const snapshotSegment = (snapshotName: string | null) => snapshotName ?? inactiveSnapshotKey
 
 /**
  * Query key factory for protocols-related React Query caches
@@ -12,13 +16,13 @@ import { protocolsAPI } from '../services/api'
  */
 export const protocolsKeys = {
   all: ['protocols'] as const,
-  eigrpEdges: () => [...protocolsKeys.all, 'eigrp-edges'] as const,
-  eigrpInterfaces: () => [...protocolsKeys.all, 'eigrp-interfaces'] as const,
-  isisEdges: () => [...protocolsKeys.all, 'isis-edges'] as const,
-  isisInterfaces: () => [...protocolsKeys.all, 'isis-interfaces'] as const,
-  isisLoopbackInterfaces: () => [...protocolsKeys.all, 'isis-loopback-interfaces'] as const,
-  bfdSessionStatus: () => [...protocolsKeys.all, 'bfd-session-status'] as const,
-  evpnRib: () => [...protocolsKeys.all, 'evpn-rib'] as const,
+  eigrpEdges: (snapshotName: string | null) => [...protocolsKeys.all, snapshotSegment(snapshotName), 'eigrp-edges'] as const,
+  eigrpInterfaces: (snapshotName: string | null) => [...protocolsKeys.all, snapshotSegment(snapshotName), 'eigrp-interfaces'] as const,
+  isisEdges: (snapshotName: string | null) => [...protocolsKeys.all, snapshotSegment(snapshotName), 'isis-edges'] as const,
+  isisInterfaces: (snapshotName: string | null) => [...protocolsKeys.all, snapshotSegment(snapshotName), 'isis-interfaces'] as const,
+  isisLoopbackInterfaces: (snapshotName: string | null) => [...protocolsKeys.all, snapshotSegment(snapshotName), 'isis-loopback-interfaces'] as const,
+  bfdSessionStatus: (snapshotName: string | null) => [...protocolsKeys.all, snapshotSegment(snapshotName), 'bfd-session-status'] as const,
+  evpnRib: (snapshotName: string | null) => [...protocolsKeys.all, snapshotSegment(snapshotName), 'evpn-rib'] as const,
 }
 
 /**
@@ -27,10 +31,12 @@ export const protocolsKeys = {
  * @param enabled - Optional flag to conditionally enable query (default: true)
  */
 export function useEIGRPEdges(enabled = true) {
+  const currentSnapshotName = useSnapshotStore((state) => state.currentSnapshotName)
+
   return useQuery({
-    queryKey: protocolsKeys.eigrpEdges(),
+    queryKey: protocolsKeys.eigrpEdges(currentSnapshotName),
     queryFn: () => protocolsAPI.getEIGRPEdges(),
-    enabled,
+    enabled: enabled && !!currentSnapshotName,
     staleTime: 60000,
   })
 }
@@ -41,10 +47,12 @@ export function useEIGRPEdges(enabled = true) {
  * @param enabled - Optional flag to conditionally enable query (default: true)
  */
 export function useEIGRPInterfaces(enabled = true) {
+  const currentSnapshotName = useSnapshotStore((state) => state.currentSnapshotName)
+
   return useQuery({
-    queryKey: protocolsKeys.eigrpInterfaces(),
+    queryKey: protocolsKeys.eigrpInterfaces(currentSnapshotName),
     queryFn: () => protocolsAPI.getEIGRPInterfaces(),
-    enabled,
+    enabled: enabled && !!currentSnapshotName,
     staleTime: 60000,
   })
 }
@@ -55,10 +63,12 @@ export function useEIGRPInterfaces(enabled = true) {
  * @param enabled - Optional flag to conditionally enable query (default: true)
  */
 export function useISISEdges(enabled = true) {
+  const currentSnapshotName = useSnapshotStore((state) => state.currentSnapshotName)
+
   return useQuery({
-    queryKey: protocolsKeys.isisEdges(),
+    queryKey: protocolsKeys.isisEdges(currentSnapshotName),
     queryFn: () => protocolsAPI.getISISEdges(),
-    enabled,
+    enabled: enabled && !!currentSnapshotName,
     staleTime: 60000,
   })
 }
@@ -69,10 +79,12 @@ export function useISISEdges(enabled = true) {
  * @param enabled - Optional flag to conditionally enable query (default: true)
  */
 export function useISISInterfaces(enabled = true) {
+  const currentSnapshotName = useSnapshotStore((state) => state.currentSnapshotName)
+
   return useQuery({
-    queryKey: protocolsKeys.isisInterfaces(),
+    queryKey: protocolsKeys.isisInterfaces(currentSnapshotName),
     queryFn: () => protocolsAPI.getISISInterfaces(),
-    enabled,
+    enabled: enabled && !!currentSnapshotName,
     staleTime: 60000,
   })
 }
@@ -83,10 +95,12 @@ export function useISISInterfaces(enabled = true) {
  * @param enabled - Optional flag to conditionally enable query (default: true)
  */
 export function useISISLoopbackInterfaces(enabled = true) {
+  const currentSnapshotName = useSnapshotStore((state) => state.currentSnapshotName)
+
   return useQuery({
-    queryKey: protocolsKeys.isisLoopbackInterfaces(),
+    queryKey: protocolsKeys.isisLoopbackInterfaces(currentSnapshotName),
     queryFn: () => protocolsAPI.getISISLoopbackInterfaces(),
-    enabled,
+    enabled: enabled && !!currentSnapshotName,
     staleTime: 60000,
   })
 }
@@ -97,10 +111,12 @@ export function useISISLoopbackInterfaces(enabled = true) {
  * @param enabled - Optional flag to conditionally enable query (default: true)
  */
 export function useBFDSessionStatus(enabled = true) {
+  const currentSnapshotName = useSnapshotStore((state) => state.currentSnapshotName)
+
   return useQuery({
-    queryKey: protocolsKeys.bfdSessionStatus(),
+    queryKey: protocolsKeys.bfdSessionStatus(currentSnapshotName),
     queryFn: () => protocolsAPI.getBFDSessionStatus(),
-    enabled,
+    enabled: enabled && !!currentSnapshotName,
     staleTime: 60000,
   })
 }
@@ -111,10 +127,12 @@ export function useBFDSessionStatus(enabled = true) {
  * @param enabled - Optional flag to conditionally enable query (default: true)
  */
 export function useEVPNRib(enabled = true) {
+  const currentSnapshotName = useSnapshotStore((state) => state.currentSnapshotName)
+
   return useQuery({
-    queryKey: protocolsKeys.evpnRib(),
+    queryKey: protocolsKeys.evpnRib(currentSnapshotName),
     queryFn: () => protocolsAPI.getEVPNRib(),
-    enabled,
+    enabled: enabled && !!currentSnapshotName,
     staleTime: 60000,
   })
 }

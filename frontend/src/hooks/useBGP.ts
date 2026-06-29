@@ -4,6 +4,10 @@
  */
 import { useQuery } from '@tanstack/react-query'
 import { bgpAPI } from '../services/api'
+import { useSnapshotStore } from '../store'
+
+const inactiveSnapshotKey = 'no-active-snapshot'
+const snapshotSegment = (snapshotName: string | null) => snapshotName ?? inactiveSnapshotKey
 
 /**
  * Query key factory for BGP-related React Query caches
@@ -11,11 +15,11 @@ import { bgpAPI } from '../services/api'
  */
 export const bgpKeys = {
   all: ['bgp'] as const,
-  peerConfiguration: () => [...bgpKeys.all, 'peer-configuration'] as const,
-  processConfiguration: () => [...bgpKeys.all, 'process-configuration'] as const,
-  sessionStatus: () => [...bgpKeys.all, 'session-status'] as const,
-  sessionCompatibility: () => [...bgpKeys.all, 'session-compatibility'] as const,
-  rib: () => [...bgpKeys.all, 'rib'] as const,
+  peerConfiguration: (snapshotName: string | null) => [...bgpKeys.all, snapshotSegment(snapshotName), 'peer-configuration'] as const,
+  processConfiguration: (snapshotName: string | null) => [...bgpKeys.all, snapshotSegment(snapshotName), 'process-configuration'] as const,
+  sessionStatus: (snapshotName: string | null) => [...bgpKeys.all, snapshotSegment(snapshotName), 'session-status'] as const,
+  sessionCompatibility: (snapshotName: string | null) => [...bgpKeys.all, snapshotSegment(snapshotName), 'session-compatibility'] as const,
+  rib: (snapshotName: string | null) => [...bgpKeys.all, snapshotSegment(snapshotName), 'rib'] as const,
 }
 
 /**
@@ -24,10 +28,12 @@ export const bgpKeys = {
  * @param enabled - Optional flag to conditionally enable query (default: true)
  */
 export function useBGPPeerConfiguration(enabled = true) {
+  const currentSnapshotName = useSnapshotStore((state) => state.currentSnapshotName)
+
   return useQuery({
-    queryKey: bgpKeys.peerConfiguration(),
+    queryKey: bgpKeys.peerConfiguration(currentSnapshotName),
     queryFn: () => bgpAPI.getPeerConfiguration(),
-    enabled,
+    enabled: enabled && !!currentSnapshotName,
     staleTime: 60000,
   })
 }
@@ -38,10 +44,12 @@ export function useBGPPeerConfiguration(enabled = true) {
  * @param enabled - Optional flag to conditionally enable query (default: true)
  */
 export function useBGPProcessConfiguration(enabled = true) {
+  const currentSnapshotName = useSnapshotStore((state) => state.currentSnapshotName)
+
   return useQuery({
-    queryKey: bgpKeys.processConfiguration(),
+    queryKey: bgpKeys.processConfiguration(currentSnapshotName),
     queryFn: () => bgpAPI.getProcessConfiguration(),
-    enabled,
+    enabled: enabled && !!currentSnapshotName,
     staleTime: 60000,
   })
 }
@@ -52,10 +60,12 @@ export function useBGPProcessConfiguration(enabled = true) {
  * @param enabled - Optional flag to conditionally enable query (default: true)
  */
 export function useBGPSessionStatus(enabled = true) {
+  const currentSnapshotName = useSnapshotStore((state) => state.currentSnapshotName)
+
   return useQuery({
-    queryKey: bgpKeys.sessionStatus(),
+    queryKey: bgpKeys.sessionStatus(currentSnapshotName),
     queryFn: () => bgpAPI.getSessionStatus(),
-    enabled,
+    enabled: enabled && !!currentSnapshotName,
     staleTime: 60000,
   })
 }
@@ -66,10 +76,12 @@ export function useBGPSessionStatus(enabled = true) {
  * @param enabled - Optional flag to conditionally enable query (default: true)
  */
 export function useBGPSessionCompatibility(enabled = true) {
+  const currentSnapshotName = useSnapshotStore((state) => state.currentSnapshotName)
+
   return useQuery({
-    queryKey: bgpKeys.sessionCompatibility(),
+    queryKey: bgpKeys.sessionCompatibility(currentSnapshotName),
     queryFn: () => bgpAPI.getSessionCompatibility(),
-    enabled,
+    enabled: enabled && !!currentSnapshotName,
     staleTime: 60000,
   })
 }
@@ -80,10 +92,12 @@ export function useBGPSessionCompatibility(enabled = true) {
  * @param enabled - Optional flag to conditionally enable query (default: true)
  */
 export function useBGPRib(enabled = true) {
+  const currentSnapshotName = useSnapshotStore((state) => state.currentSnapshotName)
+
   return useQuery({
-    queryKey: bgpKeys.rib(),
+    queryKey: bgpKeys.rib(currentSnapshotName),
     queryFn: () => bgpAPI.getRib(),
-    enabled,
+    enabled: enabled && !!currentSnapshotName,
     staleTime: 60000,
   })
 }

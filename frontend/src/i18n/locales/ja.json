@@ -39,6 +39,7 @@
     "title": "ネットワーク概要",
     "loading": "ネットワーク概要データを読み込み中...",
     "noData": "利用可能なデータがありません",
+    "noActiveSnapshot": "ネットワーク概要データを表示するにはスナップショットを有効化してください。",
     "stats": {
       "nodes": "ノード",
       "interfaces": "インターフェース",
@@ -446,7 +447,8 @@
     "label": "ノード選択",
     "placeholder": "ノードを選択...",
     "loading": "ノード読み込み中...",
-    "error": "ノードの読み込みに失敗しました"
+    "error": "ノードの読み込みに失敗しました",
+    "noActiveSnapshot": "有効なスナップショットがありません"
   },
   "edgeDetails": {
     "title": "エッジ詳細",
@@ -490,6 +492,7 @@
     "description": "設定の検証結果、パース問題、構造上の問題を確認します。",
     "loading": "{{section}}を読み込み中...",
     "noIssues": "問題は見つかりませんでした",
+    "noActiveSnapshot": "検証結果を確認するにはスナップショットを有効化してください。",
     "dataJsonFormat": "{{title}} JSON形式のデータ",
     "status": {
       "errorsFound": "エラー検出",
@@ -574,6 +577,7 @@
     "description": "ネットワークトポロジー構造、ルーティングプロトコル、設定詳細を探索します。",
     "loading": "{{section}}を読み込み中...",
     "noData": "利用可能なデータがありません",
+    "noActiveSnapshot": "ネットワーク分析データを表示するにはスナップショットを有効化してください。",
     "dataJsonFormat": "{{title}} JSON形式のデータ",
     "categoriesLabel": "分析カテゴリー",
     "tabs": {
@@ -804,6 +808,7 @@
     "loading": "トポロジーを読み込み中...",
     "loadingDetail": "ネットワークトポロジーデータを読み込んでいます。お待ちください",
     "noData": "利用可能なトポロジーデータがありません",
+    "noActiveSnapshot": "トポロジーを表示するにはスナップショットを有効化してください。",
     "layoutOptions": "レイアウトオプション",
     "layouts": {
       "cose": "CoSE（複合スプリング埋め込み）",
@@ -1066,6 +1071,7 @@
   "traceroute": {
     "title": "ネットワークトレースルート",
     "description": "ネットワーク内のパケットフローをシミュレートし、到達性、ルーティングパス、潜在的な問題を分析します。",
+    "noActiveSnapshot": "トレースルート分析を実行するにはスナップショットを有効化してください。",
     "sections": {
       "configuration": "設定",
       "pathConstraints": "パス制約",

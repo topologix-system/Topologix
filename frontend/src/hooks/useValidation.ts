@@ -6,6 +6,10 @@ import { useMemo } from 'react'
 import { useQuery, useMutation } from '@tanstack/react-query'
 import { validationAPI } from '../services/api'
 import { buildParseResultSummary } from '../lib/validation/parseResult'
+import { useSnapshotStore } from '../store'
+
+const inactiveSnapshotKey = 'no-active-snapshot'
+const snapshotSegment = (snapshotName: string | null) => snapshotName ?? inactiveSnapshotKey
 
 /**
  * Query key factory for validation-related React Query caches
@@ -13,10 +17,15 @@ import { buildParseResultSummary } from '../lib/validation/parseResult'
  */
 export const validationKeys = {
   all: ['validation'] as const,
-  fileParseStatus: () => [...validationKeys.all, 'file-parse-status'] as const,
-  initIssues: () => [...validationKeys.all, 'init-issues'] as const,
-  parseWarnings: () => [...validationKeys.all, 'parse-warnings'] as const,
-  viConversionStatus: () => [...validationKeys.all, 'vi-conversion-status'] as const,
+  fileParseStatus: (snapshotName: string | null) => [...validationKeys.all, snapshotSegment(snapshotName), 'file-parse-status'] as const,
+  initIssues: (snapshotName: string | null) => [...validationKeys.all, snapshotSegment(snapshotName), 'init-issues'] as const,
+  parseWarnings: (snapshotName: string | null) => [...validationKeys.all, snapshotSegment(snapshotName), 'parse-warnings'] as const,
+  viConversionStatus: (snapshotName: string | null) => [...validationKeys.all, snapshotSegment(snapshotName), 'vi-conversion-status'] as const,
+  unusedStructures: (snapshotName: string | null) => [...validationKeys.all, snapshotSegment(snapshotName), 'unused-structures'] as const,
+  undefinedReferences: (snapshotName: string | null) => [...validationKeys.all, snapshotSegment(snapshotName), 'undefined-references'] as const,
+  forwardingLoops: (snapshotName: string | null) => [...validationKeys.all, snapshotSegment(snapshotName), 'forwarding-loops'] as const,
+  multipathConsistency: (snapshotName: string | null) => [...validationKeys.all, snapshotSegment(snapshotName), 'multipath-consistency'] as const,
+  loopbackMultipathConsistency: (snapshotName: string | null) => [...validationKeys.all, snapshotSegment(snapshotName), 'loopback-multipath-consistency'] as const,
 }
 
 /**
@@ -25,10 +34,12 @@ export const validationKeys = {
  * @param enabled - Optional flag to conditionally enable query (default: true)
  */
 export function useFileParseStatus(enabled = true) {
+  const currentSnapshotName = useSnapshotStore((state) => state.currentSnapshotName)
+
   return useQuery({
-    queryKey: validationKeys.fileParseStatus(),
+    queryKey: validationKeys.fileParseStatus(currentSnapshotName),
     queryFn: () => validationAPI.getFileParseStatus(),
-    enabled,
+    enabled: enabled && !!currentSnapshotName,
     staleTime: 60000,
   })
 }
@@ -39,10 +50,12 @@ export function useFileParseStatus(enabled = true) {
  * @param enabled - Optional flag to conditionally enable query (default: true)
  */
 export function useInitIssues(enabled = true) {
+  const currentSnapshotName = useSnapshotStore((state) => state.currentSnapshotName)
+
   return useQuery({
-    queryKey: validationKeys.initIssues(),
+    queryKey: validationKeys.initIssues(currentSnapshotName),
     queryFn: () => validationAPI.getInitIssues(),
-    enabled,
+    enabled: enabled && !!currentSnapshotName,
     staleTime: 60000,
   })
 }
@@ -53,10 +66,12 @@ export function useInitIssues(enabled = true) {
  * @param enabled - Optional flag to conditionally enable query (default: true)
  */
 export function useParseWarnings(enabled = true) {
+  const currentSnapshotName = useSnapshotStore((state) => state.currentSnapshotName)
+
   return useQuery({
-    queryKey: validationKeys.parseWarnings(),
+    queryKey: validationKeys.parseWarnings(currentSnapshotName),
     queryFn: () => validationAPI.getParseWarnings(),
-    enabled,
+    enabled: enabled && !!currentSnapshotName,
     staleTime: 60000,
   })
 }
@@ -85,8 +100,20 @@ export function useParseResultSummary(enabled = true) {
     fileParseStatus,
     initIssues,
     parseWarnings,
-    isLoading: fileParseStatus.isLoading || initIssues.isLoading || parseWarnings.isLoading,
-    isError: fileParseStatus.isError || initIssues.isError || parseWarnings.isError,
+    isLoading:
+      fileParseStatus.isLoading ||
+      fileParseStatus.isFetching ||
+      initIssues.isLoading ||
+      initIssues.isFetching ||
+      parseWarnings.isLoading ||
+      parseWarnings.isFetching,
+    isError:
+      fileParseStatus.isError ||
+      fileParseStatus.isRefetchError ||
+      initIssues.isError ||
+      initIssues.isRefetchError ||
+      parseWarnings.isError ||
+      parseWarnings.isRefetchError,
     error: fileParseStatus.error || initIssues.error || parseWarnings.error,
   }
 }
@@ -97,10 +124,12 @@ export function useParseResultSummary(enabled = true) {
  * @param enabled - Optional flag to conditionally enable query (default: true)
  */
 export function useVIConversionStatus(enabled = true) {
+  const currentSnapshotName = useSnapshotStore((state) => state.currentSnapshotName)
+
   return useQuery({
-    queryKey: validationKeys.viConversionStatus(),
+    queryKey: validationKeys.viConversionStatus(currentSnapshotName),
     queryFn: () => validationAPI.getVIConversionStatus(),
-    enabled,
+    enabled: enabled && !!currentSnapshotName,
     staleTime: 60000,
   })
 }
@@ -112,10 +141,12 @@ export function useVIConversionStatus(enabled = true) {
  * @param enabled - Optional flag to conditionally enable query (default: true)
  */
 export function useUnusedStructures(enabled = true) {
+  const currentSnapshotName = useSnapshotStore((state) => state.currentSnapshotName)
+
   return useQuery({
-    queryKey: [...validationKeys.all, 'unused-structures'] as const,
+    queryKey: validationKeys.unusedStructures(currentSnapshotName),
     queryFn: () => validationAPI.getUnusedStructures(),
-    enabled,
+    enabled: enabled && !!currentSnapshotName,
     staleTime: 60000,
   })
 }
@@ -127,10 +158,12 @@ export function useUnusedStructures(enabled = true) {
  * @param enabled - Optional flag to conditionally enable query (default: true)
  */
 export function useUndefinedReferences(enabled = true) {
+  const currentSnapshotName = useSnapshotStore((state) => state.currentSnapshotName)
+
   return useQuery({
-    queryKey: [...validationKeys.all, 'undefined-references'] as const,
+    queryKey: validationKeys.undefinedReferences(currentSnapshotName),
     queryFn: () => validationAPI.getUndefinedReferences(),
-    enabled,
+    enabled: enabled && !!currentSnapshotName,
     staleTime: 60000,
   })
 }
@@ -142,10 +175,12 @@ export function useUndefinedReferences(enabled = true) {
  * @param enabled - Optional flag to conditionally enable query (default: true)
  */
 export function useForwardingLoops(enabled = true) {
+  const currentSnapshotName = useSnapshotStore((state) => state.currentSnapshotName)
+
   return useQuery({
-    queryKey: [...validationKeys.all, 'forwarding-loops'] as const,
+    queryKey: validationKeys.forwardingLoops(currentSnapshotName),
     queryFn: () => validationAPI.getForwardingLoops(),
-    enabled,
+    enabled: enabled && !!currentSnapshotName,
     staleTime: 60000,
   })
 }
@@ -157,10 +192,12 @@ export function useForwardingLoops(enabled = true) {
  * @param enabled - Optional flag to conditionally enable query (default: true)
  */
 export function useMultipathConsistency(enabled = true) {
+  const currentSnapshotName = useSnapshotStore((state) => state.currentSnapshotName)
+
   return useQuery({
-    queryKey: [...validationKeys.all, 'multipath-consistency'] as const,
+    queryKey: validationKeys.multipathConsistency(currentSnapshotName),
     queryFn: () => validationAPI.getMultipathConsistency(),
-    enabled,
+    enabled: enabled && !!currentSnapshotName,
     staleTime: 60000,
   })
 }
@@ -172,10 +209,12 @@ export function useMultipathConsistency(enabled = true) {
  * @param enabled - Optional flag to conditionally enable query (default: true)
  */
 export function useLoopbackMultipathConsistency(enabled = true) {
+  const currentSnapshotName = useSnapshotStore((state) => state.currentSnapshotName)
+
   return useQuery({
-    queryKey: [...validationKeys.all, 'loopback-multipath-consistency'] as const,
+    queryKey: validationKeys.loopbackMultipathConsistency(currentSnapshotName),
     queryFn: () => validationAPI.getLoopbackMultipathConsistency(),
-    enabled,
+    enabled: enabled && !!currentSnapshotName,
     staleTime: 60000,
   })
 }

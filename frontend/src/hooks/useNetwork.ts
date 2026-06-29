@@ -10,6 +10,9 @@ import { networkAPI } from '../services/api'
 import type { NetworkInitializeRequest } from '../types'
 import { useSnapshotStore } from '../store'
 
+const inactiveSnapshotKey = 'no-active-snapshot'
+const snapshotSegment = (snapshotName: string | null) => snapshotName ?? inactiveSnapshotKey
+
 /**
  * Query key factory for network-related React Query caches
  * Hierarchical structure enables targeted cache invalidation
@@ -18,12 +21,12 @@ import { useSnapshotStore } from '../store'
 export const networkKeys = {
   all: ['network'] as const,
   health: () => [...networkKeys.all, 'health'] as const,
-  allData: () => [...networkKeys.all, 'all-data'] as const,
-  nodes: () => [...networkKeys.all, 'nodes'] as const,
-  interfaces: () => [...networkKeys.all, 'interfaces'] as const,
-  routes: () => [...networkKeys.all, 'routes'] as const,
-  vlans: () => [...networkKeys.all, 'vlans'] as const,
-  ipOwners: () => [...networkKeys.all, 'ip-owners'] as const,
+  allData: (snapshotName: string | null) => [...networkKeys.all, snapshotSegment(snapshotName), 'all-data'] as const,
+  nodes: (snapshotName: string | null) => [...networkKeys.all, snapshotSegment(snapshotName), 'nodes'] as const,
+  interfaces: (snapshotName: string | null) => [...networkKeys.all, snapshotSegment(snapshotName), 'interfaces'] as const,
+  routes: (snapshotName: string | null) => [...networkKeys.all, snapshotSegment(snapshotName), 'routes'] as const,
+  vlans: (snapshotName: string | null) => [...networkKeys.all, snapshotSegment(snapshotName), 'vlans'] as const,
+  ipOwners: (snapshotName: string | null) => [...networkKeys.all, snapshotSegment(snapshotName), 'ip-owners'] as const,
 }
 
 /**
@@ -67,7 +70,7 @@ export function useAllNetworkData(enabled = true) {
   const currentSnapshotName = useSnapshotStore((state) => state.currentSnapshotName)
 
   return useQuery({
-    queryKey: networkKeys.allData(),
+    queryKey: networkKeys.allData(currentSnapshotName),
     queryFn: () => networkAPI.getAllData(),
     enabled: enabled && !!currentSnapshotName,
     staleTime: 5 * 60 * 1000,
@@ -83,10 +86,12 @@ export function useAllNetworkData(enabled = true) {
  * @param enabled - Optional flag to conditionally enable query (default: true)
  */
 export function useNodes(enabled = true) {
+  const currentSnapshotName = useSnapshotStore((state) => state.currentSnapshotName)
+
   return useQuery({
-    queryKey: networkKeys.nodes(),
+    queryKey: networkKeys.nodes(currentSnapshotName),
     queryFn: () => networkAPI.getNodes(),
-    enabled,
+    enabled: enabled && !!currentSnapshotName,
     staleTime: 5 * 60 * 1000,
     gcTime: 10 * 60 * 1000,
     refetchOnWindowFocus: false,
@@ -99,10 +104,12 @@ export function useNodes(enabled = true) {
  * @param enabled - Optional flag to conditionally enable query (default: true)
  */
 export function useInterfaces(enabled = true) {
+  const currentSnapshotName = useSnapshotStore((state) => state.currentSnapshotName)
+
   return useQuery({
-    queryKey: networkKeys.interfaces(),
+    queryKey: networkKeys.interfaces(currentSnapshotName),
     queryFn: () => networkAPI.getInterfaces(),
-    enabled,
+    enabled: enabled && !!currentSnapshotName,
     staleTime: 5 * 60 * 1000,
     gcTime: 10 * 60 * 1000,
     refetchOnWindowFocus: false,
@@ -115,10 +122,12 @@ export function useInterfaces(enabled = true) {
  * @param enabled - Optional flag to conditionally enable query (default: true)
  */
 export function useRoutes(enabled = true) {
+  const currentSnapshotName = useSnapshotStore((state) => state.currentSnapshotName)
+
   return useQuery({
-    queryKey: networkKeys.routes(),
+    queryKey: networkKeys.routes(currentSnapshotName),
     queryFn: () => networkAPI.getRoutes(),
-    enabled,
+    enabled: enabled && !!currentSnapshotName,
     staleTime: 5 * 60 * 1000,
     gcTime: 10 * 60 * 1000,
     refetchOnWindowFocus: false,
@@ -131,10 +140,12 @@ export function useRoutes(enabled = true) {
  * @param enabled - Optional flag to conditionally enable query (default: true)
  */
 export function useVlans(enabled = true) {
+  const currentSnapshotName = useSnapshotStore((state) => state.currentSnapshotName)
+
   return useQuery({
-    queryKey: networkKeys.vlans(),
+    queryKey: networkKeys.vlans(currentSnapshotName),
     queryFn: () => networkAPI.getVlans(),
-    enabled,
+    enabled: enabled && !!currentSnapshotName,
     staleTime: 5 * 60 * 1000,
     gcTime: 10 * 60 * 1000,
     refetchOnWindowFocus: false,
@@ -148,10 +159,12 @@ export function useVlans(enabled = true) {
  * @param enabled - Optional flag to conditionally enable query (default: true)
  */
 export function useIPOwners(enabled = true) {
+  const currentSnapshotName = useSnapshotStore((state) => state.currentSnapshotName)
+
   return useQuery({
-    queryKey: networkKeys.ipOwners(),
+    queryKey: networkKeys.ipOwners(currentSnapshotName),
     queryFn: () => networkAPI.getIPOwners(),
-    enabled,
+    enabled: enabled && !!currentSnapshotName,
     staleTime: 5 * 60 * 1000,
     gcTime: 10 * 60 * 1000,
     refetchOnWindowFocus: false,

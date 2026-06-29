@@ -22,6 +22,7 @@ export function Header() {
 
   const currentSnapshotName = useSnapshotStore((state) => state.currentSnapshotName)
   const setCurrentSnapshotName = useSnapshotStore((state) => state.setCurrentSnapshotName)
+  const isSnapshotActivationInProgress = useSnapshotStore((state) => state.isSnapshotActivationInProgress)
 
   const user = useAuthStore((state) => state.user)
   const logout = useAuthStore((state) => state.logout)
@@ -30,6 +31,7 @@ export function Header() {
   const { data: health, isLoading } = useHealth()
   const activateMutation = useActivateSnapshot()
   const { data: snapshots } = useSnapshots()
+  const snapshotActivationPending = isSnapshotActivationInProgress || activateMutation.isPending
 
   const [dropdownOpen, setDropdownOpen] = useState(false)
   const [focusedIndex, setFocusedIndex] = useState(-1)
@@ -162,6 +164,7 @@ export function Header() {
   const handleSnapshotChange = useCallback(
     (snapshotName: string) => {
       if (!snapshotName) return
+      if (snapshotActivationPending) return
 
       logger.log('[Header] Activating snapshot:', snapshotName)
 
@@ -175,7 +178,7 @@ export function Header() {
         },
       })
     },
-    [activateMutation, setCurrentSnapshotName]
+    [activateMutation, setCurrentSnapshotName, snapshotActivationPending]
   )
 
   /**
@@ -184,6 +187,7 @@ export function Header() {
    */
   const handleSnapshotReload = useCallback(() => {
     if (!currentSnapshotName) return
+    if (snapshotActivationPending) return
 
     logger.log('[Header] Reloading snapshot:', currentSnapshotName)
 
@@ -195,7 +199,7 @@ export function Header() {
         logger.error('[Header] Failed to reload snapshot:', currentSnapshotName, error)
       },
     })
-  }, [currentSnapshotName, activateMutation])
+  }, [currentSnapshotName, activateMutation, snapshotActivationPending])
 
   /**
    * Handle user logout action
@@ -239,10 +243,10 @@ export function Header() {
               id="snapshot-select"
               value={currentSnapshotName || ''}
               onChange={(e) => handleSnapshotChange(e.target.value)}
-              disabled={!snapshots || snapshots.length === 0 || activateMutation.isPending}
+              disabled={!snapshots || snapshots.length === 0 || snapshotActivationPending}
               className="px-3 py-1.5 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-primary-600 focus:ring-offset-1 disabled:opacity-50 disabled:cursor-not-allowed"
               aria-label="Select network snapshot"
-              aria-describedby={activateMutation.isPending ? 'snapshot-loading' : undefined}
+              aria-describedby={snapshotActivationPending ? 'snapshot-loading' : undefined}
             >
               <option value="">{t('header.selectSnapshot')}</option>
               {snapshots?.map((snapshot) => (
@@ -251,19 +255,19 @@ export function Header() {
                 </option>
               ))}
             </select>
-            {activateMutation.isPending && (
+            {snapshotActivationPending && (
               <span id="snapshot-loading" className="sr-only" role="status" aria-live="polite">
                 Loading snapshot...
               </span>
             )}
             <button
               onClick={handleSnapshotReload}
-              disabled={!currentSnapshotName || activateMutation.isPending}
+              disabled={!currentSnapshotName || snapshotActivationPending}
               className="p-2 hover:bg-gray-100 rounded-lg transition-colors focus:outline-none focus:ring-2 focus:ring-primary-600 focus:ring-offset-1 disabled:opacity-50 disabled:cursor-not-allowed"
               aria-label={t('header.reloadSnapshot')}
               title={t('header.reloadSnapshot')}
             >
-              <RefreshCw className={`w-5 h-5 ${activateMutation.isPending ? 'animate-spin' : ''}`} aria-hidden="true" />
+              <RefreshCw className={`w-5 h-5 ${snapshotActivationPending ? 'animate-spin' : ''}`} aria-hidden="true" />
               <span className="sr-only">{t('header.reloadSnapshot')}</span>
             </button>
             <Link

@@ -4,6 +4,10 @@
  */
 import { useQuery } from '@tanstack/react-query'
 import { ospfAPI } from '../services/api'
+import { useSnapshotStore } from '../store'
+
+const inactiveSnapshotKey = 'no-active-snapshot'
+const snapshotSegment = (snapshotName: string | null) => snapshotName ?? inactiveSnapshotKey
 
 /**
  * Query key factory for OSPF-related React Query caches
@@ -11,10 +15,10 @@ import { ospfAPI } from '../services/api'
  */
 export const ospfKeys = {
   all: ['ospf'] as const,
-  processes: () => [...ospfKeys.all, 'processes'] as const,
-  areas: () => [...ospfKeys.all, 'areas'] as const,
-  interfaces: () => [...ospfKeys.all, 'interfaces'] as const,
-  sessions: () => [...ospfKeys.all, 'sessions'] as const,
+  processes: (snapshotName: string | null) => [...ospfKeys.all, snapshotSegment(snapshotName), 'processes'] as const,
+  areas: (snapshotName: string | null) => [...ospfKeys.all, snapshotSegment(snapshotName), 'areas'] as const,
+  interfaces: (snapshotName: string | null) => [...ospfKeys.all, snapshotSegment(snapshotName), 'interfaces'] as const,
+  sessions: (snapshotName: string | null) => [...ospfKeys.all, snapshotSegment(snapshotName), 'sessions'] as const,
 }
 
 /**
@@ -23,10 +27,12 @@ export const ospfKeys = {
  * @param enabled - Optional flag to conditionally enable query (default: true)
  */
 export function useOSPFProcesses(enabled = true) {
+  const currentSnapshotName = useSnapshotStore((state) => state.currentSnapshotName)
+
   return useQuery({
-    queryKey: ospfKeys.processes(),
+    queryKey: ospfKeys.processes(currentSnapshotName),
     queryFn: () => ospfAPI.getProcesses(),
-    enabled,
+    enabled: enabled && !!currentSnapshotName,
     staleTime: 60000,
   })
 }
@@ -37,10 +43,12 @@ export function useOSPFProcesses(enabled = true) {
  * @param enabled - Optional flag to conditionally enable query (default: true)
  */
 export function useOSPFAreas(enabled = true) {
+  const currentSnapshotName = useSnapshotStore((state) => state.currentSnapshotName)
+
   return useQuery({
-    queryKey: ospfKeys.areas(),
+    queryKey: ospfKeys.areas(currentSnapshotName),
     queryFn: () => ospfAPI.getAreas(),
-    enabled,
+    enabled: enabled && !!currentSnapshotName,
     staleTime: 60000,
   })
 }
@@ -51,10 +59,12 @@ export function useOSPFAreas(enabled = true) {
  * @param enabled - Optional flag to conditionally enable query (default: true)
  */
 export function useOSPFInterfaces(enabled = true) {
+  const currentSnapshotName = useSnapshotStore((state) => state.currentSnapshotName)
+
   return useQuery({
-    queryKey: ospfKeys.interfaces(),
+    queryKey: ospfKeys.interfaces(currentSnapshotName),
     queryFn: () => ospfAPI.getInterfaces(),
-    enabled,
+    enabled: enabled && !!currentSnapshotName,
     staleTime: 60000,
   })
 }
@@ -65,10 +75,12 @@ export function useOSPFInterfaces(enabled = true) {
  * @param enabled - Optional flag to conditionally enable query (default: true)
  */
 export function useOSPFSessions(enabled = true) {
+  const currentSnapshotName = useSnapshotStore((state) => state.currentSnapshotName)
+
   return useQuery({
-    queryKey: ospfKeys.sessions(),
+    queryKey: ospfKeys.sessions(currentSnapshotName),
     queryFn: () => ospfAPI.getSessions(),
-    enabled,
+    enabled: enabled && !!currentSnapshotName,
     staleTime: 60000,
   })
 }

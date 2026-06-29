@@ -4,6 +4,10 @@
  */
 import { useQuery } from '@tanstack/react-query'
 import { haAPI } from '../services/api'
+import { useSnapshotStore } from '../store'
+
+const inactiveSnapshotKey = 'no-active-snapshot'
+const snapshotSegment = (snapshotName: string | null) => snapshotName ?? inactiveSnapshotKey
 
 /**
  * Query key factory for High Availability-related React Query caches
@@ -11,11 +15,11 @@ import { haAPI } from '../services/api'
  */
 export const haKeys = {
   all: ['ha'] as const,
-  vrrp: () => [...haKeys.all, 'vrrp'] as const,
-  hsrp: () => [...haKeys.all, 'hsrp'] as const,
-  mlag: () => [...haKeys.all, 'mlag'] as const,
-  duplicateRouterIds: () => [...haKeys.all, 'duplicate-router-ids'] as const,
-  switchingProperties: () => [...haKeys.all, 'switching-properties'] as const,
+  vrrp: (snapshotName: string | null) => [...haKeys.all, snapshotSegment(snapshotName), 'vrrp'] as const,
+  hsrp: (snapshotName: string | null) => [...haKeys.all, snapshotSegment(snapshotName), 'hsrp'] as const,
+  mlag: (snapshotName: string | null) => [...haKeys.all, snapshotSegment(snapshotName), 'mlag'] as const,
+  duplicateRouterIds: (snapshotName: string | null) => [...haKeys.all, snapshotSegment(snapshotName), 'duplicate-router-ids'] as const,
+  switchingProperties: (snapshotName: string | null) => [...haKeys.all, snapshotSegment(snapshotName), 'switching-properties'] as const,
 }
 
 /**
@@ -25,10 +29,12 @@ export const haKeys = {
  * @param enabled - Optional flag to conditionally enable query (default: true)
  */
 export function useVRRPProperties(enabled = true) {
+  const currentSnapshotName = useSnapshotStore((state) => state.currentSnapshotName)
+
   return useQuery({
-    queryKey: haKeys.vrrp(),
+    queryKey: haKeys.vrrp(currentSnapshotName),
     queryFn: () => haAPI.getVRRPProperties(),
-    enabled,
+    enabled: enabled && !!currentSnapshotName,
     staleTime: 60000,
   })
 }
@@ -40,10 +46,12 @@ export function useVRRPProperties(enabled = true) {
  * @param enabled - Optional flag to conditionally enable query (default: true)
  */
 export function useHSRPProperties(enabled = true) {
+  const currentSnapshotName = useSnapshotStore((state) => state.currentSnapshotName)
+
   return useQuery({
-    queryKey: haKeys.hsrp(),
+    queryKey: haKeys.hsrp(currentSnapshotName),
     queryFn: () => haAPI.getHSRPProperties(),
-    enabled,
+    enabled: enabled && !!currentSnapshotName,
     staleTime: 60000,
   })
 }
@@ -55,10 +63,12 @@ export function useHSRPProperties(enabled = true) {
  * @param enabled - Optional flag to conditionally enable query (default: true)
  */
 export function useMLAGProperties(enabled = true) {
+  const currentSnapshotName = useSnapshotStore((state) => state.currentSnapshotName)
+
   return useQuery({
-    queryKey: haKeys.mlag(),
+    queryKey: haKeys.mlag(currentSnapshotName),
     queryFn: () => haAPI.getMLAGProperties(),
-    enabled,
+    enabled: enabled && !!currentSnapshotName,
     staleTime: 60000,
   })
 }
@@ -70,10 +80,12 @@ export function useMLAGProperties(enabled = true) {
  * @param enabled - Optional flag to conditionally enable query (default: true)
  */
 export function useDuplicateRouterIDs(enabled = true) {
+  const currentSnapshotName = useSnapshotStore((state) => state.currentSnapshotName)
+
   return useQuery({
-    queryKey: haKeys.duplicateRouterIds(),
+    queryKey: haKeys.duplicateRouterIds(currentSnapshotName),
     queryFn: () => haAPI.getDuplicateRouterIDs(),
-    enabled,
+    enabled: enabled && !!currentSnapshotName,
     staleTime: 60000,
   })
 }
@@ -84,10 +96,12 @@ export function useDuplicateRouterIDs(enabled = true) {
  * @param enabled - Optional flag to conditionally enable query (default: true)
  */
 export function useSwitchingProperties(enabled = true) {
+  const currentSnapshotName = useSnapshotStore((state) => state.currentSnapshotName)
+
   return useQuery({
-    queryKey: haKeys.switchingProperties(),
+    queryKey: haKeys.switchingProperties(currentSnapshotName),
     queryFn: () => haAPI.getSwitchingProperties(),
-    enabled,
+    enabled: enabled && !!currentSnapshotName,
     staleTime: 60000,
   })
 }

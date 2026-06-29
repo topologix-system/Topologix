@@ -50,6 +50,8 @@ export const TopologyViewer = memo(function TopologyViewer() {
   const savePositionTimeoutRef = useRef<NodeJS.Timeout | null>(null) // Debounce timer for position saving
   const fitTimeoutRef = useRef<NodeJS.Timeout | null>(null) // Timeout for delayed fit operation
   const lastRenderSignatureRef = useRef<string | null>(null) // Prevents duplicate layout runs for the same graph
+  const initializationGenerationRef = useRef(0) // Invalidates async initialization when container/snapshot changes
+  const initializedSnapshotRef = useRef<string | null>(null) // Snapshot bound to the current Cytoscape instance
 
   const currentLayout = useUIStore((state) => state.currentLayout)
   const setCurrentLayout = useUIStore((state) => state.setCurrentLayout)
@@ -145,15 +147,32 @@ export const TopologyViewer = memo(function TopologyViewer() {
 
       if (!node) {
         logger.log('[TopologyViewer] No container node provided')
+        initializationGenerationRef.current += 1
+        containerRef.current = null
         return
       }
 
       containerRef.current = node
+      const activeSnapshotName = useSnapshotStore.getState().currentSnapshotName
+
+      if (!activeSnapshotName) {
+        logger.log('[TopologyViewer] Skipping Cytoscape initialization because no snapshot is active')
+        return
+      }
 
       if (cy.cyRef.current) {
-        logger.log('[TopologyViewer] Cytoscape instance already exists, skipping initialization')
-        cytoscapeInitializedRef.current = true
-        return
+        const existingContainer = cy.cyRef.current.container()
+        if (existingContainer === node && initializedSnapshotRef.current === activeSnapshotName) {
+          logger.log('[TopologyViewer] Cytoscape instance already exists, skipping initialization')
+          cytoscapeInitializedRef.current = true
+          return
+        }
+
+        logger.log('[TopologyViewer] Existing Cytoscape instance does not match the active container or snapshot, reinitializing')
+        lastRenderSignatureRef.current = null
+        cy.destroy()
+        cytoscapeInitializedRef.current = false
+        initializedSnapshotRef.current = null
       }
 
       if (isUpdatingRef.current) {
@@ -164,6 +183,7 @@ export const TopologyViewer = memo(function TopologyViewer() {
       logger.log('[TopologyViewer] Initializing Cytoscape')
       isUpdatingRef.current = true
       cytoscapeInitializedRef.current = false
+      const initializationGeneration = ++initializationGenerationRef.current
 
       try {
         const instance = await cy.initialize(node, [])
@@ -175,10 +195,33 @@ export const TopologyViewer = memo(function TopologyViewer() {
           return
         }
 
+        const latestSnapshotName = useSnapshotStore.getState().currentSnapshotName
+        const initializationStillCurrent =
+          initializationGeneration === initializationGenerationRef.current &&
+          containerRef.current === node &&
+          latestSnapshotName === activeSnapshotName
+
+        if (!initializationStillCurrent) {
+          logger.log('[TopologyViewer] Discarding stale Cytoscape initialization')
+          cy.destroy()
+          cytoscapeInitializedRef.current = false
+          initializedSnapshotRef.current = null
+          return
+        }
+
         logger.log('[TopologyViewer] Cytoscape initialized successfully')
         cytoscapeInitializedRef.current = true
+        initializedSnapshotRef.current = activeSnapshotName
       } finally {
         isUpdatingRef.current = false
+        const latestSnapshotName = useSnapshotStore.getState().currentSnapshotName
+        if (!cy.cyRef.current && containerRef.current && latestSnapshotName && latestSnapshotName !== initializedSnapshotRef.current) {
+          queueMicrotask(() => {
+            if (containerRef.current && !isUpdatingRef.current && useSnapshotStore.getState().currentSnapshotName) {
+              void handleContainerRef(containerRef.current)
+            }
+          })
+        }
       }
     },
     [cy]
@@ -205,6 +248,10 @@ export const TopologyViewer = memo(function TopologyViewer() {
 
     if (!networkData) {
       logger.log('[TopologyViewer] No network data available')
+      if (cy.cyRef.current && cy.cyRef.current.elements().length > 0) {
+        lastRenderSignatureRef.current = null
+        cy.updateElements([], false)
+      }
       return
     }
 
@@ -314,6 +361,37 @@ export const TopologyViewer = memo(function TopologyViewer() {
     }
   }, [networkData, cy, handleContainerRef, graphElements, currentSnapshotName, getPositions, scheduleFit, visibleLayers])
 
+  useEffect(() => {
+    if (currentSnapshotName) return
+
+    initializationGenerationRef.current += 1
+    initializedSnapshotRef.current = null
+    logger.log('[TopologyViewer] Active snapshot cleared, destroying Cytoscape instance')
+    lastRenderSignatureRef.current = null
+    if (cy.cyRef.current) {
+      cy.destroy()
+    }
+    cytoscapeInitializedRef.current = false
+    containerRef.current = null
+  }, [currentSnapshotName, cy])
+
+  useEffect(() => {
+    if (!currentSnapshotName) return
+    if (!cy.cyRef.current) return
+    if (initializedSnapshotRef.current === currentSnapshotName) return
+
+    logger.log('[TopologyViewer] Active snapshot changed, resetting Cytoscape instance')
+    initializationGenerationRef.current += 1
+    lastRenderSignatureRef.current = null
+    initializedSnapshotRef.current = null
+    cy.destroy()
+    cytoscapeInitializedRef.current = false
+
+    if (containerRef.current && !isUpdatingRef.current) {
+      void handleContainerRef(containerRef.current)
+    }
+  }, [currentSnapshotName, cy, handleContainerRef])
+
   /**
    * Cleanup effect: Destroys Cytoscape instance on component unmount
    * IMPORTANT: Empty dependency array prevents premature cleanup in React Strict Mode
@@ -324,6 +402,7 @@ export const TopologyViewer = memo(function TopologyViewer() {
         logger.log('[TopologyViewer] Component unmounting, destroying Cytoscape')
         cy.destroy()
         cytoscapeInitializedRef.current = false
+        initializedSnapshotRef.current = null
       }
     }
   }, [])
@@ -548,6 +627,14 @@ export const TopologyViewer = memo(function TopologyViewer() {
             {t('common.retry')}
           </button>
         </div>
+      </div>
+    )
+  }
+
+  if (!currentSnapshotName) {
+    return (
+      <div className="flex items-center justify-center h-full" role="status" aria-live="polite">
+        <p className="text-sm text-gray-700">{t('topologyViewer.noActiveSnapshot')}</p>
       </div>
     )
   }

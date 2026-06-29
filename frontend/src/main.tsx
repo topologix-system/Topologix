@@ -2,12 +2,14 @@
  * Application entry point with lazy loading and React Query configuration
  * See inline code for specific cache strategy and component mounting behavior
  */
-import React, { Suspense, lazy } from 'react'
+import React, { Suspense, lazy, useEffect, useMemo, useRef } from 'react'
 import ReactDOM from 'react-dom/client'
 import { createBrowserRouter, createHashRouter, Navigate, RouterProvider } from 'react-router-dom'
-import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
+import { QueryClient, QueryClientProvider, useQueryClient } from '@tanstack/react-query'
 import { runtimeConfig } from './config/runtimeConfig'
 import { authAPI } from './services/api'
+import { batfishQueryFamilies } from './hooks/useSnapshots'
+import { useSnapshotStore } from './store'
 import './index.css'
 
 // Lazy load components for code splitting
@@ -65,6 +67,114 @@ const RouteLoadingFallback = () => (
 // Create router with lazy loaded components
 const RouterFactory = runtimeConfig.useHashRouter ? createHashRouter : createBrowserRouter
 const authEnabled = authAPI.isAuthEnabled()
+const isSidebarPopoutRuntime = window.location.pathname === '/sidebar-popout'
+  || window.location.hash.replace(/^#/, '').split('?')[0] === '/sidebar-popout'
+const snapshotStorageKey = 'topologix-snapshot-storage'
+
+function readPersistedSnapshotName(storageValue: string | null) {
+  if (!storageValue) return null
+
+  try {
+    const parsed = JSON.parse(storageValue)
+    const snapshotName = parsed?.state?.currentSnapshotName
+    return typeof snapshotName === 'string' && snapshotName.length > 0 ? snapshotName : null
+  } catch {
+    return null
+  }
+}
+
+function SnapshotStorageSync() {
+  const activeQueryClient = useQueryClient()
+  const syncSequenceRef = useRef(0)
+
+  useEffect(() => {
+    const handleStorage = (event: StorageEvent) => {
+      if (event.key !== snapshotStorageKey) return
+
+      syncSequenceRef.current += 1
+      const syncSequence = syncSequenceRef.current
+      const nextSnapshotName = readPersistedSnapshotName(event.newValue)
+      const currentSnapshotName = useSnapshotStore.getState().currentSnapshotName
+      const shouldUpdateSnapshot = currentSnapshotName !== nextSnapshotName
+
+      if (shouldUpdateSnapshot) {
+        useSnapshotStore.getState().setCurrentSnapshotName(nextSnapshotName)
+      }
+
+      void (async () => {
+        await Promise.all(
+          batfishQueryFamilies.map((queryKey) => activeQueryClient.cancelQueries({ queryKey }))
+        )
+        if (syncSequence !== syncSequenceRef.current) return
+        await Promise.all(
+          batfishQueryFamilies.map((queryKey) =>
+            activeQueryClient.invalidateQueries({
+              queryKey,
+              refetchType: shouldUpdateSnapshot ? 'none' : 'active',
+            })
+          )
+        )
+        if (syncSequence !== syncSequenceRef.current) return
+      })()
+    }
+
+    window.addEventListener('storage', handleStorage)
+
+    return () => {
+      window.removeEventListener('storage', handleStorage)
+    }
+  }, [activeQueryClient])
+
+  return null
+}
+
+function createSidebarPopoutQueryClient() {
+  return new QueryClient({
+    defaultOptions: {
+      queries: {
+        staleTime: 30 * 1000,
+        gcTime: 60 * 1000,
+        refetchOnWindowFocus: false,
+        refetchOnReconnect: false,
+        retry: (failureCount, error: any) => {
+          if (error?.response?.status >= 400 && error?.response?.status < 500) {
+            return false
+          }
+          return failureCount < 1
+        },
+      },
+    },
+  })
+}
+
+function SidebarPopoutRoute() {
+  const popoutQueryClient = useMemo(() => createSidebarPopoutQueryClient(), [])
+
+  useEffect(() => {
+    const clearPopoutCache = () => {
+      popoutQueryClient.clear()
+    }
+
+    window.addEventListener('pagehide', clearPopoutCache)
+    window.addEventListener('beforeunload', clearPopoutCache)
+
+    return () => {
+      window.removeEventListener('pagehide', clearPopoutCache)
+      window.removeEventListener('beforeunload', clearPopoutCache)
+      clearPopoutCache()
+    }
+  }, [popoutQueryClient])
+
+  return (
+    <QueryClientProvider client={popoutQueryClient}>
+      <SnapshotStorageSync />
+      <ProtectedRoute>
+        <SidebarPopout />
+      </ProtectedRoute>
+    </QueryClientProvider>
+  )
+}
+
 const router = RouterFactory([
   {
     path: '/login',
@@ -187,9 +297,7 @@ const router = RouterFactory([
     path: '/sidebar-popout',
     element: (
       <Suspense fallback={<RouteLoadingFallback />}>
-        <ProtectedRoute>
-          <SidebarPopout />
-        </ProtectedRoute>
+        <SidebarPopoutRoute />
       </Suspense>
     ),
   },
@@ -220,8 +328,9 @@ ReactDOM.createRoot(document.getElementById('root')!).render(
   // This is normal React behavior - see TopologyViewer cleanup hooks for handling
   <React.StrictMode>
     <QueryClientProvider client={queryClient}>
+      {!isSidebarPopoutRuntime && <SnapshotStorageSync />}
       <RouterProvider router={router} />
-      {import.meta.env.DEV && (
+      {import.meta.env.DEV && !isSidebarPopoutRuntime && (
         <Suspense fallback={null}>
           <ReactQueryDevtools initialIsOpen={false} />
         </Suspense>
