@@ -53,6 +53,25 @@ export interface DeleteSnapshotFileResponse {
   requires_reinitialize: boolean
 }
 
+export interface SnapshotOwnerMigrationCandidate extends Snapshot {
+  access_scope?: string | null
+}
+
+export interface AssignSnapshotOwnerRequest {
+  snapshot_name: string
+  owner_user_id: number
+  folder_name?: string | null
+  dry_run?: boolean
+}
+
+export interface AssignSnapshotOwnerResponse extends Snapshot {
+  dry_run: boolean
+  owner_user_id: number
+  access_scope: string
+  previous_access_scope?: string | null
+  previous_legacy_unowned?: boolean
+}
+
 export interface SnapshotArtifactFieldDefinition {
   name: string
   label: string

@@ -27,6 +27,7 @@ const ProfilePage = lazy(() => import('./pages/ProfilePage').then(m => ({ defaul
 const UserManagementPage = lazy(() => import('./pages/UserManagementPage').then(m => ({ default: m.UserManagementPage })))
 const UserEditPage = lazy(() => import('./pages/UserEditPage').then(m => ({ default: m.UserEditPage })))
 const SecurityLogsPage = lazy(() => import('./pages/SecurityLogsPage').then(m => ({ default: m.SecurityLogsPage })))
+const SnapshotOwnerMigrationPage = lazy(() => import('./pages/SnapshotOwnerMigrationPage').then(m => ({ default: m.SnapshotOwnerMigrationPage })))
 const ProtectedRoute = lazy(() => import('./components/ProtectedRoute').then(m => ({ default: m.ProtectedRoute })))
 
 // Lazy load React Query DevTools (only in development)
@@ -279,6 +280,16 @@ const router = RouterFactory([
         </Suspense>
       ),
     },
+    {
+      path: '/admin/snapshot-migrations',
+      element: (
+        <Suspense fallback={<RouteLoadingFallback />}>
+          <ProtectedRoute>
+            <SnapshotOwnerMigrationPage />
+          </ProtectedRoute>
+        </Suspense>
+      ),
+    },
   ] : [
     {
       path: '/admin/users',
@@ -290,6 +301,10 @@ const router = RouterFactory([
     },
     {
       path: '/admin/security-logs',
+      element: <Navigate to="/" replace />,
+    },
+    {
+      path: '/admin/snapshot-migrations',
       element: <Navigate to="/" replace />,
     },
   ]),

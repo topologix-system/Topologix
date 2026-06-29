@@ -22,6 +22,7 @@ from flask import Flask, jsonify, request, make_response, session
 from flask_cors import CORS
 from flask_compress import Compress
 from werkzeug.middleware.proxy_fix import ProxyFix
+from werkzeug.exceptions import BadRequest, UnsupportedMediaType
 
 from config import config
 from services import BatfishQueryError, BatfishService, SnapshotService
@@ -41,6 +42,7 @@ if config.AUTH_ENABLED:
         JWTManager, require_auth, require_role,
         sanitize_input, validate_file_upload,
         validate_snapshot_name, validate_node_name, validate_json_input,
+        validate_positive_integer,
         SecurityHeaders, RateLimiter
     )
     from security.auth import TooManyAttemptsError
@@ -1659,6 +1661,84 @@ if config.AUTH_ENABLED:
         except Exception as e:
             logger.error(f"Get security stats error: {e}")
             return error_response(f"Failed to retrieve security statistics: {str(e)}", 500)
+
+    # ========== Admin Snapshot Owner Migration Endpoints ==========
+
+    @app.route('/api/admin/snapshot-migrations/unowned', methods=['GET'])
+    @require_role('admin')
+    def list_unowned_snapshot_migrations():
+        """List legacy or unowned snapshots that need explicit owner assignment."""
+        try:
+            snapshots = snapshot_service.list_unowned_snapshots()
+            logger.info(
+                "Unowned snapshot migration candidates retrieved: count=%s user=%s",
+                len(snapshots),
+                request.username,
+            )
+            return success_response(snapshots)
+        except Exception as e:
+            logger.error(f"Failed to list unowned snapshot migration candidates: {e}")
+            return error_response("Failed to list unowned snapshot migration candidates", 500)
+
+    @app.route('/api/admin/snapshot-migrations/assign-owner', methods=['POST'])
+    @require_role('admin')
+    def assign_unowned_snapshot_owner():
+        """Assign one unowned snapshot to a selected active user."""
+        try:
+            data = validate_json_input(
+                request.get_json(),
+                required_fields=['snapshot_name', 'owner_user_id'],
+                optional_fields=['folder_name', 'dry_run'],
+            )
+
+            owner_user_id = validate_positive_integer(data['owner_user_id'], 'owner_user_id')
+
+            dry_run_value = data.get('dry_run', False)
+            if isinstance(dry_run_value, bool):
+                dry_run = dry_run_value
+            elif isinstance(dry_run_value, str) and dry_run_value.lower() in {'true', 'false'}:
+                dry_run = dry_run_value.lower() == 'true'
+            else:
+                return error_response("dry_run must be a boolean", 400)
+
+            from database.models import User
+            from database.session import get_db
+
+            with next(get_db()) as db:
+                target_user = db.get(User, owner_user_id)
+                if not target_user:
+                    return error_response("Target owner user not found", 404)
+                if not target_user.is_active:
+                    return error_response("Target owner user is inactive", 400)
+
+                result = snapshot_service.assign_snapshot_owner(
+                    snapshot_name=data['snapshot_name'],
+                    owner_user_id=target_user.id,
+                    owner_username=target_user.username,
+                    folder_name=data.get('folder_name'),
+                    dry_run=dry_run,
+                )
+
+            logger.info(
+                "Snapshot owner migration completed: snapshot=%s owner_user_id=%s dry_run=%s admin=%s",
+                result.get('name'),
+                result.get('owner_user_id'),
+                result.get('dry_run'),
+                request.username,
+            )
+            return success_response(result, "Snapshot owner assignment completed")
+
+        except PermissionError as e:
+            return error_response(str(e), 403)
+        except FileNotFoundError as e:
+            return error_response(str(e), 404)
+        except ValueError as e:
+            return error_response(str(e), 400)
+        except (BadRequest, UnsupportedMediaType):
+            return error_response("Request body must be valid JSON", 400)
+        except Exception as e:
+            logger.error(f"Failed to assign snapshot owner: {e}")
+            return error_response("Failed to assign snapshot owner", 500)
 
     # ========== Password Reset Endpoints ==========
 

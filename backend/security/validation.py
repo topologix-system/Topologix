@@ -8,6 +8,7 @@ Comprehensive input validation and sanitization
 - validate_ip_address(): IPv4 address validation
 - validate_cidr(): CIDR notation validation
 - validate_json_input(): Required/optional field validation
+- validate_positive_integer(): Strict JSON positive integer validation
 - File security: MIME type checking with python-magic
 - Content scanning for malicious patterns (scripts, code injection)
 - Network config keyword validation (interface, hostname, router, etc.)
@@ -421,3 +422,16 @@ def validate_json_input(data: dict, required_fields: List[str],
             logger.warning(f"Unexpected field in input: {field}")
 
     return validated
+
+
+def validate_positive_integer(value: Any, field_name: str) -> int:
+    """Validate a JSON field as a positive integer.
+
+    JSON booleans must be rejected explicitly because Python bool is a subclass
+    of int and would otherwise allow true to become user ID 1.
+    """
+    if isinstance(value, bool) or not isinstance(value, int):
+        raise ValueError(f"{field_name} must be a positive integer")
+    if value <= 0:
+        raise ValueError(f"{field_name} must be a positive integer")
+    return value

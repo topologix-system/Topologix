@@ -18,6 +18,8 @@ import base64
 import hashlib
 import hmac
 import time
+import threading
+from contextlib import contextmanager
 from pathlib import Path
 from typing import Any, Optional
 from datetime import datetime
@@ -28,6 +30,11 @@ from config import config
 from security.validation import DANGEROUS_PATTERNS, validate_file_upload
 
 logger = logging.getLogger(__name__)
+
+try:
+    import fcntl
+except ImportError:  # pragma: no cover - Windows fallback for non-container development
+    fcntl = None
 
 ALLOWED_EXTENSIONS = {'.cfg', '.conf', '.txt', '.log'}
 MAX_FILE_SIZE = 10 * 1024 * 1024  # 10MB
@@ -260,10 +267,24 @@ class SnapshotService:
         """Initialize snapshot service"""
         self.snapshots_dir = Path(config.SNAPSHOTS_DIR)
         self.snapshots_dir.mkdir(parents=True, exist_ok=True)
+        self._metadata_lock = threading.RLock()
 
     def _metadata_path(self, snapshot_path: Path) -> Path:
         """Return metadata sidecar path for a snapshot directory."""
         return snapshot_path / METADATA_FILENAME
+
+    @contextmanager
+    def _snapshot_metadata_file_lock(self, snapshot_path: Path):
+        """Coordinate metadata migrations across multiple Linux worker processes."""
+        lock_path = snapshot_path / f'{METADATA_FILENAME}.lock'
+        with open(lock_path, 'a', encoding='utf-8') as lock_file:
+            if fcntl is not None:
+                fcntl.flock(lock_file.fileno(), fcntl.LOCK_EX)
+            try:
+                yield
+            finally:
+                if fcntl is not None:
+                    fcntl.flock(lock_file.fileno(), fcntl.LOCK_UN)
 
     def _normalize_owner_user_id(self, owner_user_id: Any) -> Optional[int]:
         """Normalize owner user ID for stable metadata comparison."""
@@ -325,10 +346,33 @@ class SnapshotService:
         }
 
     def _write_metadata(self, snapshot_path: Path, metadata: dict[str, Any]) -> None:
-        """Persist snapshot metadata sidecar."""
+        """Persist snapshot metadata sidecar using an atomic replace."""
         metadata_path = self._metadata_path(snapshot_path)
-        with open(metadata_path, 'w', encoding='utf-8') as metadata_file:
-            json.dump(metadata, metadata_file, indent=2, ensure_ascii=False)
+        temp_path: Optional[Path] = None
+
+        try:
+            with tempfile.NamedTemporaryFile(
+                'w',
+                encoding='utf-8',
+                dir=snapshot_path,
+                prefix=f'.{METADATA_FILENAME}.',
+                suffix='.tmp',
+                delete=False,
+            ) as metadata_file:
+                temp_path = Path(metadata_file.name)
+                json.dump(metadata, metadata_file, indent=2, ensure_ascii=False)
+                metadata_file.write('\n')
+                metadata_file.flush()
+                os.fsync(metadata_file.fileno())
+
+            os.replace(temp_path, metadata_path)
+        except Exception:
+            if temp_path is not None:
+                try:
+                    temp_path.unlink(missing_ok=True)
+                except OSError:
+                    logger.warning("Failed to clean up temporary snapshot metadata file: %s", temp_path)
+            raise
 
     def _load_metadata(self, snapshot_path: Path) -> dict[str, Any]:
         """Load snapshot metadata or synthesize deny-by-default legacy metadata."""
@@ -1228,6 +1272,108 @@ class SnapshotService:
         snapshots.sort(key=lambda x: x['created_at'], reverse=True)
 
         return snapshots
+
+    def list_unowned_snapshots(self) -> list[dict[str, Any]]:
+        """List legacy or metadata-bearing snapshots that have no owner."""
+        snapshots = []
+
+        for snapshot_path in self.snapshots_dir.iterdir():
+            if not snapshot_path.is_dir():
+                continue
+
+            configs_dir = snapshot_path / 'configs'
+            if not configs_dir.exists():
+                continue
+
+            metadata = self._load_metadata(snapshot_path)
+            if metadata.get('owner_user_id') is not None:
+                continue
+
+            snapshot = self._build_snapshot_response(snapshot_path, metadata)
+            snapshot['access_scope'] = metadata.get('access_scope')
+            snapshots.append(snapshot)
+
+        snapshots.sort(key=lambda x: x['created_at'], reverse=True)
+        return snapshots
+
+    def assign_snapshot_owner(
+        self,
+        snapshot_name: str,
+        owner_user_id: Any,
+        owner_username: str,
+        folder_name: Optional[str] = None,
+        dry_run: bool = False,
+    ) -> dict[str, Any]:
+        """Assign an owner to one currently unowned snapshot."""
+        safe_name = self._validate_snapshot_name(snapshot_name)
+        normalized_owner_id = self._normalize_owner_user_id(owner_user_id)
+        if normalized_owner_id is None:
+            raise ValueError("Target owner user ID is required")
+
+        normalized_owner_username = str(owner_username or '').strip()
+        if not normalized_owner_username:
+            raise ValueError("Target owner username is required")
+
+        def build_assignment_result(
+            snapshot_path: Path,
+            current_metadata: dict[str, Any],
+            dry_run_value: bool,
+        ) -> tuple[dict[str, Any], dict[str, Any]]:
+            current_owner_id = self._normalize_owner_user_id(current_metadata.get('owner_user_id'))
+            if current_owner_id is not None:
+                raise ValueError(f"Snapshot '{safe_name}' already has an owner")
+
+            effective_folder_name = (
+                folder_name if folder_name is not None else current_metadata.get('folder_name')
+            )
+            next_metadata = self._build_metadata(
+                snapshot_name=safe_name,
+                folder_name=effective_folder_name,
+                owner_user_id=normalized_owner_id,
+                owner_username=normalized_owner_username,
+                access_scope='private',
+                created_at=current_metadata.get('created_at'),
+            )
+
+            result = self._build_snapshot_response(snapshot_path, next_metadata)
+            result.update({
+                'dry_run': dry_run_value,
+                'owner_user_id': normalized_owner_id,
+                'access_scope': next_metadata.get('access_scope'),
+                'previous_access_scope': current_metadata.get('access_scope'),
+                'previous_legacy_unowned': current_metadata.get('legacy_unowned', False),
+            })
+            return result, next_metadata
+
+        with self._metadata_lock:
+            snapshot_path = self._get_snapshot_directory(safe_name)
+            configs_dir = snapshot_path / 'configs'
+            if not snapshot_path.is_dir() or not configs_dir.exists():
+                raise FileNotFoundError(f"Snapshot '{safe_name}' not found")
+
+            if dry_run:
+                current_metadata = self._load_metadata(snapshot_path)
+                result, next_metadata = build_assignment_result(snapshot_path, current_metadata, True)
+                logger.info(
+                    "Dry-run snapshot owner assignment: snapshot=%s owner_user_id=%s folder=%s",
+                    safe_name,
+                    normalized_owner_id,
+                    next_metadata.get('folder_name'),
+                )
+                return result
+
+            with self._snapshot_metadata_file_lock(snapshot_path):
+                current_metadata = self._load_metadata(snapshot_path)
+                result, next_metadata = build_assignment_result(snapshot_path, current_metadata, False)
+
+                self._write_metadata(snapshot_path, next_metadata)
+                logger.info(
+                    "Assigned snapshot owner: snapshot=%s owner_user_id=%s folder=%s",
+                    safe_name,
+                    normalized_owner_id,
+                    next_metadata.get('folder_name'),
+                )
+                return result
 
     def create_snapshot(
         self,

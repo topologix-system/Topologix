@@ -101,7 +101,7 @@ Authentication is optional and controlled by matching backend/frontend flags:
 
 When authentication is enabled, newly created snapshots and metadata-bearing snapshots store owner and folder metadata in a sidecar file named `.topologix-snapshot.json`.
 
-Important migration note: snapshots created before owner metadata existed are treated as legacy/unowned. They are not automatically assigned to a user when switching from `AUTH_ENABLED=false` to `AUTH_ENABLED=true`; plan an explicit owner migration before relying on authenticated production use.
+Important migration note: snapshots created before owner metadata existed are treated as legacy/unowned. They are not automatically assigned to a user when switching from `AUTH_ENABLED=false` to `AUTH_ENABLED=true`. After enabling authentication, an admin can open **Snapshot Owner Migration** from the user menu and explicitly assign each unowned snapshot to an active user. Until assigned, those legacy snapshots remain hidden from normal authenticated snapshot access.
 
 ### Snapshot Folders and Uploads
 
@@ -219,7 +219,7 @@ docker compose -f docker-compose.dev.yaml down
 
 `AUTH_ENABLED=true` かつ `VITE_AUTH_ENABLED=true` の場合、ログインが必要です。このモードで作成された snapshot と owner metadata を持つ snapshot は作成者のみ参照・更新・アップロード・activate・削除・比較できます。権限確認は UI 表示だけではなく、backend の API route 側で行われます。
 
-注意: `AUTH_ENABLED=false` の時代に作成された owner 情報なしの snapshot は、`AUTH_ENABLED=true` に切り替えても自動的には owner 付与されません。認証付き運用へ切り替える前に、明示的な owner migration を計画してください。
+注意: `AUTH_ENABLED=false` の時代に作成された owner 情報なしの snapshot は、`AUTH_ENABLED=true` に切り替えても自動的には owner 付与されません。認証有効後、管理者はユーザーメニューの **スナップショット所有者移行** から、所有者未設定 snapshot を有効ユーザーへ明示的に割り当てられます。割り当てが完了するまで、それらの旧 snapshot は通常の認証付き snapshot 一覧には表示されません。
 
 ### snapshot folder とアップロード
 

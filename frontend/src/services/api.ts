@@ -57,6 +57,9 @@ import type {
   UpdateSnapshotRequest,
   UpdateSnapshotFileFormatRequest,
   DeleteSnapshotFileResponse,
+  SnapshotOwnerMigrationCandidate,
+  AssignSnapshotOwnerRequest,
+  AssignSnapshotOwnerResponse,
   UploadSnapshotArtifactRequest,
   UpdateSnapshotArtifactRequest,
   ReplaceSnapshotArtifactContentRequest,
@@ -891,6 +894,23 @@ export const snapshotAPI = {
   async compare(request: CompareSnapshotsRequest) {
     const response = await apiClient.post<APIResponse<ComparisonResult>>(
       '/snapshots/compare',
+      request
+    )
+    return response.data.data
+  },
+}
+
+export const snapshotMigrationAPI = {
+  async listUnowned() {
+    const response = await apiClient.get<APIResponse<SnapshotOwnerMigrationCandidate[]>>(
+      '/admin/snapshot-migrations/unowned'
+    )
+    return response.data.data
+  },
+
+  async assignOwner(request: AssignSnapshotOwnerRequest) {
+    const response = await apiClient.post<APIResponse<AssignSnapshotOwnerResponse>>(
+      '/admin/snapshot-migrations/assign-owner',
       request
     )
     return response.data.data

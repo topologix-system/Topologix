@@ -3,10 +3,11 @@
  * Handles snapshot listing, creation, deletion, activation, and file management
  */
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
-import { snapshotAPI } from '../services/api'
+import { snapshotAPI, snapshotMigrationAPI } from '../services/api'
 import { validationKeys } from './useValidation'
 import { useSnapshotStore } from '../store'
 import type {
+  AssignSnapshotOwnerRequest,
   CreateSnapshotRequest,
   ReplaceSnapshotArtifactContentRequest,
   SnapshotArtifactPreviewRequest,
@@ -25,6 +26,8 @@ export const snapshotKeys = {
   files: (name: string) => [...snapshotKeys.all, name, 'files'] as const,
   artifactTypes: (name: string) => [...snapshotKeys.all, name, 'artifact-types'] as const,
   artifactTree: (name: string) => [...snapshotKeys.all, name, 'artifact-tree'] as const,
+  migrations: () => [...snapshotKeys.all, 'migrations'] as const,
+  unownedMigrations: () => [...snapshotKeys.migrations(), 'unowned'] as const,
 }
 
 export const batfishQueryFamilies = [
@@ -94,6 +97,29 @@ export function useSnapshotArtifactTree(name: string, enabled = true) {
     queryFn: () => snapshotAPI.getArtifactTree(name),
     enabled: enabled && !!name,
     staleTime: 10000,
+  })
+}
+
+export function useUnownedSnapshotMigrations(enabled = true) {
+  return useQuery({
+    queryKey: snapshotKeys.unownedMigrations(),
+    queryFn: () => snapshotMigrationAPI.listUnowned(),
+    enabled,
+    staleTime: 10000,
+  })
+}
+
+export function useAssignSnapshotOwner() {
+  const queryClient = useQueryClient()
+
+  return useMutation({
+    mutationFn: (request: AssignSnapshotOwnerRequest) => snapshotMigrationAPI.assignOwner(request),
+    onSuccess: (_, variables) => {
+      if (!variables.dry_run) {
+        queryClient.invalidateQueries({ queryKey: snapshotKeys.unownedMigrations() })
+        queryClient.invalidateQueries({ queryKey: snapshotKeys.list() })
+      }
+    },
   })
 }
 

@@ -18,6 +18,7 @@
     "closeSidebar": "Close sidebar",
     "myProfile": "My Profile",
     "userManagement": "User Management",
+    "snapshotOwnerMigration": "Snapshot Owner Migration",
     "securityLogs": "Security Logs"
   },
   "sidebar": {
@@ -1023,6 +1024,32 @@
     "registeredCount": "{{count}} users registered",
     "usernameImmutable": "Username cannot be changed",
     "superuser": "Superuser"
+  },
+  "snapshotMigration": {
+    "title": "Snapshot Owner Migration",
+    "summary": "{{count}} unowned snapshots need review",
+    "help": "Legacy snapshots created before owner metadata remain hidden when authentication is enabled. Assign each snapshot to the correct active user before relying on authenticated production use.",
+    "failedToLoad": "Failed to load snapshot migration data",
+    "noCandidates": "No unowned snapshots found",
+    "legacyUnowned": "Legacy snapshot without owner metadata",
+    "metadataUnowned": "Metadata exists, but no owner is assigned",
+    "selectOwner": "Select owner",
+    "ownerRequired": "Select an active owner before assigning this snapshot.",
+    "folderPlaceholder": "Optional folder label",
+    "ownerSelectAria": "Select owner for {{snapshot}}",
+    "folderAria": "Folder label for {{snapshot}}",
+    "dryRun": "Dry Run",
+    "assignOwner": "Assign Owner",
+    "assignFailed": "Failed to assign snapshot owner",
+    "dryRunPassed": "Dry run passed. This snapshot can be assigned to {{owner}}.",
+    "assigned": "Assigned to {{owner}}.",
+    "table": {
+      "snapshot": "Snapshot",
+      "files": "Files",
+      "owner": "Owner",
+      "folder": "Folder",
+      "actions": "Actions"
+    }
   },
   "userEdit": {
     "title": "Edit User",

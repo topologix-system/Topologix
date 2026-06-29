@@ -5,7 +5,8 @@ from .validation import (
     validate_file_upload,
     validate_snapshot_name,
     validate_node_name,
-    validate_json_input
+    validate_json_input,
+    validate_positive_integer
 )
 
 _LAZY_EXPORTS = {
@@ -40,6 +41,7 @@ __all__ = [
     'validate_snapshot_name',
     'validate_node_name',
     'validate_json_input',
+    'validate_positive_integer',
     'CSRFProtect',
     'SecurityHeaders',
     'RateLimiter'

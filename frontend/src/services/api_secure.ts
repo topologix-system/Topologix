@@ -43,9 +43,13 @@ import type {
   Snapshot,
   SnapshotFile,
   CreateSnapshotRequest,
+  UpdateSnapshotRequest,
   UpdateSnapshotFileFormatRequest,
   SnapshotFileMutationResponse,
   DeleteSnapshotFileResponse,
+  SnapshotOwnerMigrationCandidate,
+  AssignSnapshotOwnerRequest,
+  AssignSnapshotOwnerResponse,
   BGPEdge,
   BGPPeerConfiguration,
   BGPProcessConfiguration,
@@ -426,6 +430,11 @@ export const snapshotAPI = {
     return response.data.data
   },
 
+  async update(name: string, request: UpdateSnapshotRequest) {
+    const response = await apiClient.patch<APIResponse<Snapshot>>(`/snapshots/${name}`, request)
+    return response.data.data
+  },
+
   async getFiles(name: string) {
     const response = await apiClient.get<APIResponse<SnapshotFile[]>>(`/snapshots/${name}/files`)
     return response.data.data
@@ -484,6 +493,23 @@ export const snapshotAPI = {
   async activate(name: string) {
     const response = await apiClient.post<APIResponse<NetworkInitializeResponse>>(
       `/snapshots/${name}/activate`
+    )
+    return response.data.data
+  },
+}
+
+export const snapshotMigrationAPI = {
+  async listUnowned() {
+    const response = await apiClient.get<APIResponse<SnapshotOwnerMigrationCandidate[]>>(
+      '/admin/snapshot-migrations/unowned'
+    )
+    return response.data.data
+  },
+
+  async assignOwner(request: AssignSnapshotOwnerRequest) {
+    const response = await apiClient.post<APIResponse<AssignSnapshotOwnerResponse>>(
+      '/admin/snapshot-migrations/assign-owner',
+      request
     )
     return response.data.data
   },

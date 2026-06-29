@@ -18,6 +18,7 @@
     "closeSidebar": "サイドバーを閉じる",
     "myProfile": "マイプロフィール",
     "userManagement": "ユーザー管理",
+    "snapshotOwnerMigration": "スナップショット所有者移行",
     "securityLogs": "セキュリティログ"
   },
   "sidebar": {
@@ -1023,6 +1024,32 @@
     "registeredCount": "{{count}} ユーザー登録済み",
     "usernameImmutable": "ユーザー名は変更できません",
     "superuser": "スーパーユーザー"
+  },
+  "snapshotMigration": {
+    "title": "スナップショット所有者移行",
+    "summary": "{{count}} 件の所有者未設定スナップショットがあります",
+    "help": "owner metadata が存在しない旧スナップショットは、認証有効時に通常一覧へ表示されません。認証付き本番運用で利用する前に、正しい有効ユーザーへ明示的に割り当ててください。",
+    "failedToLoad": "スナップショット移行データの読み込みに失敗しました",
+    "noCandidates": "所有者未設定のスナップショットはありません",
+    "legacyUnowned": "owner metadata がない旧スナップショット",
+    "metadataUnowned": "metadata はありますが owner が未設定です",
+    "selectOwner": "所有者を選択",
+    "ownerRequired": "割り当て前に有効な所有者を選択してください。",
+    "folderPlaceholder": "任意のフォルダーラベル",
+    "ownerSelectAria": "{{snapshot}} の所有者を選択",
+    "folderAria": "{{snapshot}} のフォルダーラベル",
+    "dryRun": "Dry Run",
+    "assignOwner": "所有者を割り当て",
+    "assignFailed": "スナップショット所有者の割り当てに失敗しました",
+    "dryRunPassed": "Dry run に成功しました。このスナップショットは {{owner}} に割り当て可能です。",
+    "assigned": "{{owner}} に割り当てました。",
+    "table": {
+      "snapshot": "スナップショット",
+      "files": "ファイル数",
+      "owner": "所有者",
+      "folder": "フォルダー",
+      "actions": "操作"
+    }
   },
   "userEdit": {
     "title": "ユーザー編集",

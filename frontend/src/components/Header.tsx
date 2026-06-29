@@ -46,6 +46,7 @@ export function Header() {
     { type: 'link', path: '/profile', label: t('header.myProfile') },
     ...(isAdmin ? [
       { type: 'link', path: '/admin/users', label: t('header.userManagement') },
+      { type: 'link', path: '/admin/snapshot-migrations', label: t('header.snapshotOwnerMigration') },
       { type: 'link', path: '/admin/security-logs', label: t('header.securityLogs') },
     ] : []),
     { type: 'button', action: 'logout', label: t('auth.logout') },
@@ -333,9 +334,19 @@ export function Header() {
                       {t('header.userManagement')}
                     </Link>
                     <Link
-                      to="/admin/security-logs"
+                      to="/admin/snapshot-migrations"
                       role="menuitem"
                       tabIndex={focusedIndex === 2 ? 0 : -1}
+                      onClick={() => setDropdownOpen(false)}
+                      className="flex items-center gap-3 px-4 py-2 text-sm text-gray-700 hover:bg-gray-100 focus:bg-gray-100 focus:outline-none transition-colors"
+                    >
+                      <FolderOpen className="w-4 h-4" aria-hidden="true" />
+                      {t('header.snapshotOwnerMigration')}
+                    </Link>
+                    <Link
+                      to="/admin/security-logs"
+                      role="menuitem"
+                      tabIndex={focusedIndex === 3 ? 0 : -1}
                       onClick={() => setDropdownOpen(false)}
                       className="flex items-center gap-3 px-4 py-2 text-sm text-gray-700 hover:bg-gray-100 focus:bg-gray-100 focus:outline-none transition-colors"
                     >
