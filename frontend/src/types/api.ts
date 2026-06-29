@@ -49,7 +49,18 @@ export interface NetworkInitializeResponse {
   initialization_result: Record<string, unknown>
 }
 
+export interface AggregateQueryError {
+  data_key: string
+  query: string
+  code: string
+  message: string
+  details?: unknown
+  hints?: string[]
+  status_code: number
+}
+
 export interface AllNetworkData {
+  query_errors?: AggregateQueryError[]
   node_properties: NodeProperties[]
   interface_properties: InterfaceProperties[]
   routes: Route[]

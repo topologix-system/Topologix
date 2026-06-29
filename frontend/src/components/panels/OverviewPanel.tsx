@@ -58,6 +58,10 @@ export function OverviewPanel() {
   )
     .filter((file) => file.statusBucket !== 'passed' || file.relatedIssueCount > 0 || file.relatedWarningCount > 0)
     .slice(0, 5)
+  const aggregateQueryErrors = data.query_errors ?? []
+  const bgpQueryErrors = aggregateQueryErrors.filter((queryError) =>
+    queryError.data_key === 'search_route_policies' || queryError.data_key.startsWith('bgp_')
+  )
 
   /**
    * Statistics card configuration for overview dashboard
@@ -121,6 +125,20 @@ export function OverviewPanel() {
           </div>
         </div>
       </div>
+
+      {bgpQueryErrors.length > 0 && (
+        <div className="rounded-lg border border-yellow-200 bg-yellow-50 p-4 text-sm text-yellow-900" role="status">
+          <h3 className="font-medium">{t('overview.partialData.title')}</h3>
+          <p className="mt-1">{t('overview.partialData.description', { count: bgpQueryErrors.length })}</p>
+          <ul className="mt-2 list-disc space-y-1 pl-5 text-xs">
+            {bgpQueryErrors.slice(0, 3).map((queryError) => (
+              <li key={`${queryError.data_key}-${queryError.code}`}>
+                {queryError.data_key}: {queryError.code}
+              </li>
+            ))}
+          </ul>
+        </div>
+      )}
 
       {/* BGP Summary */}
       <div className="bg-gray-50 rounded-lg p-4">

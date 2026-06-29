@@ -372,6 +372,12 @@ class BatfishService:
             "Check that the active snapshot is initialized and the query inputs use Batfish syntax.",
         ]
 
+        is_route_policy_query = query_name in self._ROUTE_POLICY_QUERY_NAMES
+        is_node_specifier_parse_error = (
+            ("nodespecifier" in normalized or "node specifier" in normalized)
+            and ("error parsing" in normalized or "valid continuations" in normalized)
+        )
+
         if any(token in normalized for token in ("timed out", "timeout")):
             error_type = "query_timeout"
             status_code = 504
@@ -379,15 +385,24 @@ class BatfishService:
                 "Reduce the query scope and retry.",
                 "Check Batfish service health if the query repeatedly times out.",
             ]
-        elif "does not match any strings" in normalized:
-            error_type = "specifier_no_match"
-            hints = [
-                "Check node, policy, filter, or location specifiers before running the query.",
-                "For route policy tools, the nodes field must contain Batfish node names or node regex, not an ASN.",
-                "Leave the nodes field blank to query all nodes, or run Resolve Nodes first.",
-            ]
+        elif "does not match any strings" in normalized or is_node_specifier_parse_error:
+            if is_route_policy_query:
+                error_type = "route_policy_specifier_no_match"
+                hints = [
+                    "Batfish could not resolve a specifier while evaluating route-policy analysis.",
+                    "If the nodes parameter was provided, verify it matches existing Batfish node names or node regex, not an ASN.",
+                    "If nodes is blank or valid, inspect route-policy AS-path, community, or policy references for values Batfish may interpret as specifiers.",
+                    "Run Resolve Nodes and review parse warnings/init issues before retrying.",
+                ]
+            else:
+                error_type = "specifier_no_match"
+                hints = [
+                    "Check node, policy, filter, or location specifiers before running the query.",
+                    "For route policy tools, the nodes field must contain Batfish node names or node regex, not an ASN.",
+                    "Leave the nodes field blank to query all nodes, or run Resolve Nodes first.",
+                ]
 
-        if query_name in self._ROUTE_POLICY_QUERY_NAMES:
+        if is_route_policy_query:
             if error_type == "query_error":
                 error_type = "route_policy_query_error"
             hints.append(
@@ -411,6 +426,34 @@ class BatfishService:
             hints=hints,
             status_code=status_code,
         )
+
+    def _aggregate_query_error_payload(self, data_key: str, error: BatfishQueryError) -> dict[str, Any]:
+        """Create all-data metadata for a query failure while keeping array fallbacks compatible."""
+        return {
+            "data_key": data_key,
+            "query": error.query_name,
+            "code": error.error_type,
+            "message": self._sanitize_error_message(error.message),
+            "details": self._sanitize_error_detail(error.details),
+            "hints": self._sanitize_error_detail(error.hints),
+            "status_code": error.status_code,
+        }
+
+    def _set_aggregate_query_result(
+        self,
+        data: dict[str, Any],
+        query_errors: list[dict[str, Any]],
+        data_key: str,
+        query_callable: Callable[[], Any],
+        fallback: Any,
+    ) -> None:
+        try:
+            data[data_key] = query_callable()
+        except BatfishQueryError as e:
+            safe_message = self._sanitize_error_message(e.message)
+            logger.warning("Aggregate query '%s' failed: %s", data_key, safe_message)
+            data[data_key] = fallback
+            query_errors.append(self._aggregate_query_error_payload(data_key, e))
 
     # ========== Helper Functions for Safe Serialization ==========
     def _convert_interfaces_to_strings(self, interfaces):
@@ -1313,7 +1356,7 @@ class BatfishService:
         except BatfishQueryError as e:
             if raise_on_error:
                 raise
-            logger.warning("searchRoutePolicies preflight failed: %s", e.message)
+            logger.warning("searchRoutePolicies preflight failed: %s", self._sanitize_error_message(e.message))
             return []
 
         df = self._execute_query_factory(
@@ -3401,7 +3444,8 @@ class BatfishService:
         initial_memory = sys.getsizeof({})
         logger.info("Fetching all Batfish data (70 query types)...")
 
-        data = {}
+        query_errors: list[dict[str, Any]] = []
+        data: dict[str, Any] = {"query_errors": query_errors}
 
         try:
             # ========== ORIGINAL QUERIES (35) ==========
@@ -3460,7 +3504,13 @@ class BatfishService:
             logger.debug("Fetching reachability...")
             data["reachability"] = [f.to_dict() for f in self.get_reachability()]
             logger.debug("Fetching search_route_policies...")
-            data["search_route_policies"] = self.get_search_route_policies(raise_on_error=False)
+            self._set_aggregate_query_result(
+                data,
+                query_errors,
+                "search_route_policies",
+                lambda: self.get_search_route_policies(raise_on_error=True),
+                [],
+            )
             logger.debug("Fetching aaa_authentication_login...")
             data["aaa_authentication_login"] = self.get_aaa_authentication_login()
             logger.debug("Fetching snmp_community_clients...")
@@ -3468,17 +3518,17 @@ class BatfishService:
 
             # BGP Protocol Analysis
             logger.debug("Fetching bgp_edges...")
-            data["bgp_edges"] = self.get_bgp_edges(raise_on_error=False)
+            self._set_aggregate_query_result(data, query_errors, "bgp_edges", self.get_bgp_edges, [])
             logger.debug("Fetching bgp_peer_configuration...")
-            data["bgp_peer_configuration"] = self.get_bgp_peer_configuration(raise_on_error=False)
+            self._set_aggregate_query_result(data, query_errors, "bgp_peer_configuration", self.get_bgp_peer_configuration, [])
             logger.debug("Fetching bgp_process_configuration...")
-            data["bgp_process_configuration"] = self.get_bgp_process_configuration(raise_on_error=False)
+            self._set_aggregate_query_result(data, query_errors, "bgp_process_configuration", self.get_bgp_process_configuration, [])
             logger.debug("Fetching bgp_session_status...")
-            data["bgp_session_status"] = self.get_bgp_session_status(raise_on_error=False)
+            self._set_aggregate_query_result(data, query_errors, "bgp_session_status", self.get_bgp_session_status, [])
             logger.debug("Fetching bgp_session_compatibility...")
-            data["bgp_session_compatibility"] = self.get_bgp_session_compatibility(raise_on_error=False)
+            self._set_aggregate_query_result(data, query_errors, "bgp_session_compatibility", self.get_bgp_session_compatibility, [])
             logger.debug("Fetching bgp_rib...")
-            data["bgp_rib"] = self.get_bgp_rib(raise_on_error=False)
+            self._set_aggregate_query_result(data, query_errors, "bgp_rib", self.get_bgp_rib, [])
 
             # ACL/Firewall Analysis
             logger.debug("Fetching filter_line_reachability...")

@@ -11,6 +11,7 @@ import {
   ChevronUp,
   Search,
   X,
+  AlertTriangle,
 } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
 
@@ -63,6 +64,10 @@ export const TopologyViewer = memo(function TopologyViewer() {
 
   // Fetch network data using React Query (NO useEffect for data fetching!)
   const { data: networkData, isLoading, isFetching, error, refetch } = useAllNetworkData()
+  const aggregateQueryErrors = networkData?.query_errors ?? []
+  const topologyQueryErrors = aggregateQueryErrors.filter((queryError) =>
+    queryError.data_key === 'search_route_policies' || queryError.data_key.startsWith('bgp_')
+  )
 
   // Lazy-loaded Cytoscape instance (initialized only when needed)
   const cy = useCytoscapeLazy()
@@ -562,6 +567,18 @@ export const TopologyViewer = memo(function TopologyViewer() {
             <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-primary-600 mx-auto" aria-hidden="true"></div>
             <p className="mt-4 text-gray-600">{t('topologyViewer.loading')}</p>
             <span className="sr-only">{t('topologyViewer.loadingDetail')}</span>
+          </div>
+        </div>
+      )}
+
+      {topologyQueryErrors.length > 0 && (
+        <div className="absolute top-4 right-4 z-20 max-w-sm rounded-lg border border-yellow-200 bg-yellow-50 px-4 py-3 text-sm text-yellow-900 shadow-lg" role="status">
+          <div className="flex items-start gap-2">
+            <AlertTriangle className="mt-0.5 h-4 w-4 flex-shrink-0" aria-hidden="true" />
+            <div>
+              <p className="font-medium">{t('topologyViewer.partialData.title')}</p>
+              <p className="mt-1 text-xs">{t('topologyViewer.partialData.description', { count: topologyQueryErrors.length })}</p>
+            </div>
           </div>
         </div>
       )}

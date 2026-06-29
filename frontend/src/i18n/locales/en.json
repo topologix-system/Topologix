@@ -57,6 +57,10 @@
       "peers": "Peers",
       "sessions": "Sessions"
     },
+    "partialData": {
+      "title": "Some Batfish queries failed",
+      "description": "{{count}} BGP or route-policy query failed while loading aggregate data. Counts may be partial."
+    },
     "ipsec": {
       "title": "IPsec Summary",
       "tunnels": "Tunnels",
@@ -845,6 +849,10 @@
       "exportFailed": "Failed to export PNG",
       "loadFailed": "Failed to load network data",
       "connectionIssue": "Please check your connection and try again"
+    },
+    "partialData": {
+      "title": "Partial topology data",
+      "description": "{{count}} BGP or route-policy query failed. Some topology layers may be incomplete."
     },
     "retry": "Retry loading network data",
     "exportFailed": "Export Failed",

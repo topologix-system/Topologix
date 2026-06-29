@@ -57,6 +57,10 @@
       "peers": "ピア",
       "sessions": "セッション"
     },
+    "partialData": {
+      "title": "一部のBatfishクエリが失敗しました",
+      "description": "集約データの読み込み中にBGPまたはルートポリシークエリが {{count}} 件失敗しました。件数は部分的な可能性があります。"
+    },
     "ipsec": {
       "title": "IPsec サマリー",
       "tunnels": "トンネル",
@@ -845,6 +849,10 @@
       "exportFailed": "PNGのエクスポートに失敗しました",
       "loadFailed": "ネットワークデータの読み込みに失敗しました",
       "connectionIssue": "接続を確認してもう一度お試しください"
+    },
+    "partialData": {
+      "title": "トポロジーデータの一部のみ表示中",
+      "description": "BGPまたはルートポリシークエリが {{count}} 件失敗しました。一部のトポロジーレイヤーは不完全な可能性があります。"
     },
     "retry": "ネットワークデータの再読み込み",
     "exportFailed": "エクスポート失敗",
