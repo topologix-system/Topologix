@@ -5,15 +5,14 @@
  * - Provides layout switching for different network sizes and topologies
  * - Force-directed layouts for organic clustering, grid/circle for ordered views
  */
-import type cytoscape from 'cytoscape'
-import type { LayoutName } from './types'
+import type { CytoscapeLayoutOptions, LayoutName } from './types'
 
 /**
  * Pre-configured layout settings for each supported algorithm
  * Maps layout names to their optimized Cytoscape.js configuration
  * Tuned for network topology visualization with appropriate spacing and animation
  */
-export const layoutConfigs: Record<LayoutName, cytoscape.LayoutOptions> = {
+export const layoutConfigs: Record<LayoutName, CytoscapeLayoutOptions> = {
   cola: {
     name: 'cola',
     animate: true,
@@ -146,6 +145,6 @@ export const layoutConfigs: Record<LayoutName, cytoscape.LayoutOptions> = {
  * @param layoutName - Name of the layout algorithm to retrieve
  * @returns Cytoscape layout configuration object
  */
-export function getLayoutConfig(layoutName: LayoutName): cytoscape.LayoutOptions {
+export function getLayoutConfig(layoutName: LayoutName): CytoscapeLayoutOptions {
   return layoutConfigs[layoutName] || layoutConfigs.cola
 }

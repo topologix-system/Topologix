@@ -30,10 +30,10 @@ export interface APIErrorResponse {
   code?: string
   details?: unknown
   hints?: string[]
-  data?: never
+  data: never
 }
 
-export type APIResponse<T> = APISuccessResponse<T> | APIErrorResponse
+export type APIResponse<T = unknown> = APISuccessResponse<T> | APIErrorResponse
 
 export interface NetworkInitializeRequest {
   snapshot_dir: string

@@ -25,6 +25,7 @@ export interface CytoscapeNode {
     y: number
   }
   classes?: string
+  [key: string]: any
 }
 
 /**
@@ -45,6 +46,7 @@ export interface CytoscapeEdge {
     [key: string]: any
   }
   classes?: string
+  [key: string]: any
 }
 
 /**
@@ -76,6 +78,9 @@ export type LayoutName = 'cola' | 'cola-spaced' | 'cose' | 'cose-bilkent' | 'dag
  */
 export type LayerType = 'physical' | 'layer1' | 'layer3' | 'ospf' | 'bgp' | 'vxlan' | 'eigrp' | 'isis' | 'ipsec'
 
+export type CytoscapeLayoutOptions = { name: string } & Record<string, any>
+export type CytoscapeStylesheet = NonNullable<cytoscape.CytoscapeOptions['style']>
+
 /**
  * Configuration options for Cytoscape.js graph instance
  * Overrides default settings for container, elements, style, layout, and zoom
@@ -83,8 +88,8 @@ export type LayerType = 'physical' | 'layer1' | 'layer3' | 'ospf' | 'bgp' | 'vxl
 export interface CytoscapeConfig {
   container?: HTMLElement | null
   elements?: cytoscape.ElementDefinition[]
-  style?: cytoscape.Stylesheet[]
-  layout?: cytoscape.LayoutOptions
+  style?: CytoscapeStylesheet
+  layout?: CytoscapeLayoutOptions
   minZoom?: number
   maxZoom?: number
   wheelSensitivity?: number

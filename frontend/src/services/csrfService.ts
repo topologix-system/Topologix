@@ -20,7 +20,6 @@ const API_BASE_URL = runtimeConfig.apiBaseUrl || '';
 
 export class CSRFService {
   private static readonly COOKIE_NAME = 'csrf_token';
-  private static readonly HEADER_NAME = 'X-CSRF-Token';
   private static memoryToken: string | null = null;
 
   private static getSafeErrorMessage(error: unknown): string {

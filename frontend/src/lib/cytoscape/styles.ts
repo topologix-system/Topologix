@@ -5,9 +5,9 @@
  * - Selection, hover, and highlighting states with visual feedback
  * - Color-coded edges and nodes for easy protocol identification
  */
-import type cytoscape from 'cytoscape'
+import type { CytoscapeStylesheet } from './types'
 
-export const defaultStyles: cytoscape.Stylesheet[] = [
+export const defaultStyles: CytoscapeStylesheet = [
   {
     selector: 'node',
     style: {

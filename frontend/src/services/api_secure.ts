@@ -102,7 +102,7 @@ const storedUser = localStorage.getItem('user')
 if (storedUser) {
   try {
     authState.user = JSON.parse(storedUser)
-  } catch (e) {
+  } catch (_e) {
     logger.error('Failed to parse stored user data')
   }
 }
@@ -673,22 +673,22 @@ export const validationAPI = {
   },
 
   async getUnusedStructures() {
-    const response = await apiClient.get<APIResponse>('/validation/unused-structures')
+    const response = await apiClient.get<APIResponse<Record<string, unknown>[]>>('/validation/unused-structures')
     return response.data.data
   },
 
   async getUndefinedReferences() {
-    const response = await apiClient.get<APIResponse>('/validation/undefined-references')
+    const response = await apiClient.get<APIResponse<Record<string, unknown>[]>>('/validation/undefined-references')
     return response.data.data
   },
 
   async getForwardingLoops() {
-    const response = await apiClient.get<APIResponse>('/validation/detect-loops')
+    const response = await apiClient.get<APIResponse<Record<string, unknown>[]>>('/validation/detect-loops')
     return response.data.data
   },
 
   async getMultipathConsistency() {
-    const response = await apiClient.get<APIResponse>('/validation/multipath-consistency')
+    const response = await apiClient.get<APIResponse<Record<string, unknown>[]>>('/validation/multipath-consistency')
     return response.data.data
   },
 
@@ -712,24 +712,24 @@ export const validationAPI = {
   },
 
   async getLoopbackMultipathConsistency() {
-    const response = await apiClient.get<APIResponse>('/validation/loopback-multipath-consistency')
+    const response = await apiClient.get<APIResponse<Record<string, unknown>[]>>('/validation/loopback-multipath-consistency')
     return response.data.data
   },
 }
 
 export const haAPI = {
   async getVRRPProperties() {
-    const response = await apiClient.get<APIResponse>('/ha/vrrp-properties')
+    const response = await apiClient.get<APIResponse<Record<string, unknown>[]>>('/ha/vrrp-properties')
     return response.data.data
   },
 
   async getHSRPProperties() {
-    const response = await apiClient.get<APIResponse>('/ha/hsrp-properties')
+    const response = await apiClient.get<APIResponse<Record<string, unknown>[]>>('/ha/hsrp-properties')
     return response.data.data
   },
 
   async getMLAGProperties() {
-    const response = await apiClient.get<APIResponse>('/ha/mlag-properties')
+    const response = await apiClient.get<APIResponse<Record<string, unknown>[]>>('/ha/mlag-properties')
     return response.data.data
   },
 
@@ -746,27 +746,27 @@ export const haAPI = {
 
 export const protocolsAPI = {
   async getEIGRPEdges() {
-    const response = await apiClient.get<APIResponse>('/protocols/eigrp/edges')
+    const response = await apiClient.get<APIResponse<Record<string, unknown>[]>>('/protocols/eigrp/edges')
     return response.data.data
   },
 
   async getEIGRPInterfaces() {
-    const response = await apiClient.get<APIResponse>('/protocols/eigrp/interface-configuration')
+    const response = await apiClient.get<APIResponse<Record<string, unknown>[]>>('/protocols/eigrp/interface-configuration')
     return response.data.data
   },
 
   async getISISEdges() {
-    const response = await apiClient.get<APIResponse>('/protocols/isis/edges')
+    const response = await apiClient.get<APIResponse<Record<string, unknown>[]>>('/protocols/isis/edges')
     return response.data.data
   },
 
   async getISISInterfaces() {
-    const response = await apiClient.get<APIResponse>('/protocols/isis/interface-configuration')
+    const response = await apiClient.get<APIResponse<Record<string, unknown>[]>>('/protocols/isis/interface-configuration')
     return response.data.data
   },
 
   async getISISLoopbackInterfaces() {
-    const response = await apiClient.get<APIResponse>('/protocols/isis-loopback-interfaces')
+    const response = await apiClient.get<APIResponse<Record<string, unknown>[]>>('/protocols/isis-loopback-interfaces')
     return response.data.data
   },
 
@@ -776,7 +776,7 @@ export const protocolsAPI = {
   },
 
   async getEVPNRib() {
-    const response = await apiClient.get<APIResponse>('/protocols/evpn/rib')
+    const response = await apiClient.get<APIResponse<Record<string, unknown>[]>>('/protocols/evpn/rib')
     return response.data.data
   },
 }
@@ -793,7 +793,7 @@ export const topologyAPI = {
   },
 
   async getVXLANVNIProperties() {
-    const response = await apiClient.get<APIResponse>('/protocols/evpn/vxlan-vni-properties')
+    const response = await apiClient.get<APIResponse<Record<string, unknown>[]>>('/protocols/evpn/vxlan-vni-properties')
     return response.data.data
   },
 
@@ -818,19 +818,19 @@ export const topologyAPI = {
   },
 
   async getInterfaceMTU() {
-    const response = await apiClient.get<APIResponse>('/topology/interface-mtu')
+    const response = await apiClient.get<APIResponse<Record<string, unknown>[]>>('/topology/interface-mtu')
     return response.data.data
   },
 
   async getIPSpaceAssignment() {
-    const response = await apiClient.get<APIResponse>('/topology/ip-space-assignment')
+    const response = await apiClient.get<APIResponse<Record<string, unknown>[]>>('/topology/ip-space-assignment')
     return response.data.data
   },
 }
 
 export const advancedAPI = {
   async getF5VIPs() {
-    const response = await apiClient.get<APIResponse>('/advanced/f5-bigip-vip-configuration')
+    const response = await apiClient.get<APIResponse<Record<string, unknown>[]>>('/advanced/f5-bigip-vip-configuration')
     return response.data.data
   },
 
@@ -854,7 +854,7 @@ export const advancedAPI = {
     perPath?: boolean
     pathOption?: string
   }) {
-    const response = await apiClient.post<APIResponse>('/advanced/search-route-policies', request || {})
+    const response = await apiClient.post<APIResponse<Record<string, unknown> | Record<string, unknown>[]>>('/advanced/search-route-policies', request || {})
     return response.data.data
   },
 
@@ -869,12 +869,12 @@ export const advancedAPI = {
   },
 
   async findMatchingFilterLines(request: { headers: object; filters?: string; nodes?: string[] }) {
-    const response = await apiClient.post<APIResponse>('/acl/find-matching-lines', request)
+    const response = await apiClient.post<APIResponse<Record<string, unknown> | Record<string, unknown>[]>>('/acl/find-matching-lines', request)
     return response.data.data
   },
 
   async searchFilters(request?: { action?: string; filters?: string; nodes?: string[] }) {
-    const response = await apiClient.post<APIResponse>('/acl/search-filters', request || {})
+    const response = await apiClient.post<APIResponse<Record<string, unknown> | Record<string, unknown>[]>>('/acl/search-filters', request || {})
     return response.data.data
   },
 

@@ -18,6 +18,14 @@ export * from './policy'
 export * from './api'
 export * from './snapshot'
 export * from './topology'
-export * from './layer1'
+export type {
+  Layer1Node,
+  Layer1Topology,
+  Layer1ValidationError,
+  DeviceInterface,
+  DeviceWithInterfaces,
+  SnapshotInterfaces,
+  Layer1TopologySaveResult,
+} from './layer1'
 export * from './comparison'
 export * from './errors'

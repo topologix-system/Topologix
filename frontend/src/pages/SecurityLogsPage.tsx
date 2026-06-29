@@ -45,8 +45,8 @@ export function SecurityLogsPage() {
   const [usernameValidationError, setUsernameValidationError] = useState<string | null>(null)
 
   // Debounce timer refs for real-time validation feedback
-  const ipDebounceRef = useRef<NodeJS.Timeout | null>(null)
-  const usernameDebounceRef = useRef<NodeJS.Timeout | null>(null)
+  const ipDebounceRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const usernameDebounceRef = useRef<ReturnType<typeof setTimeout> | null>(null)
 
   // Build query params
   const queryParams: SecurityLogsQueryParams = {
@@ -58,23 +58,6 @@ export function SecurityLogsPage() {
   // Fetch data
   const { data: logsData, isLoading: logsLoading, error: logsError } = useSecurityLogs(queryParams, isAdmin)
   const { data: stats, isLoading: statsLoading } = useSecurityStats(isAdmin)
-
-  // Access denied for non-admin users
-  if (!isAdmin) {
-    return (
-      <div className="flex items-center justify-center h-screen bg-gray-50">
-        <div className="bg-red-50 border border-red-200 rounded-lg p-4 flex items-start gap-2">
-          <AlertCircle className="w-5 h-5 text-red-600 flex-shrink-0 mt-0.5" aria-hidden="true" />
-          <div>
-            <p className="text-sm font-medium text-red-800">{t('securityLogs.accessDenied')}</p>
-            <p className="text-xs text-red-600 mt-1">
-              {t('securityLogs.adminRequired')}
-            </p>
-          </div>
-        </div>
-      </div>
-    )
-  }
 
   // Enhanced IP validation with detailed error messages
   const validateIPAddress = useCallback((ip: string): { valid: boolean; error: string | null } => {
@@ -117,7 +100,7 @@ export function SecurityLogsPage() {
       return { valid: false, error: 'Username too long (max 100 characters)' }
     }
 
-    const usernamePattern = /^[a-zA-Z0-9_\-\.@]+$/
+    const usernamePattern = /^[a-zA-Z0-9_.@-]+$/
     if (!usernamePattern.test(username)) {
       return { valid: false, error: 'Invalid characters (use: a-z, 0-9, _, -, ., @)' }
     }
@@ -250,6 +233,22 @@ export function SecurityLogsPage() {
     if (logsData && page < logsData.total_pages) {
       setPage((prev) => prev + 1)
     }
+  }
+
+  if (!isAdmin) {
+    return (
+      <div className="flex items-center justify-center h-screen bg-gray-50">
+        <div className="bg-red-50 border border-red-200 rounded-lg p-4 flex items-start gap-2">
+          <AlertCircle className="w-5 h-5 text-red-600 flex-shrink-0 mt-0.5" aria-hidden="true" />
+          <div>
+            <p className="text-sm font-medium text-red-800">{t('securityLogs.accessDenied')}</p>
+            <p className="text-xs text-red-600 mt-1">
+              {t('securityLogs.adminRequired')}
+            </p>
+          </div>
+        </div>
+      </div>
+    )
   }
 
   return (

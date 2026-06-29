@@ -11,6 +11,8 @@ interface PolicyCheck {
   test: (pwd: string) => boolean
 }
 
+const SPECIAL_PASSWORD_CHARACTERS = `!@#$%^&*()_+-=[]{};':"\\|,.<>/?`
+
 export function PasswordPolicyHelper({ password, className = '' }: PasswordPolicyHelperProps) {
   const { t } = useTranslation()
 
@@ -33,7 +35,7 @@ export function PasswordPolicyHelper({ password, className = '' }: PasswordPolic
     },
     {
       key: 'special',
-      test: (pwd: string) => /[!@#$%^&*()_+\-=\[\]{};':"\\|,.<>\/?]/.test(pwd),
+      test: (pwd: string) => [...pwd].some((character) => SPECIAL_PASSWORD_CHARACTERS.includes(character)),
     },
   ]
 

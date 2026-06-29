@@ -83,7 +83,7 @@ export function UserTable({ users, currentUserId, onDelete, isDeleting }: UserTa
                   <div className="flex items-center gap-2">
                     <span className="text-sm font-medium text-gray-900">{user.username}</span>
                     {user.is_superuser && (
-                      <Shield className="w-4 h-4 text-primary-600" title="Superuser" aria-label="Superuser" />
+                      <Shield className="w-4 h-4 text-primary-600" aria-label="Superuser" />
                     )}
                     {user.id === currentUserId && (
                       <span className="text-xs text-primary-600 font-medium">(You)</span>

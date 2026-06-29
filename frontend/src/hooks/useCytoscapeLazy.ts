@@ -10,7 +10,7 @@ import { useRef, useCallback, useState, useEffect, useMemo } from 'react'
 import type cytoscape from 'cytoscape'
 import type { Core, ElementDefinition } from 'cytoscape'
 import { getLayoutConfig } from '../lib/cytoscape/layouts'
-import type { LayoutName, CytoscapeConfig } from '../lib/cytoscape/types'
+import type { LayoutName, CytoscapeConfig, CytoscapeLayoutOptions } from '../lib/cytoscape/types'
 
 let cytoscapeModule: typeof import('cytoscape') | null = null
 let cytoscapeLoaded = false
@@ -67,7 +67,7 @@ export interface NodePositions {
 export interface UpdateElementsOptions {
   applyLayout?: boolean
   layoutName?: LayoutName
-  layoutOptions?: cytoscape.LayoutOptions
+  layoutOptions?: Partial<CytoscapeLayoutOptions>
   fitAfterLayout?: boolean
 }
 
@@ -105,8 +105,8 @@ export interface UseCytoscapeLazyReturn {
 export function useCytoscapeLazy(config?: CytoscapeConfig): UseCytoscapeLazyReturn {
   const cyRef = useRef<Core | null>(null)
   const [isLoaded, setIsLoaded] = useState(false)
-  const updateTimeoutRef = useRef<NodeJS.Timeout | null>(null)
-  const fitAfterLayoutTimeoutRef = useRef<NodeJS.Timeout | null>(null)
+  const updateTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const fitAfterLayoutTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const runningLayoutRef = useRef<any | null>(null)
   const resizeObserverRef = useRef<ResizeObserver | null>(null)
   const isLayoutRunningRef = useRef(false)
@@ -167,7 +167,7 @@ export function useCytoscapeLazy(config?: CytoscapeConfig): UseCytoscapeLazyRetu
   }, [])
 
   const runManagedLayout = useCallback((
-    layoutOptions: cytoscape.LayoutOptions,
+    layoutOptions: CytoscapeLayoutOptions,
     options: { fitAfterLayout?: boolean; reason: string }
   ) => {
     if (!cyRef.current || cyRef.current.destroyed()) {
@@ -186,7 +186,7 @@ export function useCytoscapeLazy(config?: CytoscapeConfig): UseCytoscapeLazyRetu
     layoutRunIdRef.current = runId
 
     const originalStop = layoutOptions.stop as ((event: unknown) => void) | undefined
-    const managedLayoutOptions: cytoscape.LayoutOptions = {
+    const managedLayoutOptions: CytoscapeLayoutOptions = {
       ...layoutOptions,
       fit: false,
       stop: (event: unknown) => {
@@ -211,7 +211,7 @@ export function useCytoscapeLazy(config?: CytoscapeConfig): UseCytoscapeLazyRetu
     try {
       console.log('[useCytoscapeLazy] Running managed layout:', managedLayoutOptions.name)
       isLayoutRunningRef.current = true
-      const layout = cyRef.current.layout(managedLayoutOptions)
+      const layout = cyRef.current.layout(managedLayoutOptions as cytoscape.LayoutOptions)
       runningLayoutRef.current = layout
       layout.run()
       return true
@@ -258,7 +258,7 @@ export function useCytoscapeLazy(config?: CytoscapeConfig): UseCytoscapeLazyRetu
       const initialElements = elements || config?.elements || []
       console.log('[useCytoscapeLazy] Creating Cytoscape instance with', initialElements.length, 'elements')
 
-      const cytoscapeConfig = {
+      const cytoscapeConfig: cytoscape.CytoscapeOptions = {
         container,
         elements: initialElements,
         style: config?.style || defaultStyles,
@@ -269,7 +269,7 @@ export function useCytoscapeLazy(config?: CytoscapeConfig): UseCytoscapeLazyRetu
         textureOnViewport: true,
         hideEdgesOnViewport: true,
         hideLabelsOnViewport: true,
-        pixelRatio: 'auto',
+        pixelRatio: 'auto' as const,
         ...config,
       }
 
@@ -384,7 +384,7 @@ export function useCytoscapeLazy(config?: CytoscapeConfig): UseCytoscapeLazyRetu
 
       if (shouldApplyLayout && cyRef.current && cyRef.current.elements().length > 0) {
         const layoutName = normalizedOptions.layoutName ?? 'cola'
-        const layoutOptions: cytoscape.LayoutOptions = {
+        const layoutOptions: CytoscapeLayoutOptions = {
           ...getLayoutConfig(layoutName),
           animate: false,
           fit: false,
@@ -478,7 +478,6 @@ export function useCytoscapeLazy(config?: CytoscapeConfig): UseCytoscapeLazyRetu
     const currentZoom = cyRef.current.zoom()
     cyRef.current.animate({
       zoom: currentZoom * 1.2,
-      center: cyRef.current.extent().midpoint,
     }, {
       duration: 200,
     })
@@ -489,7 +488,6 @@ export function useCytoscapeLazy(config?: CytoscapeConfig): UseCytoscapeLazyRetu
     const currentZoom = cyRef.current.zoom()
     cyRef.current.animate({
       zoom: currentZoom * 0.8,
-      center: cyRef.current.extent().midpoint,
     }, {
       duration: 200,
     })
@@ -499,7 +497,6 @@ export function useCytoscapeLazy(config?: CytoscapeConfig): UseCytoscapeLazyRetu
     if (!cyRef.current) return
     cyRef.current.animate({
       zoom: 1,
-      center: cyRef.current.extent().midpoint,
     }, {
       duration: 200,
     })

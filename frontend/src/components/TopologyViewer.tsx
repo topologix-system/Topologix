@@ -29,7 +29,7 @@ import {
   validatePositionsForSave,
   validateSavedPositions,
 } from '../lib/cytoscape'
-import type { LayoutName, LayerType } from '../lib/cytoscape/types'
+import type { LayoutName } from '../lib/cytoscape/types'
 
 /**
  * Main network topology visualization component using Cytoscape.js
@@ -47,13 +47,12 @@ export const TopologyViewer = memo(function TopologyViewer() {
   const cytoscapeInitializedRef = useRef(false) // Tracks if Cytoscape is fully initialized
   const containerRef = useRef<HTMLDivElement | null>(null) // DOM container reference
   const isUpdatingRef = useRef(false) // Prevents concurrent initialization
-  const savePositionTimeoutRef = useRef<NodeJS.Timeout | null>(null) // Debounce timer for position saving
-  const fitTimeoutRef = useRef<NodeJS.Timeout | null>(null) // Timeout for delayed fit operation
+  const savePositionTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null) // Debounce timer for position saving
+  const fitTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null) // Timeout for delayed fit operation
   const lastRenderSignatureRef = useRef<string | null>(null) // Prevents duplicate layout runs for the same graph
   const initializationGenerationRef = useRef(0) // Invalidates async initialization when container/snapshot changes
   const initializedSnapshotRef = useRef<string | null>(null) // Snapshot bound to the current Cytoscape instance
 
-  const currentLayout = useUIStore((state) => state.currentLayout)
   const setCurrentLayout = useUIStore((state) => state.setCurrentLayout)
   const setSelectedNode = useUIStore((state) => state.setSelectedNode)
   const setSelectedEdge = useUIStore((state) => state.setSelectedEdge)
@@ -405,6 +404,8 @@ export const TopologyViewer = memo(function TopologyViewer() {
         initializedSnapshotRef.current = null
       }
     }
+  // Keep this cleanup unmount-only; adding cy here can destroy the graph during normal rerenders.
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 
   /**

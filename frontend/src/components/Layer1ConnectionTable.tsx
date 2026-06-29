@@ -1,6 +1,6 @@
 import { useTranslation } from 'react-i18next'
 import { Edit2, Trash2, ArrowRight } from 'lucide-react'
-import type { Layer1Edge } from '../types'
+import type { Layer1Edge } from '../types/layer1'
 
 interface Layer1ConnectionTableProps {
   edges: Layer1Edge[]

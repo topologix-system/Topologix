@@ -7,7 +7,8 @@
  * - Used in SecurityLogsPage for admin security audit tracking
  */
 import { CheckCircle, XCircle, Monitor, User, Calendar } from 'lucide-react'
-import { useTranslation, type TFunction } from 'react-i18next'
+import { useTranslation } from 'react-i18next'
+import type { TFunction } from 'i18next'
 import type { SecurityLog } from '../types'
 import { TIMEZONE } from '../constants'
 import { logger } from '../utils/logger'

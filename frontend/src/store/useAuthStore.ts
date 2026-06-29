@@ -111,7 +111,7 @@ export const useAuthStore = create<AuthStore>((set, get) => ({
         isLoading: false,
         error: null,
       })
-    } catch (_error: unknown) {
+    } catch {
       clearSnapshotClientState()
       set({
         user: null,

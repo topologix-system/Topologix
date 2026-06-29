@@ -442,7 +442,7 @@ export function parseInterface(interfaceStr: string): [string, string] {
   }
 
   // If no brackets, try to split by last colon or slash
-  const parts = interfaceStr.split(/[:\/]/)
+  const parts = interfaceStr.split(/[:/]/)
   if (parts.length > 1) {
     const port = parts[parts.length - 1]
     const node = parts.slice(0, -1).join(':')

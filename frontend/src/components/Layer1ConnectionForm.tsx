@@ -2,7 +2,8 @@ import { useState, useMemo } from 'react'
 import { useTranslation } from 'react-i18next'
 import { Combobox } from '@headlessui/react'
 import { Plus, X, Check, ChevronDown } from 'lucide-react'
-import type { Layer1Edge, SnapshotInterfaces } from '../types'
+import type { SnapshotInterfaces } from '../types'
+import type { Layer1Edge } from '../types/layer1'
 import { useComboboxFilter } from '../hooks'
 
 interface Layer1ConnectionFormProps {
@@ -78,16 +79,24 @@ export function Layer1ConnectionForm({
     interface2Filter.setQuery('')
   }
 
-  const handleHostname1Change = (value: string) => {
-    setHostname1(value)
+  const handleHostname1Change = (value: string | null) => {
+    setHostname1(value || '')
     setInterfaceName1('') // Clear interface when hostname changes
     interface1Filter.setQuery('')
   }
 
-  const handleHostname2Change = (value: string) => {
-    setHostname2(value)
+  const handleHostname2Change = (value: string | null) => {
+    setHostname2(value || '')
     setInterfaceName2('') // Clear interface when hostname changes
     interface2Filter.setQuery('')
+  }
+
+  const handleInterfaceName1Change = (value: string | null) => {
+    setInterfaceName1(value || '')
+  }
+
+  const handleInterfaceName2Change = (value: string | null) => {
+    setInterfaceName2(value || '')
   }
 
   return (
@@ -159,7 +168,7 @@ export function Layer1ConnectionForm({
           </Combobox>
 
           {/* Interface 1 Combobox */}
-          <Combobox value={interfaceName1} onChange={setInterfaceName1} disabled={!hostname1}>
+          <Combobox value={interfaceName1} onChange={handleInterfaceName1Change} disabled={!hostname1}>
             <div className="relative">
               <Combobox.Label className="block text-sm font-medium text-gray-700 mb-1">
                 {t('layer1Editor.interface')}
@@ -278,7 +287,7 @@ export function Layer1ConnectionForm({
           </Combobox>
 
           {/* Interface 2 Combobox */}
-          <Combobox value={interfaceName2} onChange={setInterfaceName2} disabled={!hostname2}>
+          <Combobox value={interfaceName2} onChange={handleInterfaceName2Change} disabled={!hostname2}>
             <div className="relative">
               <Combobox.Label className="block text-sm font-medium text-gray-700 mb-1">
                 {t('layer1Editor.interface')}

@@ -97,7 +97,7 @@ export function AdvancedArtifactPanel({ snapshotName }: AdvancedArtifactPanelPro
     : artifactTypes[0]?.id ?? artifactType
   const selectedDefinition = artifactTypes.find((definition) => definition.id === effectiveArtifactType)
   const artifactTree = artifactTreeQuery.data
-  const artifacts = artifactTree?.artifacts ?? []
+  const artifacts = useMemo(() => artifactTree?.artifacts ?? [], [artifactTree?.artifacts])
 
   const groupedArtifacts = useMemo(() => {
     const groups = new Map<string, SnapshotArtifactRecord[]>()

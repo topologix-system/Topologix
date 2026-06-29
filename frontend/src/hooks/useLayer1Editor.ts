@@ -1,6 +1,6 @@
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { layer1API } from '../services/api'
-import type { Layer1Topology } from '../types'
+import type { Layer1Topology } from '../types/layer1'
 
 export const layer1EditorKeys = {
   all: ['layer1Editor'] as const,

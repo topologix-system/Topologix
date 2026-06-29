@@ -1,5 +1,5 @@
 import { useState, useCallback } from 'react'
-import { useParams, useNavigate, Link } from 'react-router-dom'
+import { useParams, Link } from 'react-router-dom'
 import { useTranslation } from 'react-i18next'
 import { ArrowLeft, Save, AlertCircle, CheckCircle } from 'lucide-react'
 import { Layer1ConnectionForm } from '../components/Layer1ConnectionForm'
@@ -10,11 +10,10 @@ import {
   useSnapshotInterfacesList,
   useSaveLayer1TopologyEditor,
 } from '../hooks'
-import type { Layer1Edge } from '../types'
+import type { Layer1Edge } from '../types/layer1'
 
 export function Layer1TopologyEditor() {
   const { snapshotName } = useParams<{ snapshotName: string }>()
-  const navigate = useNavigate()
   const { t } = useTranslation()
 
   const { data: topology, isLoading: topologyLoading } = useLayer1TopologyEditor(
@@ -53,7 +52,7 @@ export function Layer1TopologyEditor() {
     [localEdges, editingIndex, hasChanges, topology?.edges]
   )
 
-  const handleEditConnection = useCallback((edge: Layer1Edge, index: number) => {
+  const handleEditConnection = useCallback((_edge: Layer1Edge, index: number) => {
     setEditingIndex(index)
   }, [])
 
