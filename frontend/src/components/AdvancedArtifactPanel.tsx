@@ -7,6 +7,7 @@ import {
   ChevronRight,
   FileJson,
   Loader2,
+  Pencil,
   RefreshCw,
   Trash2,
   Upload,
@@ -20,6 +21,7 @@ import {
   useSnapshotArtifactTree,
   useSnapshotArtifactTypes,
   useUploadSnapshotArtifact,
+  useUpdateSnapshotArtifact,
   useValidateSnapshotArtifacts,
 } from '../hooks'
 import { useSnapshotStore } from '../store'
@@ -45,6 +47,15 @@ const cleanMetadata = (metadata: Record<string, string>) =>
       .map(([key, value]) => [key, value.trim()])
       .filter(([, value]) => value)
   )
+
+const buildMetadataKey = (metadata: Record<string, string>) =>
+  JSON.stringify(Object.entries(cleanMetadata(metadata)).sort(([left], [right]) => left.localeCompare(right)))
+
+const buildEditPreviewKey = (
+  artifact: SnapshotArtifactRecord,
+  filename: string,
+  metadata: Record<string, string>
+) => `${artifact.artifact_id}:${filename.trim()}:${buildMetadataKey(metadata)}`
 
 const getAcceptValue = (definition: SnapshotArtifactTypeDefinition | undefined) => {
   if (!definition) return '.cfg,.conf,.txt,.log,.json,.yml,.iptables'
@@ -77,6 +88,11 @@ export function AdvancedArtifactPanel({ snapshotName }: AdvancedArtifactPanelPro
   const [replaceFile, setReplaceFile] = useState<File | null>(null)
   const [replacePreviewToken, setReplacePreviewToken] = useState('')
   const [deletePreviewToken, setDeletePreviewToken] = useState('')
+  const [editTarget, setEditTarget] = useState<SnapshotArtifactRecord | null>(null)
+  const [editFilename, setEditFilename] = useState('')
+  const [editDraft, setEditDraft] = useState<Record<string, string>>({})
+  const [editPreviewKey, setEditPreviewKey] = useState('')
+  const [editConfirmOpen, setEditConfirmOpen] = useState(false)
   const uploadInputRef = useRef<HTMLInputElement>(null)
   const replaceTargetRef = useRef<SnapshotArtifactRecord | null>(null)
   const replaceInputRef = useRef<HTMLInputElement>(null)
@@ -85,11 +101,13 @@ export function AdvancedArtifactPanel({ snapshotName }: AdvancedArtifactPanelPro
   const artifactTreeQuery = useSnapshotArtifactTree(snapshotName, isOpen)
   const previewMutation = usePreviewSnapshotArtifactChange()
   const uploadMutation = useUploadSnapshotArtifact()
+  const updateMutation = useUpdateSnapshotArtifact()
   const replaceMutation = useReplaceSnapshotArtifactContent()
   const deleteMutation = useDeleteSnapshotArtifact()
   const validateMutation = useValidateSnapshotArtifacts()
   const activateMutation = useActivateSnapshot()
   const actionPreviewMutation = usePreviewSnapshotArtifactChange()
+  const editPreviewMutation = usePreviewSnapshotArtifactChange()
 
   const artifactTypes = artifactTypesQuery.data ?? []
   const effectiveArtifactType = artifactTypes.some((definition) => definition.id === artifactType)
@@ -112,18 +130,35 @@ export function AdvancedArtifactPanel({ snapshotName }: AdvancedArtifactPanelPro
   const requiredFieldsMissing = !!selectedDefinition?.fields.some(
     (field) => field.required && !metadataDraft[field.name]?.trim()
   )
+  const editDefinition = editTarget
+    ? artifactTypes.find((definition) => definition.id === editTarget.artifact_type)
+    : undefined
+  const editRequiredFieldsMissing = !!editDefinition?.fields.some(
+    (field) => field.required && !editDraft[field.name]?.trim()
+  )
+  const editCurrentPreviewKey = editTarget ? buildEditPreviewKey(editTarget, editFilename, editDraft) : ''
   const previewMatchesUpload =
     !!previewMutation.data &&
     previewMutation.data.artifact_type === effectiveArtifactType &&
     !previewMutation.data.destination_exists
+  const previewMatchesEdit =
+    !!editTarget &&
+    !!editPreviewMutation.data &&
+    editPreviewMutation.data.artifact_type === editTarget.artifact_type &&
+    editPreviewKey === editCurrentPreviewKey
+  const editDestinationConflict =
+    !!editPreviewMutation.data?.destination_exists &&
+    editPreviewMutation.data.current_destination !== editPreviewMutation.data.next_destination
   const isBusy =
     previewMutation.isPending ||
     uploadMutation.isPending ||
+    updateMutation.isPending ||
     replaceMutation.isPending ||
     deleteMutation.isPending ||
     validateMutation.isPending ||
     activateMutation.isPending ||
-    actionPreviewMutation.isPending
+    actionPreviewMutation.isPending ||
+    editPreviewMutation.isPending
 
   const translateTypeLabel = (definition: SnapshotArtifactTypeDefinition | undefined, artifactTypeId: string) =>
     t(`snapshots.artifacts.types.${artifactTypeId}.label`, {
@@ -134,6 +169,31 @@ export function AdvancedArtifactPanel({ snapshotName }: AdvancedArtifactPanelPro
     t(`snapshots.artifacts.types.${artifactTypeId}.description`, {
       defaultValue: definition?.description ?? '',
     })
+
+  const canEditArtifact = (
+    artifact: SnapshotArtifactRecord,
+    definition: SnapshotArtifactTypeDefinition | undefined
+  ) => {
+    if (!definition) return false
+    if (definition?.fixed_destination) return false
+    const policy = artifact.mutation_policy ?? definition?.mutation_policy
+    if (!policy) return false
+    return policy?.metadata_edit !== 'none' || policy?.safe_relocate !== 'none'
+  }
+
+  const resetEditState = () => {
+    setEditTarget(null)
+    setEditFilename('')
+    setEditDraft({})
+    setEditPreviewKey('')
+    setEditConfirmOpen(false)
+    editPreviewMutation.reset()
+  }
+
+  const resetEditPreview = () => {
+    setEditPreviewKey('')
+    editPreviewMutation.reset()
+  }
 
   const maybeReactivateSnapshot = (requiresReinitialize?: boolean) => {
     if (!requiresReinitialize) return
@@ -342,6 +402,84 @@ export function AdvancedArtifactPanel({ snapshotName }: AdvancedArtifactPanelPro
         },
         onError: (error: unknown) => {
           setPanelError(extractErrorMessage(error, t('snapshots.artifacts.previewFailed')))
+        },
+      }
+    )
+  }
+
+  const openEditArtifact = (artifact: SnapshotArtifactRecord) => {
+    const definition = artifactTypes.find((item) => item.id === artifact.artifact_type)
+    const nextDraft: Record<string, string> = {}
+    for (const field of definition?.fields ?? []) {
+      const value = artifact.metadata?.[field.name]
+      nextDraft[field.name] = typeof value === 'string' ? value : ''
+    }
+    setPanelError('')
+    setPanelNotice('')
+    setEditTarget(artifact)
+    setEditFilename(artifact.logical_name)
+    setEditDraft(nextDraft)
+    setEditPreviewKey('')
+    setEditConfirmOpen(false)
+    editPreviewMutation.reset()
+  }
+
+  const handlePreviewEdit = () => {
+    if (!editTarget) return
+    const nextPreviewKey = buildEditPreviewKey(editTarget, editFilename, editDraft)
+    setPanelError('')
+    setPanelNotice('')
+    editPreviewMutation.mutate(
+      {
+        name: snapshotName,
+        request: {
+          operation: 'metadata_update',
+          artifact_id: editTarget.artifact_id,
+          artifact_type: editTarget.artifact_type,
+          filename: editFilename.trim(),
+          metadata: cleanMetadata(editDraft),
+        },
+      },
+      {
+        onSuccess: (preview) => {
+          if (!preview) {
+            setPanelError(t('snapshots.artifacts.previewFailed'))
+            return
+          }
+          setEditPreviewKey(nextPreviewKey)
+        },
+        onError: (error: unknown) => {
+          setPanelError(extractErrorMessage(error, t('snapshots.artifacts.previewFailed')))
+          setEditPreviewKey('')
+        },
+      }
+    )
+  }
+
+  const confirmUpdateArtifact = () => {
+    if (!editTarget || !previewMatchesEdit || !editPreviewMutation.data?.preview_token) return
+    updateMutation.mutate(
+      {
+        name: snapshotName,
+        artifactId: editTarget.artifact_id,
+        artifactType: editTarget.artifact_type,
+        filename: editFilename.trim(),
+        metadata: cleanMetadata(editDraft),
+        previewToken: editPreviewMutation.data.preview_token,
+      },
+      {
+        onSuccess: (artifact) => {
+          if (!artifact) {
+            setPanelError(t('snapshots.artifacts.updateFailed'))
+            return
+          }
+          setPanelNotice(t('snapshots.artifacts.updated'))
+          resetEditState()
+          maybeReactivateSnapshot(artifact.requires_reinitialize)
+        },
+        onError: (error: unknown) => {
+          setPanelError(extractErrorMessage(error, t('snapshots.artifacts.updateFailed')))
+          setEditConfirmOpen(false)
         },
       }
     )
@@ -625,6 +763,18 @@ export function AdvancedArtifactPanel({ snapshotName }: AdvancedArtifactPanelPro
                                       {t('snapshots.editLayer1')}
                                     </Link>
                                   )}
+                                  {canEditArtifact(artifact, definition) && (
+                                    <button
+                                      type="button"
+                                      onClick={() => openEditArtifact(artifact)}
+                                      disabled={isBusy}
+                                      className="inline-flex items-center gap-1.5 rounded-md border border-blue-200 px-3 py-1.5 text-xs font-medium text-blue-700 hover:bg-blue-50 disabled:cursor-not-allowed disabled:opacity-50"
+                                      aria-label={t('snapshots.artifacts.editAria', { name: artifact.logical_name })}
+                                    >
+                                      <Pencil className="h-3.5 w-3.5" aria-hidden="true" />
+                                      {t('snapshots.artifacts.editMetadata')}
+                                    </button>
+                                  )}
                                   <button
                                     type="button"
                                     onClick={() => openReplaceFilePicker(artifact)}
@@ -646,6 +796,115 @@ export function AdvancedArtifactPanel({ snapshotName }: AdvancedArtifactPanelPro
                                   </button>
                                 </div>
                               </div>
+                              {editTarget?.artifact_id === artifact.artifact_id && (
+                                <div className="mt-3 rounded-lg border border-blue-100 bg-blue-50/60 p-3">
+                                  <h4 className="text-sm font-semibold text-blue-950">
+                                    {t('snapshots.artifacts.editTitle')}
+                                  </h4>
+                                  <div className="mt-3 grid gap-3 md:grid-cols-2">
+                                    <div>
+                                      <label
+                                        htmlFor={`artifact-edit-filename-${artifact.artifact_id}`}
+                                        className="block text-xs font-medium text-gray-700"
+                                      >
+                                        {t('snapshots.artifacts.filenameLabel')}
+                                      </label>
+                                      <input
+                                        id={`artifact-edit-filename-${artifact.artifact_id}`}
+                                        type="text"
+                                        value={editFilename}
+                                        onChange={(event) => {
+                                          setEditFilename(event.target.value)
+                                          resetEditPreview()
+                                        }}
+                                        className="mt-1 w-full rounded-md border border-gray-300 bg-white px-3 py-2 text-sm text-gray-900 shadow-sm focus:border-primary-600 focus:outline-none focus:ring-2 focus:ring-primary-600"
+                                        disabled={isBusy}
+                                      />
+                                    </div>
+                                    {editDefinition?.fields.map((field) => (
+                                      <div key={field.name}>
+                                        <label
+                                          htmlFor={`artifact-edit-${artifact.artifact_id}-${field.name}`}
+                                          className="block text-xs font-medium text-gray-700"
+                                        >
+                                          {t(`snapshots.artifacts.fields.${field.name}`, { defaultValue: field.label })}
+                                          {field.required && <span className="ml-1 text-red-600">*</span>}
+                                        </label>
+                                        <input
+                                          id={`artifact-edit-${artifact.artifact_id}-${field.name}`}
+                                          type="text"
+                                          value={editDraft[field.name] ?? ''}
+                                          onChange={(event) => {
+                                            setEditDraft((current) => ({
+                                              ...current,
+                                              [field.name]: event.target.value,
+                                            }))
+                                            resetEditPreview()
+                                          }}
+                                          placeholder={field.placeholder}
+                                          className="mt-1 w-full rounded-md border border-gray-300 bg-white px-3 py-2 text-sm text-gray-900 shadow-sm focus:border-primary-600 focus:outline-none focus:ring-2 focus:ring-primary-600"
+                                          disabled={isBusy}
+                                        />
+                                      </div>
+                                    ))}
+                                  </div>
+
+                                  {editPreviewMutation.data && (
+                                    <div className="mt-3 rounded-md border border-gray-200 bg-white px-3 py-2 text-xs text-gray-700">
+                                      <p className="font-medium">{t('snapshots.artifacts.previewDestination')}</p>
+                                      <p className="mt-1">
+                                        <span className="font-medium">{t('snapshots.artifacts.currentPath')}:</span>{' '}
+                                        <span className="break-all font-mono">{editPreviewMutation.data.current_destination}</span>
+                                      </p>
+                                      <p className="mt-1">
+                                        <span className="font-medium">{t('snapshots.artifacts.newPath')}:</span>{' '}
+                                        <span className="break-all font-mono">{editPreviewMutation.data.next_destination}</span>
+                                      </p>
+                                      {editDestinationConflict && (
+                                        <p className="mt-2 flex items-center gap-2 text-yellow-700">
+                                          <AlertTriangle className="h-4 w-4" aria-hidden="true" />
+                                          {t('snapshots.artifacts.destinationExists')}
+                                        </p>
+                                      )}
+                                      {editPreviewMutation.data.warnings.map((warning) => (
+                                        <p key={warning} className="mt-2 text-yellow-700">{warning}</p>
+                                      ))}
+                                    </div>
+                                  )}
+
+                                  <div className="mt-3 flex flex-wrap gap-2">
+                                    <button
+                                      type="button"
+                                      onClick={handlePreviewEdit}
+                                      disabled={!editFilename.trim() || editRequiredFieldsMissing || isBusy}
+                                      className="inline-flex items-center gap-2 rounded-md border border-gray-300 bg-white px-3 py-1.5 text-xs font-medium text-gray-800 hover:bg-gray-50 disabled:cursor-not-allowed disabled:opacity-50"
+                                    >
+                                      {editPreviewMutation.isPending ? (
+                                        <Loader2 className="h-3.5 w-3.5 animate-spin" aria-hidden="true" />
+                                      ) : (
+                                        <RefreshCw className="h-3.5 w-3.5" aria-hidden="true" />
+                                      )}
+                                      {t('snapshots.artifacts.previewEdit')}
+                                    </button>
+                                    <button
+                                      type="button"
+                                      onClick={() => setEditConfirmOpen(true)}
+                                      disabled={!previewMatchesEdit || editDestinationConflict || isBusy}
+                                      className="inline-flex items-center rounded-md bg-blue-600 px-3 py-1.5 text-xs font-medium text-white hover:bg-blue-700 disabled:cursor-not-allowed disabled:opacity-50"
+                                    >
+                                      {t('snapshots.artifacts.applyEdit')}
+                                    </button>
+                                    <button
+                                      type="button"
+                                      onClick={resetEditState}
+                                      disabled={isBusy}
+                                      className="inline-flex items-center rounded-md border border-gray-300 bg-white px-3 py-1.5 text-xs font-medium text-gray-700 hover:bg-gray-50 disabled:cursor-not-allowed disabled:opacity-50"
+                                    >
+                                      {t('common.cancel')}
+                                    </button>
+                                  </div>
+                                </div>
+                              )}
                             </div>
                           ))}
                         </div>
@@ -658,6 +917,21 @@ export function AdvancedArtifactPanel({ snapshotName }: AdvancedArtifactPanelPro
           </div>
         </div>
       )}
+
+      <ConfirmDialog
+        isOpen={editConfirmOpen}
+        title={t('snapshots.artifacts.editConfirm.title')}
+        message={t('snapshots.artifacts.editConfirm.message', {
+          current: editPreviewMutation.data?.current_destination ?? editTarget?.relative_path ?? '',
+          next: editPreviewMutation.data?.next_destination ?? editTarget?.relative_path ?? '',
+        })}
+        confirmText={t('snapshots.artifacts.applyEdit')}
+        cancelText={t('common.cancel')}
+        onConfirm={confirmUpdateArtifact}
+        onCancel={() => setEditConfirmOpen(false)}
+        variant="info"
+        isLoading={updateMutation.isPending}
+      />
 
       <ConfirmDialog
         isOpen={replaceConfirmOpen}

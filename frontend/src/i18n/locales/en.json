@@ -1360,6 +1360,16 @@
       "replacing": "Replacing...",
       "replaced": "Artifact content replaced.",
       "replaceFailed": "Failed to replace artifact content",
+      "editMetadata": "Edit metadata",
+      "editAria": "Edit artifact metadata for {{name}}",
+      "editTitle": "Edit artifact metadata",
+      "filenameLabel": "Filename",
+      "previewEdit": "Preview changes",
+      "applyEdit": "Apply changes",
+      "updated": "Artifact metadata updated.",
+      "updateFailed": "Failed to update artifact metadata",
+      "currentPath": "Current path",
+      "newPath": "New path",
       "deleteAria": "Delete artifact {{name}}",
       "deleted": "Artifact deleted.",
       "deleteFailed": "Failed to delete artifact",
@@ -1376,6 +1386,10 @@
       "replaceConfirm": {
         "title": "Replace Artifact File",
         "message": "Replace artifact \"{{path}}\" with \"{{file}}\"? The snapshot must be re-activated before relying on analysis results."
+      },
+      "editConfirm": {
+        "title": "Apply Artifact Metadata Change",
+        "message": "Apply this artifact change? Current path: {{current}}. New path: {{next}}."
       },
       "fields": {
         "account": "Account",

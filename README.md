@@ -121,7 +121,7 @@ Current UI behavior:
 - The trash button beside each file timestamp opens a confirmation dialog before deleting the uploaded file. If the changed snapshot is active, Topologix re-activates it so Batfish reads the updated file set.
 - When authentication is enabled, only the snapshot owner can update file format overrides or delete uploaded files.
 - Advanced artifact data is available as an optional collapsed panel. Use it only when you need Batfish-specific layouts such as `aws_configs`, `azure_configs`, `checkpoint_management`, `sonic_configs`, `hosts`, `iptables`, `batfish/layer1_topology.json`, `batfish/isp_config.json`, `batfish/runtime_data.json`, or `external_bgp_announcements.json`.
-- Advanced artifacts can be previewed before upload, listed by artifact type, replaced, deleted, and lightly validated. Upload, replace, and delete operations require the preview token issued by the backend. Replace and delete tokens are bound to the current artifact fingerprint, so stale tokens are rejected after concurrent changes. Final parsing and semantic validation still happens when Batfish activates the snapshot.
+- Advanced artifacts can be previewed before upload, listed by artifact type, metadata-edited with a safe destination preview, replaced, deleted, and lightly validated. Upload, metadata update, replace, and delete operations require the preview token issued by the backend. Metadata update, replace, and delete tokens are bound to the current artifact fingerprint, so stale tokens are rejected after concurrent changes. Final parsing and semantic validation still happens when Batfish activates the snapshot.
 - When files are uploaded to the currently active snapshot, Topologix re-activates that snapshot after the upload batch so Batfish analysis does not continue using stale data.
 
 Allowed upload extensions are:
@@ -233,7 +233,7 @@ snapshot を選択すると、file list のファイル名横に format dropdown
 
 各 file の更新日時横にある trash button を押すと確認 dialog が表示され、承認後にアップロード済み file を削除できます。変更対象の snapshot が active の場合、Topologix は Batfish が更新後の file set を読むように snapshot を再アクティブ化します。認証が有効な場合、format override 更新と file 削除は snapshot owner のみ実行できます。
 
-高度な Batfish アーティファクトは、折りたたみ式の「高度なアーティファクトデータ」パネルから任意で利用できます。`aws_configs`、`azure_configs`、`checkpoint_management`、`sonic_configs`、`hosts`、`iptables`、`batfish/layer1_topology.json`、`batfish/isp_config.json`、`batfish/runtime_data.json`、`external_bgp_announcements.json` のような Batfish 固有レイアウトが必要な場合に使います。保存先プレビュー、アーティファクト種別ごとの表示、置換、削除、軽量検証ができます。upload、replace、delete は backend が発行する preview token を必要とします。replace/delete token は現在の artifact fingerprint に結び付くため、同時変更後の古い token は拒否されます。最終的な parse / semantic validation は Batfish activate 時に確認してください。
+高度な Batfish アーティファクトは、折りたたみ式の「高度なアーティファクトデータ」パネルから任意で利用できます。`aws_configs`、`azure_configs`、`checkpoint_management`、`sonic_configs`、`hosts`、`iptables`、`batfish/layer1_topology.json`、`batfish/isp_config.json`、`batfish/runtime_data.json`、`external_bgp_announcements.json` のような Batfish 固有レイアウトが必要な場合に使います。保存先プレビュー、アーティファクト種別ごとの表示、メタデータ編集と安全な保存先変更、置換、削除、軽量検証ができます。upload、metadata update、replace、delete は backend が発行する preview token を必要とします。metadata update / replace / delete token は現在の artifact fingerprint に結び付くため、同時変更後の古い token は拒否されます。最終的な parse / semantic validation は Batfish activate 時に確認してください。
 
 現在 active な snapshot に通常の config / log file を upload した場合、Topologix は upload batch 完了後にその snapshot を再 activate し、Batfish 解析結果が古いまま残らないようにします。
 

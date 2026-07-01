@@ -1360,6 +1360,16 @@
       "replacing": "置換中...",
       "replaced": "アーティファクト内容を置換しました。",
       "replaceFailed": "アーティファクト内容の置換に失敗しました",
+      "editMetadata": "メタデータ編集",
+      "editAria": "{{name}} のアーティファクトメタデータを編集",
+      "editTitle": "アーティファクトメタデータ編集",
+      "filenameLabel": "ファイル名",
+      "previewEdit": "変更をプレビュー",
+      "applyEdit": "変更を適用",
+      "updated": "アーティファクトメタデータを更新しました。",
+      "updateFailed": "アーティファクトメタデータの更新に失敗しました",
+      "currentPath": "現在のパス",
+      "newPath": "変更後のパス",
       "deleteAria": "{{name}} のアーティファクトを削除",
       "deleted": "アーティファクトを削除しました。",
       "deleteFailed": "アーティファクト削除に失敗しました",
@@ -1376,6 +1386,10 @@
       "replaceConfirm": {
         "title": "アーティファクトファイル置換",
         "message": "アーティファクト「{{path}}」を「{{file}}」で置換しますか？解析結果を信頼する前にsnapshotの再有効化が必要です。"
+      },
+      "editConfirm": {
+        "title": "アーティファクトメタデータ変更の適用",
+        "message": "このアーティファクト変更を適用しますか？現在のパス: {{current}}。変更後のパス: {{next}}。"
       },
       "fields": {
         "account": "アカウント",
