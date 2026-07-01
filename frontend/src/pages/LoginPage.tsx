@@ -13,6 +13,7 @@ import { Network, AlertCircle } from 'lucide-react'
 import { useAuthStore } from '../store/useAuthStore'
 import { APP_VERSION, IS_PRODUCTION } from '../constants'
 import { logger } from '../utils/logger'
+import { useAuthModeStatus } from '../hooks'
 
 export function LoginPage() {
   const { t } = useTranslation()
@@ -22,6 +23,11 @@ export function LoginPage() {
   const isLoading = useAuthStore((state) => state.isLoading)
   const error = useAuthStore((state) => state.error)
   const clearError = useAuthStore((state) => state.clearError)
+  const {
+    authModeMismatch,
+    frontendAuthEnabled,
+    backendAuthEnabled,
+  } = useAuthModeStatus()
 
   const [username, setUsername] = useState('')
   const [password, setPassword] = useState('')
@@ -61,6 +67,26 @@ export function LoginPage() {
 
         {/* Login Form */}
         <form onSubmit={handleSubmit} className="space-y-6">
+          {authModeMismatch && (
+            <div
+              className="bg-red-50 border border-red-200 rounded-lg p-3 flex items-start gap-2"
+              role="alert"
+            >
+              <AlertCircle className="w-5 h-5 text-red-600 flex-shrink-0 mt-0.5" aria-hidden="true" />
+              <div className="space-y-1">
+                <p className="text-sm font-semibold text-red-800">
+                  {t('header.authConfigMismatchTitle')}
+                </p>
+                <p className="text-sm text-red-800">
+                  {t('header.authConfigMismatchDetails', {
+                    frontend: String(frontendAuthEnabled),
+                    backend: String(backendAuthEnabled),
+                  })}
+                </p>
+              </div>
+            </div>
+          )}
+
           {error && (
             <div
               className="bg-red-50 border border-red-200 rounded-lg p-3 flex items-start gap-2"

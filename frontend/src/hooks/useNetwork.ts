@@ -6,6 +6,7 @@
  * - All queries depend on active snapshot selection from Zustand store
  */
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
+import { runtimeConfig } from '../config/runtimeConfig'
 import { networkAPI } from '../services/api'
 import type { NetworkInitializeRequest } from '../types'
 import { useSnapshotStore } from '../store'
@@ -42,6 +43,21 @@ export function useHealth() {
     gcTime: 60 * 1000,
     refetchInterval: 60 * 1000,
   })
+}
+
+export function useAuthModeStatus() {
+  const healthQuery = useHealth()
+  const frontendAuthEnabled = runtimeConfig.authEnabled
+  const backendAuthEnabled =
+    typeof healthQuery.data?.auth_enabled === 'boolean' ? healthQuery.data.auth_enabled : null
+
+  return {
+    ...healthQuery,
+    frontendAuthEnabled,
+    backendAuthEnabled,
+    authModeMismatch:
+      typeof backendAuthEnabled === 'boolean' && backendAuthEnabled !== frontendAuthEnabled,
+  }
 }
 
 /**

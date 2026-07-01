@@ -4,7 +4,7 @@ import { Network, Menu, X, RefreshCw, LogOut, User, Users, ChevronDown, FolderOp
 import { APP_VERSION, IS_PRODUCTION } from '../constants'
 import { useTranslation } from 'react-i18next'
 import { useUIStore, useSnapshotStore, useAuthStore } from '../store'
-import { useHealth, useSnapshots, useActivateSnapshot } from '../hooks'
+import { useAuthModeStatus, useSnapshots, useActivateSnapshot } from '../hooks'
 import { LanguageSwitcher } from './LanguageSwitcher'
 import { authAPI } from '../services/api'
 import { logger } from '../utils/logger'
@@ -28,10 +28,31 @@ export function Header() {
   const logout = useAuthStore((state) => state.logout)
 
   // Fetch health status and snapshots using React Query (NO useEffect!)
-  const { data: health, isLoading } = useHealth()
+  const {
+    data: health,
+    isLoading,
+    authModeMismatch,
+    frontendAuthEnabled,
+    backendAuthEnabled,
+  } = useAuthModeStatus()
   const activateMutation = useActivateSnapshot()
   const { data: snapshots } = useSnapshots()
   const snapshotActivationPending = isSnapshotActivationInProgress || activateMutation.isPending
+  const connectionStatusText = isLoading
+    ? t('header.connecting')
+    : authModeMismatch
+      ? t('header.authConfigMismatchShort')
+      : health
+        ? t('header.connected')
+        : t('header.disconnected')
+  const connectionStatusDetail = authModeMismatch
+    ? t('header.authConfigMismatchDetails', {
+      frontend: String(frontendAuthEnabled),
+      backend: String(backendAuthEnabled),
+    })
+    : t('header.connectionStatus', {
+      status: isLoading ? 'connecting' : health ? 'connected' : 'disconnected',
+    })
 
   const [dropdownOpen, setDropdownOpen] = useState(false)
   const [focusedIndex, setFocusedIndex] = useState(-1)
@@ -378,15 +399,24 @@ export function Header() {
         <div className="flex items-center gap-2" role="status" aria-live="polite" aria-atomic="true">
           <div
             className={`w-2 h-2 rounded-full ${
-              isLoading ? 'bg-yellow-400' : health ? 'bg-green-400' : 'bg-red-400'
+              isLoading
+                ? 'bg-yellow-400'
+                : authModeMismatch
+                  ? 'bg-red-500'
+                  : health
+                    ? 'bg-green-400'
+                    : 'bg-red-400'
             }`}
             aria-hidden="true"
           />
-          <span className="text-sm text-gray-700">
-            {isLoading ? t('header.connecting') : health ? t('header.connected') : t('header.disconnected')}
+          <span
+            className={`text-sm ${authModeMismatch ? 'font-semibold text-red-700' : 'text-gray-700'}`}
+            title={authModeMismatch ? connectionStatusDetail : undefined}
+          >
+            {connectionStatusText}
           </span>
           <span className="sr-only">
-            {t('header.connectionStatus', { status: isLoading ? 'connecting' : health ? 'connected' : 'disconnected' })}
+            {connectionStatusDetail}
           </span>
         </div>
 

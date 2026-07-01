@@ -99,6 +99,8 @@ Authentication is optional and controlled by matching backend/frontend flags:
 | Open access | `AUTH_ENABLED=false` and `VITE_AUTH_ENABLED=false` | Single shared workspace. Existing sample and legacy snapshots remain visible. |
 | Authenticated access | `AUTH_ENABLED=true` and `VITE_AUTH_ENABLED=true` | Users must log in. Snapshots created in this mode are private to their creator and checked server-side on list, files, update, upload, activate, delete, compare, Layer1, and interface routes. |
 
+If the frontend and backend flags do not match, Topologix shows an authentication configuration mismatch warning in the header or login page based on the backend `/api/health` response. Set both flags to the same value and restart the stack before relying on snapshot access behavior.
+
 When authentication is enabled, newly created snapshots and metadata-bearing snapshots store owner and folder metadata in a sidecar file named `.topologix-snapshot.json`.
 
 Important migration note: snapshots created before owner metadata existed are treated as legacy/unowned. They are not automatically assigned to a user when switching from `AUTH_ENABLED=false` to `AUTH_ENABLED=true`. After enabling authentication, an admin can open **Snapshot Owner Migration** from the user menu and explicitly assign each unowned snapshot to an active user. Until assigned, those legacy snapshots remain hidden from normal authenticated snapshot access.
@@ -218,6 +220,8 @@ docker compose -f docker-compose.dev.yaml down
 `AUTH_ENABLED=false` かつ `VITE_AUTH_ENABLED=false` の場合、Topologix は単一の共有 workspace として動作します。この場合、既存の sample / legacy snapshot は表示対象です。
 
 `AUTH_ENABLED=true` かつ `VITE_AUTH_ENABLED=true` の場合、ログインが必要です。このモードで作成された snapshot と owner metadata を持つ snapshot は作成者のみ参照・更新・アップロード・activate・削除・比較できます。権限確認は UI 表示だけではなく、backend の API route 側で行われます。
+
+frontend と backend の flag が一致していない場合、Topologix は backend の `/api/health` response をもとに Header または Login page で認証設定の不一致を警告します。snapshot access の挙動を信頼する前に、両方の flag を同じ値にして stack を再起動してください。
 
 注意: `AUTH_ENABLED=false` の時代に作成された owner 情報なしの snapshot は、`AUTH_ENABLED=true` に切り替えても自動的には owner 付与されません。認証有効後、管理者はユーザーメニューの **スナップショット所有者移行** から、所有者未設定 snapshot を有効ユーザーへ明示的に割り当てられます。割り当てが完了するまで、それらの旧 snapshot は通常の認証付き snapshot 一覧には表示されません。
 
