@@ -4,7 +4,7 @@
  */
 import { runtimeConfig } from './config/runtimeConfig'
 
-export const APP_VERSION = '0.8.0-Alpha'
+export const APP_VERSION = '1.2.0'
 
 export const IS_PRODUCTION = import.meta.env.PROD
 
