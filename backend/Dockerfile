@@ -78,5 +78,8 @@ EXPOSE 5000
 # Use entrypoint script to handle permissions before running app
 ENTRYPOINT ["/docker-entrypoint.sh"]
 
-# Production: gunicorn (dev environments override via docker-compose)
-CMD ["gunicorn", "--worker-class", "gevent", "--workers", "4", "--bind", "0.0.0.0:5000", "app:app"]
+# Production: gunicorn (dev environments override via docker-compose).
+# Single worker is required: Batfish session state, the request lock, and
+# auto-generated secrets are process-local, so multiple workers split the
+# active snapshot state and break artifact preview tokens across requests.
+CMD ["gunicorn", "--worker-class", "gevent", "--workers", "1", "--bind", "0.0.0.0:5000", "app:app"]

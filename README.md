@@ -171,6 +171,7 @@ See [.env.example](.env.example) for the full template. Key variables:
 - Use Docker/container workflows for dependency checks and builds.
 - The current frontend dependency set includes Vite 6.x. A GitHub-reviewed 2026 Vite advisory affects the dev server when exposed to a network. Topologix Docker serves the production build with nginx, but do not expose the Vite dev server externally until dependencies and configuration have been reviewed.
 - Production deployments should set explicit secrets, restrict CORS origins, configure reverse proxy settings correctly, and review authentication defaults before going live.
+- Run the backend with a single gunicorn worker (the image default and the compose files already do). Batfish session state, the request lock, and auto-generated secrets are process-local, so multiple workers split the active snapshot state between requests.
 
 ## 日本語
 
@@ -256,6 +257,7 @@ snapshot を選択すると、file list のファイル名横に format dropdown
 - `AUTH_ENABLED` と `VITE_AUTH_ENABLED` は必ず一致させてください。
 - 本番運用では `SECRET_KEY`, `JWT_SECRET_KEY`, `CSRF_SECRET_KEY` を明示的に設定してください。
 - `SQLALCHEMY_ECHO` は既定の `false` のままにしてください。SQL 値には password hash などの機密性が高い運用情報が含まれる可能性があります。
+- backend は gunicorn worker 1 で運用してください(image の既定値と compose は 1 に設定済みです)。Batfish session 状態・request lock・自動生成 secret は process-local のため、複数 worker では active snapshot の状態がリクエスト間で分裂します。
 - reverse proxy を使う場合、`BEHIND_REVERSE_PROXY` と `TRUSTED_PROXY_COUNT` を実際の構成に合わせてください。
 - Batfish container image は、固定した pybatfish バージョンで検証済みの digest を既定値としています。別バージョンを試す場合は `BATFISH_IMAGE` で上書きしてください。`/api/health` は pybatfish バージョンと、最初の snapshot 初期化後は稼働中の Batfish サーバーバージョンを返します。
 - 1 つの Batfish クエリの実行上限は `BATFISH_QUERY_TIMEOUT_SECONDS`(既定 120 秒)で調整できます。
