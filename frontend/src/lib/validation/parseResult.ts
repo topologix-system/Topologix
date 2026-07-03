@@ -32,6 +32,9 @@ export interface ParseResultSummary {
   parseWarnings: number
   formats: Record<string, number>
   severity: ParseResultSeverity
+  failedFileNames: string[]
+  partialFileNames: string[]
+  unknownFileNames: string[]
 }
 
 const normalizeText = (value: unknown) => String(value ?? '').trim()
@@ -153,6 +156,9 @@ export function buildParseResultSummary(
     parseWarnings: parseWarnings.length,
     formats: {},
     severity: 'success',
+    failedFileNames: [],
+    partialFileNames: [],
+    unknownFileNames: [],
   }
 
   const affectedFiles = new Set<string>()
@@ -163,9 +169,18 @@ export function buildParseResultSummary(
     const fileName = normalizeText(status.file_name)
 
     if (classification.bucket === 'passed') summary.passedFiles += 1
-    if (classification.bucket === 'partial') summary.partialFiles += 1
-    if (classification.bucket === 'failed') summary.failedFiles += 1
-    if (classification.bucket === 'unknown') summary.unknownFiles += 1
+    if (classification.bucket === 'partial') {
+      summary.partialFiles += 1
+      if (fileName) summary.partialFileNames.push(fileName)
+    }
+    if (classification.bucket === 'failed') {
+      summary.failedFiles += 1
+      if (fileName) summary.failedFileNames.push(fileName)
+    }
+    if (classification.bucket === 'unknown') {
+      summary.unknownFiles += 1
+      if (fileName) summary.unknownFileNames.push(fileName)
+    }
 
     if (classification.severity !== 'success' && fileName) {
       affectedFiles.add(fileName)
@@ -192,6 +207,9 @@ export function buildParseResultSummary(
 
   summary.warningFiles = warningFiles.size
   summary.affectedFiles = affectedFiles.size
+  summary.failedFileNames.sort()
+  summary.partialFileNames.sort()
+  summary.unknownFileNames.sort()
 
   if (summary.failedFiles > 0 || summary.initIssueErrors > 0) {
     summary.severity = 'error'

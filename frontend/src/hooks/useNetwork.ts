@@ -93,6 +93,11 @@ export function useAllNetworkData(enabled = true) {
     gcTime: 10 * 60 * 1000,
     refetchInterval: false,
     refetchOnWindowFocus: false,
+    // No automatic retry: each attempt re-runs ~70 Batfish queries while the
+    // backend holds its process-wide Batfish lock, so retrying a slow/failed
+    // aggregate multiplies the outage instead of recovering from it. The
+    // error view offers a manual retry button.
+    retry: false,
   })
 }
 

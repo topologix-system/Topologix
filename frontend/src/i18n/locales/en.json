@@ -527,6 +527,10 @@
       "title": "Batfish Parse Result",
       "subtitle": "Review how Batfish parsed the active snapshot input before relying on topology and validation results.",
       "loading": "Refreshing parse result...",
+      "failedFilesLabel": "Failed files",
+      "partialFilesLabel": "Partially parsed files",
+      "unknownFilesLabel": "Files with unknown parse status",
+      "moreFiles": "+{{count}} more",
       "fileStatusTitle": "File parse status",
       "fileStatusHelp": "Use this table to find files that failed or partially parsed, then correlate them with warnings and initialization issues.",
       "initIssuesTitle": "Initialization issues",
@@ -810,6 +814,7 @@
   "topologyViewer": {
     "title": "Topology Viewer",
     "loading": "Loading topology...",
+    "loadingLargeSnapshotHint": "Large snapshots with many devices can take a few minutes.",
     "loadingDetail": "Loading network topology data, please wait",
     "noData": "No topology data available",
     "noActiveSnapshot": "Activate a snapshot to view the topology.",

@@ -608,6 +608,7 @@ export const TopologyViewer = memo(function TopologyViewer() {
         <div className="text-center">
           <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-primary-600 mx-auto" aria-hidden="true"></div>
           <p className="mt-4 text-gray-600">{t('topologyViewer.loading')}</p>
+          <p className="mt-1 text-sm text-gray-500">{t('topologyViewer.loadingLargeSnapshotHint')}</p>
           <span className="sr-only">{t('topologyViewer.loadingDetail')}</span>
         </div>
       </div>

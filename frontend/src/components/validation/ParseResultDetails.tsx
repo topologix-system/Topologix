@@ -93,6 +93,22 @@ export function ParseResultSummaryCard({
         <Metric label={t('validation.parseResult.metrics.parseWarnings')} value={summary.parseWarnings} />
       </div>
 
+      <AffectedFileList
+        label={t('validation.parseResult.failedFilesLabel')}
+        fileNames={summary.failedFileNames}
+        badgeClassName={statusBadgeClasses.failed}
+      />
+      <AffectedFileList
+        label={t('validation.parseResult.partialFilesLabel')}
+        fileNames={summary.partialFileNames}
+        badgeClassName={statusBadgeClasses.partial}
+      />
+      <AffectedFileList
+        label={t('validation.parseResult.unknownFilesLabel')}
+        fileNames={summary.unknownFileNames}
+        badgeClassName={statusBadgeClasses.unknown}
+      />
+
       {!compact && (
         <div className="mt-3 grid gap-2 text-sm text-gray-700 md:grid-cols-2">
           <p>
@@ -114,6 +130,46 @@ function Metric({ label, value }: { label: string; value: number }) {
     <div className="rounded-md bg-white px-3 py-2 shadow-sm">
       <div className="text-lg font-bold text-gray-900">{value}</div>
       <div className="text-xs font-medium text-gray-600">{label}</div>
+    </div>
+  )
+}
+
+const MAX_LISTED_AFFECTED_FILES = 8
+
+function AffectedFileList({
+  label,
+  fileNames,
+  badgeClassName,
+}: {
+  label: string
+  fileNames: string[]
+  badgeClassName: string
+}) {
+  const { t } = useTranslation()
+
+  if (fileNames.length === 0) return null
+
+  const visibleNames = fileNames.slice(0, MAX_LISTED_AFFECTED_FILES)
+  const remaining = fileNames.length - visibleNames.length
+
+  return (
+    <div className="mt-3 text-sm">
+      <span className="font-medium text-gray-800">{label}:</span>
+      <ul className="mt-1 flex flex-wrap gap-1.5" aria-label={label}>
+        {visibleNames.map((fileName) => (
+          <li
+            key={fileName}
+            className={`break-all rounded px-2 py-0.5 font-mono text-xs ${badgeClassName}`}
+          >
+            {fileName}
+          </li>
+        ))}
+        {remaining > 0 && (
+          <li className="rounded bg-white px-2 py-0.5 text-xs font-medium text-gray-600 shadow-sm">
+            {t('validation.parseResult.moreFiles', { count: remaining })}
+          </li>
+        )}
+      </ul>
     </div>
   )
 }

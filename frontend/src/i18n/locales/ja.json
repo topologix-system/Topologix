@@ -527,6 +527,10 @@
       "title": "Batfish解析結果",
       "subtitle": "トポロジーや検証結果を信頼する前に、Batfishが有効なスナップショット入力をどう解析したかを確認します。",
       "loading": "解析結果を更新中...",
+      "failedFilesLabel": "失敗したファイル",
+      "partialFilesLabel": "部分解析のファイル",
+      "unknownFilesLabel": "解析状態不明のファイル",
+      "moreFiles": "他 {{count}} 件",
       "fileStatusTitle": "ファイル解析状態",
       "fileStatusHelp": "失敗または部分解析のファイルを確認し、警告や初期化問題と突き合わせます。",
       "initIssuesTitle": "初期化問題",
@@ -810,6 +814,7 @@
   "topologyViewer": {
     "title": "トポロジービューアー",
     "loading": "トポロジーを読み込み中...",
+    "loadingLargeSnapshotHint": "機器数の多いスナップショットでは数分かかることがあります。",
     "loadingDetail": "ネットワークトポロジーデータを読み込んでいます。お待ちください",
     "noData": "利用可能なトポロジーデータがありません",
     "noActiveSnapshot": "トポロジーを表示するにはスナップショットを有効化してください。",

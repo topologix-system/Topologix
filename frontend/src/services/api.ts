@@ -432,7 +432,12 @@ export const networkAPI = {
   },
 
   async getAllData() {
-    const response = await apiClient.get<APIResponse<AllNetworkData>>('/network/all-data')
+    // The aggregate endpoint runs ~70 Batfish queries server-side, so large
+    // snapshots (50+ devices) legitimately exceed the default 30s timeout.
+    // nginx already allows 300s for /api.
+    const response = await apiClient.get<APIResponse<AllNetworkData>>('/network/all-data', {
+      timeout: 180000,
+    })
     return response.data.data
   },
 
