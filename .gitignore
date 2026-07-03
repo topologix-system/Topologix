@@ -13,6 +13,7 @@ ai/*
 .codex
 .agent-workbench/
 codex-docs/*
+claude-docs
 
 # 認証情報・証明書
 backend/security/*.key

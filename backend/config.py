@@ -161,6 +161,12 @@ class Config:
     BATFISH_NETWORK: str = 'topologix_network'
     BATFISH_SNAPSHOT: str = 'current'
     BATFISH_TIMEOUT: int = 30  # seconds
+    # Upper bound for one Batfish query so a stuck query cannot hold the
+    # process-wide Batfish request lock indefinitely. Applied only under
+    # gevent workers; snapshot initialization is intentionally not bounded.
+    BATFISH_QUERY_TIMEOUT_SECONDS: int = max(
+        10, int(os.getenv('BATFISH_QUERY_TIMEOUT_SECONDS', '120'))
+    )
 
     # Paths - with security validation
     BASE_DIR: Path = Path(__file__).parent.resolve()

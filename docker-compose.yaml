@@ -1,7 +1,8 @@
 services:
   # Batfish Network Analysis Service
+  # Pinned digest validated with pybatfish 2025.7.7.2423; override via BATFISH_IMAGE.
   batfish:
-    image: batfish/allinone:latest
+    image: ${BATFISH_IMAGE:-batfish/allinone@sha256:09817554db90e2f2674b72562c2d659427094187de0a3dfc23534ab58bf26207}
     container_name: batfish
     ports:
       - "8888:8888"

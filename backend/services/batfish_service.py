@@ -13,6 +13,7 @@ Batfish network analysis service wrapper
 - DataFrame to dataclass conversion utilities
 - Comprehensive error handling for Batfish exceptions
 """
+import contextlib
 import gc
 import logging
 import re
@@ -22,6 +23,13 @@ from pathlib import Path
 
 import pandas as pd
 from pybatfish.client.session import Session
+
+try:
+    import gevent
+    from gevent import monkey as gevent_monkey
+except ImportError:  # pragma: no cover - gevent is a runtime dependency but optional for tooling
+    gevent = None
+    gevent_monkey = None
 
 from config import config
 from models import (
@@ -34,6 +42,56 @@ from models import (
 )
 
 logger = logging.getLogger(__name__)
+
+# Deterministic question-content errors come back from the Batfish
+# coordinator as HTTP 500, and pybatfish's module-level retry policy
+# (total=10, backoff_factor=0.8) retries them for ~444 seconds. That wait
+# happens while the Flask process holds the app-wide Batfish request lock,
+# so every Batfish-backed endpoint freezes. Keep the upstream retry
+# statuses but cap the retry budget to a couple of seconds.
+_PYBATFISH_RETRY_TOTAL = 3
+_PYBATFISH_RETRY_BACKOFF_FACTOR = 0.3
+
+
+def _configure_pybatfish_retries() -> None:
+    """Cap pybatfish's HTTP retry policy so coordinator errors fail fast."""
+    try:
+        from requests.adapters import HTTPAdapter
+        from urllib3 import Retry
+
+        from pybatfish.client import restv2helper
+
+        http_sessions = (
+            restv2helper._requests_session,
+            restv2helper._requests_session_fail_fast,
+        )
+
+        retry = Retry(
+            total=_PYBATFISH_RETRY_TOTAL,
+            connect=_PYBATFISH_RETRY_TOTAL,
+            read=_PYBATFISH_RETRY_TOTAL,
+            backoff_factor=_PYBATFISH_RETRY_BACKOFF_FACTOR,
+            allowed_methods=None,
+            status_forcelist=[429, 500, 502, 503, 504],
+        )
+        for http_session in http_sessions:
+            adapter = HTTPAdapter(max_retries=retry)
+            http_session.mount("http://", adapter)
+            http_session.mount("https://", adapter)
+    except Exception as e:
+        # Degrade to pybatfish's default retry policy instead of failing
+        # startup when pybatfish/urllib3 internals change.
+        logger.warning("Could not adjust pybatfish HTTP retry policy: %s", e)
+        return
+
+    logger.info(
+        "Adjusted pybatfish HTTP retry policy: total=%s backoff_factor=%s",
+        _PYBATFISH_RETRY_TOTAL,
+        _PYBATFISH_RETRY_BACKOFF_FACTOR,
+    )
+
+
+_configure_pybatfish_retries()
 
 
 class BatfishQueryError(RuntimeError):
@@ -67,6 +125,15 @@ class BatfishService:
         "comparePeerGroupPolicies",
         "compareRoutePolicies",
     }
+
+    # Batfish AS-path regexes range over sequences of numeric AS numbers, so
+    # bare letters are never valid there. The coordinator answers such values
+    # with HTTP 500 at question creation, which pybatfish retries, so reject
+    # them before they reach Batfish. Escape pairs such as \d are removed
+    # before this check so regex character classes stay usable.
+    _ROUTE_POLICY_AS_PATH_REGEX_ALLOWED = re.compile(r"[0-9\s^$.*+?()\[\]{}|,_-]*")
+    _BGP_STANDARD_COMMUNITY_LITERAL = re.compile(r"^(\d+):(\d+)$")
+    _BGP_LARGE_COMMUNITY_LITERAL = re.compile(r"^(\d+):(\d+):(\d+)$")
 
     _SECRET_ERROR_KEY_PATTERN = re.compile(
         r"""(["']?[A-Za-z0-9_.-]*(?:password|secret|token|communities|community)[A-Za-z0-9_.-]*["']?)(\s*(?::|=)\s*|\s+)""",
@@ -169,6 +236,27 @@ class BatfishService:
         if not self._initialized:
             raise RuntimeError("Batfish session not initialized. Call initialize_network() first.")
 
+    @staticmethod
+    def _query_timeout_context(query_name: str):
+        """Bound one Batfish query under gevent workers.
+
+        gevent.Timeout inherits from BaseException, so a raw expiry would
+        bypass the `except Exception` error classification below. Passing a
+        TimeoutError instance makes the expiry surface as a normal exception
+        whose message matches the existing query_timeout classification.
+        Outside gevent (unit tests, tooling) no bound is applied.
+        """
+        if gevent is None or gevent_monkey is None or not gevent_monkey.is_module_patched("socket"):
+            return contextlib.nullcontext()
+
+        timeout_seconds = config.BATFISH_QUERY_TIMEOUT_SECONDS
+        return gevent.Timeout(
+            timeout_seconds,
+            TimeoutError(
+                f"Batfish query '{query_name}' timed out after {timeout_seconds} seconds"
+            ),
+        )
+
     def _execute_query(
         self,
         query: Any,
@@ -188,7 +276,8 @@ class BatfishService:
             DataFrame with results or None if error/empty
         """
         try:
-            result = query.answer().frame()
+            with self._query_timeout_context(query_name):
+                result = query.answer().frame()
             if result.empty:
                 logger.debug(f"Query '{query_name}' returned empty result")
                 return None
@@ -357,6 +446,36 @@ class BatfishService:
             return sanitized
         return value
 
+    @staticmethod
+    def _extract_batfish_root_cause(message: str) -> str:
+        """Reduce a Batfish work-log dump to its deepest root-cause line.
+
+        Failed work items arrive as 'Work terminated abnormally' followed by
+        the work_item JSON and a full Java stack trace (thousands of
+        characters). Only the innermost 'Caused by:' line carries the actual
+        failure reason, so surface that line instead of the whole dump.
+        """
+        if "Work terminated abnormally" not in message:
+            return message
+
+        causes = re.findall(r"Caused by: ([^\n]+)", message)
+        if not causes:
+            return message
+
+        root_cause = causes[-1].strip()
+        # Some Batfish answers embed the Java stack trace as JSON-encoded
+        # strings on one physical line, so also cut at the first stack frame
+        # ('at package.Class.method(File.java:NN)') and drop the JSON quoting
+        # left at the boundary.
+        root_cause = re.split(r"\s+at\s+[A-Za-z_$][\w.$]*\(", root_cause)[0]
+        root_cause = root_cause.rstrip().rstrip('",').rstrip()
+        root_cause = re.sub(r"^[A-Za-z0-9_.$]+(?:Exception|Error):\s*", "", root_cause)
+        if not root_cause:
+            return message
+        if len(root_cause) > 500:
+            root_cause = root_cause[:500] + "..."
+        return f"Batfish work failed: {root_cause}"
+
     def _build_query_error(
         self,
         query_name: str,
@@ -364,6 +483,7 @@ class BatfishService:
         query_params: dict[str, Any] | None = None,
     ) -> BatfishQueryError:
         raw_message = str(error).strip() or error.__class__.__name__
+        raw_message = self._extract_batfish_root_cause(raw_message)
         message = self._sanitize_error_message(raw_message)
         normalized = message.lower()
         error_type = "query_error"
@@ -377,6 +497,9 @@ class BatfishService:
             ("nodespecifier" in normalized or "node specifier" in normalized)
             and ("error parsing" in normalized or "valid continuations" in normalized)
         )
+        has_constraint_params = bool(query_params) and any(
+            query_params.get(key) for key in ("inputConstraints", "outputConstraints")
+        )
 
         if any(token in normalized for token in ("timed out", "timeout")):
             error_type = "query_timeout"
@@ -385,8 +508,24 @@ class BatfishService:
                 "Reduce the query scope and retry.",
                 "Check Batfish service health if the query repeatedly times out.",
             ]
+        elif "max retries exceeded" in normalized or "too many 500 error responses" in normalized:
+            error_type = "batfish_coordinator_error"
+            status_code = 502
+            hints = [
+                "Batfish rejected the request with repeated server errors.",
+                "Verify the query parameters, especially route constraint syntax, before retrying.",
+                "Check Batfish service health if this persists for valid inputs.",
+            ]
         elif "does not match any strings" in normalized or is_node_specifier_parse_error:
-            if is_route_policy_query:
+            if is_route_policy_query and has_constraint_params:
+                error_type = "route_policy_constraint_no_match"
+                hints = [
+                    "An input/output constraint regex did not match any candidate strings.",
+                    "Check the communities and asPath regexes in inputConstraints and outputConstraints.",
+                    "Community regexes must be able to match values such as 65000:100; AS-path regexes match sequences of numeric AS numbers.",
+                    "If the constraints look correct, inspect route-policy community and AS-path definitions in the snapshot configuration.",
+                ]
+            elif is_route_policy_query:
                 error_type = "route_policy_specifier_no_match"
                 hints = [
                     "Batfish could not resolve a specifier while evaluating route-policy analysis.",
@@ -408,7 +547,10 @@ class BatfishService:
             hints.append(
                 "For route policy queries, verify policy names, route constraints, and BGP route-policy syntax in the active snapshot."
             )
-            if "as-path" in normalized or "as path" in normalized or "regex" in normalized:
+            if (
+                error_type not in ("route_policy_constraint_no_match", "batfish_coordinator_error")
+                and ("as-path" in normalized or "as path" in normalized or "regex" in normalized)
+            ):
                 error_type = "route_policy_regex_conversion_error"
                 hints.append(
                     "Some Batfish versions can fail when converting specific route-policy AS-path regex expressions; inspect parse warnings and retry after narrowing nodes or policies."
@@ -516,7 +658,8 @@ class BatfishService:
     ) -> list[dict[str, Any]]:
         """Execute a query and return dynamic records while preserving errors."""
         try:
-            result = query.answer(**(answer_kwargs or {})).frame()
+            with self._query_timeout_context(query_name):
+                result = query.answer(**(answer_kwargs or {})).frame()
             if result.empty:
                 logger.debug(f"Query '{query_name}' returned empty result")
                 return []
@@ -604,6 +747,107 @@ class BatfishService:
             )
 
         del df
+
+    def _raise_invalid_route_policy_constraint(
+        self,
+        query_name: str,
+        constraint_field: str,
+        value_field: str,
+        value: Any,
+        reason: str,
+    ) -> None:
+        parameter_key = f"{constraint_field}.{value_field}"
+        raise BatfishQueryError(
+            query_name=query_name,
+            message=f"Invalid {parameter_key} constraint: {reason}",
+            error_type="route_policy_constraint_invalid",
+            details={
+                "query": query_name,
+                "parameters": self._sanitize_error_detail({parameter_key: value}),
+            },
+            hints=[
+                "Community constraints accept literal values such as 65000:100 or community regexes.",
+                "AS-path constraints accept regexes over numeric AS numbers, such as ^8075$ or .*8075.*.",
+                "Fix the constraint value and rerun the query.",
+            ],
+            status_code=400,
+        )
+
+    @staticmethod
+    def _iter_constraint_values(raw_value: Any) -> list[Any]:
+        """Normalize a BgpRouteConstraints field that accepts a string or a list."""
+        if raw_value is None:
+            return []
+        if isinstance(raw_value, (list, tuple)):
+            return list(raw_value)
+        return [raw_value]
+
+    def _validate_route_policy_constraints(
+        self,
+        query_name: str,
+        input_constraints: Any,
+        output_constraints: Any,
+    ) -> None:
+        """Reject constraint values Batfish fails on with server errors or internal exceptions."""
+        for constraint_field, constraints in (
+            ("inputConstraints", input_constraints),
+            ("outputConstraints", output_constraints),
+        ):
+            if not isinstance(constraints, dict):
+                continue
+
+            for value in self._iter_constraint_values(constraints.get("asPath")):
+                self._validate_as_path_constraint(query_name, constraint_field, value)
+            for value in self._iter_constraint_values(constraints.get("communities")):
+                self._validate_community_constraint(query_name, constraint_field, value)
+
+    def _validate_as_path_constraint(self, query_name: str, constraint_field: str, value: Any) -> None:
+        if not isinstance(value, str) or not value.strip():
+            self._raise_invalid_route_policy_constraint(
+                query_name, constraint_field, "asPath", value,
+                "each asPath constraint must be a non-empty regex string",
+            )
+        try:
+            re.compile(value)
+        except re.error:
+            self._raise_invalid_route_policy_constraint(
+                query_name, constraint_field, "asPath", value,
+                "the value is not a valid regular expression",
+            )
+        without_escape_pairs = re.sub(r"\\.", "", value)
+        if not self._ROUTE_POLICY_AS_PATH_REGEX_ALLOWED.fullmatch(without_escape_pairs):
+            self._raise_invalid_route_policy_constraint(
+                query_name, constraint_field, "asPath", value,
+                "AS-path regexes may contain only digits, whitespace, regex metacharacters, and escape sequences",
+            )
+
+    def _validate_community_constraint(self, query_name: str, constraint_field: str, value: Any) -> None:
+        if not isinstance(value, str) or not value.strip():
+            self._raise_invalid_route_policy_constraint(
+                query_name, constraint_field, "communities", value,
+                "each communities constraint must be a non-empty string",
+            )
+        try:
+            re.compile(value)
+        except re.error:
+            self._raise_invalid_route_policy_constraint(
+                query_name, constraint_field, "communities", value,
+                "the value is not a valid regular expression",
+            )
+
+        standard = self._BGP_STANDARD_COMMUNITY_LITERAL.fullmatch(value)
+        if standard and any(int(part) > 65535 for part in standard.groups()):
+            self._raise_invalid_route_policy_constraint(
+                query_name, constraint_field, "communities", value,
+                "standard community parts must be within 0-65535",
+            )
+
+        large = self._BGP_LARGE_COMMUNITY_LITERAL.fullmatch(value)
+        if large and any(int(part) > 4294967295 for part in large.groups()):
+            self._raise_invalid_route_policy_constraint(
+                query_name, constraint_field, "communities", value,
+                "large community parts must be within 0-4294967295",
+            )
 
     def _unavailable_capability(
         self,
@@ -1352,6 +1596,9 @@ class BatfishService:
             query_params["pathOption"] = pathOption
 
         try:
+            self._validate_route_policy_constraints(
+                "searchRoutePolicies", inputConstraints, outputConstraints
+            )
             self._validate_route_policy_node_specifier(nodes, "searchRoutePolicies")
         except BatfishQueryError as e:
             if raise_on_error:
