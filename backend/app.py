@@ -837,7 +837,8 @@ def health_check():
     return success_response({
         "service": "topologix-backend",
         "status": "healthy",
-        "auth_enabled": config.AUTH_ENABLED
+        "auth_enabled": config.AUTH_ENABLED,
+        "batfish": batfish_service.get_batfish_version_info()
     })
 
 

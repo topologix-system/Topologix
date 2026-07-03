@@ -22,6 +22,7 @@ from typing import Any, Callable
 from pathlib import Path
 
 import pandas as pd
+import pybatfish
 from pybatfish.client.session import Session
 
 try:
@@ -146,6 +147,7 @@ class BatfishService:
         self.current_snapshot_name: str | None = None
         self.reference_snapshot_name: str | None = None
         self._initialized = False
+        self._batfish_version: str | None = None
 
     @property
     def session(self) -> Session:
@@ -192,6 +194,8 @@ class BatfishService:
             self.session.set_network(self.network_name)
             logger.info(f"Network set to: {self.network_name}")
 
+            self._cache_batfish_version()
+
             # Initialize snapshot
             init_result = self.session.init_snapshot(
                 str(snapshot_path),
@@ -235,6 +239,29 @@ class BatfishService:
     def _ensure_initialized(self):
         if not self._initialized:
             raise RuntimeError("Batfish session not initialized. Call initialize_network() first.")
+
+    def _cache_batfish_version(self) -> None:
+        """Cache the Batfish server version while a session is already in use."""
+        if self._batfish_version is not None:
+            return
+        try:
+            components = self.session.get_component_versions()
+            batfish_version = components.get("Batfish") if isinstance(components, dict) else None
+            self._batfish_version = str(batfish_version) if batfish_version else None
+        except Exception as e:
+            logger.warning("Could not retrieve Batfish server version: %s", e)
+
+    def get_batfish_version_info(self) -> dict[str, Any]:
+        """Return cached version diagnostics without connecting to Batfish.
+
+        Health checks call this, so it must stay non-blocking: the server
+        version is only known after the first snapshot initialization has
+        already opened a session.
+        """
+        return {
+            "pybatfish_version": getattr(pybatfish, "__version__", None),
+            "batfish_version": self._batfish_version,
+        }
 
     @staticmethod
     def _query_timeout_context(query_name: str):

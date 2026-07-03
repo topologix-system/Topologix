@@ -160,7 +160,7 @@ See [.env.example](.env.example) for the full template. Key variables:
 | `DATABASE_URL` | Auth database URL | Default Docker value is SQLite at `/app/data/topologix.db`; PostgreSQL/MySQL can be configured. |
 | `SQLALCHEMY_ECHO` | SQL statement logging | Default is `false`. Keep disabled because SQL values can include password hashes and sensitive operational data. |
 | `VITE_API_BASE_URL` | Frontend API base URL | Empty value uses nginx `/api` reverse proxy in the Docker frontend. |
-| `BATFISH_IMAGE` | Batfish container image | Compose defaults to a digest validated with the pinned pybatfish version. Override to test another Batfish release. |
+| `BATFISH_IMAGE` | Batfish container image | Compose defaults to a digest validated with the pinned pybatfish version. Override to test another Batfish release. The `/api/health` response reports the pybatfish version and, after the first snapshot initialization, the running Batfish server version. |
 | `BATFISH_QUERY_TIMEOUT_SECONDS` | Upper bound for one Batfish query | Default is `120` (minimum 10). Prevents a stuck query from blocking all Batfish-backed API requests. |
 | `BEHIND_REVERSE_PROXY` | Enables proxy-aware request handling | Must match actual infrastructure to avoid trusting spoofed proxy headers. |
 | `TRUSTED_PROXY_COUNT` | Number of trusted proxy layers | Set according to the real proxy chain. |
@@ -257,7 +257,7 @@ snapshot を選択すると、file list のファイル名横に format dropdown
 - 本番運用では `SECRET_KEY`, `JWT_SECRET_KEY`, `CSRF_SECRET_KEY` を明示的に設定してください。
 - `SQLALCHEMY_ECHO` は既定の `false` のままにしてください。SQL 値には password hash などの機密性が高い運用情報が含まれる可能性があります。
 - reverse proxy を使う場合、`BEHIND_REVERSE_PROXY` と `TRUSTED_PROXY_COUNT` を実際の構成に合わせてください。
-- Batfish container image は、固定した pybatfish バージョンで検証済みの digest を既定値としています。別バージョンを試す場合は `BATFISH_IMAGE` で上書きしてください。
+- Batfish container image は、固定した pybatfish バージョンで検証済みの digest を既定値としています。別バージョンを試す場合は `BATFISH_IMAGE` で上書きしてください。`/api/health` は pybatfish バージョンと、最初の snapshot 初期化後は稼働中の Batfish サーバーバージョンを返します。
 - 1 つの Batfish クエリの実行上限は `BATFISH_QUERY_TIMEOUT_SECONDS`(既定 120 秒)で調整できます。
 
 ## License

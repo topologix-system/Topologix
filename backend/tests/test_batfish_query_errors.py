@@ -305,6 +305,25 @@ class RoutePolicyConstraintPreflightTest(unittest.TestCase):
         self.assertIsNone(self.service._session)
 
 
+class BatfishVersionDiagnosticsTest(unittest.TestCase):
+    def test_version_info_is_non_blocking_before_any_session_use(self):
+        service = BatfishService()
+
+        info = service.get_batfish_version_info()
+
+        self.assertIsNone(service._session)
+        self.assertIsNone(info["batfish_version"])
+        self.assertIsInstance(info["pybatfish_version"], str)
+
+    def test_version_info_returns_cached_server_version(self):
+        service = BatfishService()
+        service._batfish_version = "2025.07.07.2423"
+
+        info = service.get_batfish_version_info()
+
+        self.assertEqual(info["batfish_version"], "2025.07.07.2423")
+
+
 class PybatfishHttpHardeningTest(unittest.TestCase):
     def test_pybatfish_retry_policy_is_capped(self):
         from pybatfish.client import restv2helper
