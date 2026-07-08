@@ -67,7 +67,10 @@ services:
       - BEHIND_REVERSE_PROXY=${BEHIND_REVERSE_PROXY:-false}
       - TRUSTED_PROXY_COUNT=${TRUSTED_PROXY_COUNT:-1}
     volumes:
-      - snapshots-data:/snapshots
+      # Dev uses the host ./snapshots bind mount as SNAPSHOTS_DIR
+      # (/app/snapshots). The packaged compose stores snapshots in the
+      # snapshots-data named volume instead, so snapshots do NOT carry over
+      # when switching between the dev and packaged stacks on one host.
       - backend-db:/app/data
       - flask-sessions:/app/flask_session
       - ./backend:/app

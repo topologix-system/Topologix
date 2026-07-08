@@ -134,7 +134,12 @@ if (AUTH_ENABLED) {
 
 const apiClient: AxiosInstance = axios.create({
   baseURL: `${API_BASE_URL}/api`,
-  timeout: 30000,
+  // The backend serializes every Batfish-backed request behind one lock, so
+  // any query can legitimately wait for a long-running aggregate (measured
+  // 34s at 170 devices) before its own execution starts. 30s starved those
+  // queued requests on large snapshots; connection-level failures still fail
+  // fast regardless of this ceiling.
+  timeout: 120000,
   headers: {
     'Content-Type': 'application/json',
     ...(AUTH_ENABLED ? {} : {
@@ -432,11 +437,11 @@ export const networkAPI = {
   },
 
   async getAllData() {
-    // The aggregate endpoint runs ~70 Batfish queries server-side, so large
-    // snapshots (50+ devices) legitimately exceed the default 30s timeout.
-    // nginx already allows 300s for /api.
+    // The aggregate endpoint runs ~70 Batfish queries server-side; measured
+    // 34s for 170 minimal configs, so real-world large snapshots need the
+    // full window nginx allows for /api (300s).
     const response = await apiClient.get<APIResponse<AllNetworkData>>('/network/all-data', {
-      timeout: 180000,
+      timeout: 300000,
     })
     return response.data.data
   },
@@ -602,19 +607,31 @@ export const securityAPI = {
  * Includes unused structures, undefined references, forwarding loops, and multipath consistency
  * Critical for identifying network configuration errors before deployment
  */
+// Parse-result queries re-run Batfish parse-status questions server-side and
+// back the snapshot page's parse summary card; give large snapshots headroom
+// beyond the 30s default.
+const PARSE_RESULT_TIMEOUT_MS = 120000
+
 export const validationAPI = {
   async getFileParseStatus() {
-    const response = await apiClient.get<APIResponse<FileParseStatus[]>>('/validation/file-parse-status')
+    const response = await apiClient.get<APIResponse<FileParseStatus[]>>(
+      '/validation/file-parse-status',
+      { timeout: PARSE_RESULT_TIMEOUT_MS }
+    )
     return response.data.data
   },
 
   async getInitIssues() {
-    const response = await apiClient.get<APIResponse<InitIssue[]>>('/validation/init-issues')
+    const response = await apiClient.get<APIResponse<InitIssue[]>>('/validation/init-issues', {
+      timeout: PARSE_RESULT_TIMEOUT_MS,
+    })
     return response.data.data
   },
 
   async getParseWarnings() {
-    const response = await apiClient.get<APIResponse<ParseWarning[]>>('/validation/parse-warnings')
+    const response = await apiClient.get<APIResponse<ParseWarning[]>>('/validation/parse-warnings', {
+      timeout: PARSE_RESULT_TIMEOUT_MS,
+    })
     return response.data.data
   },
 
@@ -890,8 +907,15 @@ export const snapshotAPI = {
   },
 
   async activate(name: string) {
+    // Activation parses every uploaded config in Batfish, so 100+ real-world
+    // files legitimately exceed the 30s default. A client-side timeout here is
+    // worse than a slow wait: the backend still finishes activating, leaving
+    // the UI rolled back to the previous snapshot while the backend serves the
+    // new one. nginx allows 300s for /api.
     const response = await apiClient.post<APIResponse<NetworkInitializeResponse>>(
-      `/snapshots/${name}/activate`
+      `/snapshots/${name}/activate`,
+      undefined,
+      { timeout: 300000 }
     )
     return response.data.data
   },
