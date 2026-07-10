@@ -20,8 +20,10 @@ import hmac
 import time
 import threading
 from contextlib import contextmanager
+from io import BytesIO
 from pathlib import Path
 from typing import Any, Optional
+from werkzeug.datastructures import FileStorage
 from datetime import datetime
 from werkzeug.utils import secure_filename
 import magic
@@ -83,6 +85,10 @@ CHECKPOINT_PACKAGE_FILES = {
     'show-package.json',
 }
 ARTIFACT_SEGMENT_PATTERN = re.compile(r'^[A-Za-z0-9][A-Za-z0-9_.-]{0,63}$')
+
+
+class ConfigContentConflictError(Exception):
+    """Raised when a config content update uses a stale content hash."""
 
 
 def _artifact_definition(
@@ -1535,6 +1541,105 @@ class SnapshotService:
         files.sort(key=lambda x: x['name'])
 
         return files
+
+    def get_config_file_content(
+        self,
+        name: str,
+        filename: str,
+        requester_user_id: Any = None,
+        auth_enabled: bool = False,
+    ) -> dict[str, Any]:
+        """Read one UTF-8 config file body with a content hash for optimistic writes."""
+        safe_name = self._validate_snapshot_name(name)
+        snapshot_path, _ = self._authorize_snapshot(
+            safe_name,
+            requester_user_id=requester_user_id,
+            auth_enabled=auth_enabled,
+        )
+        file_path = self._get_snapshot_config_file(snapshot_path, filename)
+
+        content_bytes = file_path.read_bytes()
+        try:
+            content = content_bytes.decode('utf-8')
+        except UnicodeDecodeError as exc:
+            raise ValueError("Snapshot file must be UTF-8 text") from exc
+
+        return {
+            'content': content,
+            'sha256': hashlib.sha256(content_bytes).hexdigest(),
+            'size_bytes': len(content_bytes),
+        }
+
+    def update_config_file_content(
+        self,
+        name: str,
+        filename: str,
+        content: str,
+        expected_sha256: str,
+        requester_user_id: Any = None,
+        auth_enabled: bool = False,
+    ) -> dict[str, Any]:
+        """Validate and atomically replace one config file body."""
+        if not isinstance(content, str):
+            raise ValueError("Content must be a string")
+        if not isinstance(expected_sha256, str) or not expected_sha256:
+            raise ValueError("Expected content hash is required")
+
+        safe_name = self._validate_snapshot_name(name)
+        snapshot_path, _ = self._authorize_snapshot(
+            safe_name,
+            requester_user_id=requester_user_id,
+            auth_enabled=auth_enabled,
+        )
+        file_path = self._get_snapshot_config_file(snapshot_path, filename)
+
+        current_content = file_path.read_bytes()
+        current_sha256 = hashlib.sha256(current_content).hexdigest()
+        if current_sha256 != expected_sha256:
+            raise ConfigContentConflictError("Config file changed since it was opened")
+
+        updated_bytes = content.encode('utf-8')
+        file_storage = FileStorage(
+            stream=BytesIO(updated_bytes),
+            filename=file_path.name,
+        )
+        file_size = self._validate_upload_content(file_storage, file_path.name)
+
+        file_stat = file_path.stat()
+        temp_path: Optional[Path] = None
+
+        try:
+            with tempfile.NamedTemporaryFile(
+                mode='w',
+                encoding='utf-8',
+                dir=str(file_path.parent),
+                prefix=f".{file_path.name}.",
+                suffix='.tmp',
+                delete=False,
+            ) as temp_file:
+                temp_path = Path(temp_file.name)
+                temp_file.write(content)
+                temp_file.flush()
+                os.fsync(temp_file.fileno())
+
+            os.chmod(temp_path, file_stat.st_mode)
+            os.replace(temp_path, file_path)
+        except Exception:
+            if temp_path and temp_path.exists():
+                temp_path.unlink()
+            raise
+
+        logger.info(
+            "Updated snapshot file content: snapshot=%s file=%s size_bytes=%s requester_user_id=%s",
+            safe_name,
+            file_path.name,
+            file_size,
+            requester_user_id,
+        )
+
+        file_info = self._build_snapshot_file_response(file_path)
+        file_info['requires_reinitialize'] = True
+        return file_info
 
     def upload_file(
         self,

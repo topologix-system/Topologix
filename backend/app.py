@@ -22,10 +22,11 @@ from flask import Flask, jsonify, request, make_response, session
 from flask_cors import CORS
 from flask_compress import Compress
 from werkzeug.middleware.proxy_fix import ProxyFix
-from werkzeug.exceptions import BadRequest, UnsupportedMediaType
+from werkzeug.exceptions import BadRequest, RequestEntityTooLarge, UnsupportedMediaType
 
 from config import config
 from services import BatfishQueryError, BatfishService, SnapshotService
+from services.snapshot_service import ConfigContentConflictError
 from security.validation import validate_path
 
 # Configure logging early so it's available during conditional imports
@@ -68,6 +69,7 @@ else:
 
 # Initialize Flask app
 app = Flask(__name__)
+app.config['MAX_CONTENT_LENGTH'] = config.MAX_CONTENT_LENGTH
 
 # Apply ProxyFix middleware if behind reverse proxy (Caddy/nginx)
 # This ensures request.remote_addr contains real client IP, not proxy IP
@@ -90,7 +92,6 @@ if config.AUTH_ENABLED:
     app.config['SESSION_COOKIE_HTTPONLY'] = config.SESSION_COOKIE_HTTPONLY
     app.config['SESSION_COOKIE_SAMESITE'] = config.SESSION_COOKIE_SAMESITE
     app.config['PERMANENT_SESSION_LIFETIME'] = config.PERMANENT_SESSION_LIFETIME
-    app.config['MAX_CONTENT_LENGTH'] = config.MAX_CONTENT_LENGTH
     app.config['JWT_ACCESS_TOKEN_EXPIRES'] = config.JWT_ACCESS_TOKEN_EXPIRES
 
 # Initialize CORS
@@ -343,7 +344,7 @@ def request_uses_batfish() -> bool:
     if path.endswith('/activate') and path.startswith('/api/snapshots/'):
         return True
 
-    if path.startswith('/api/snapshots/') and '/files' in path and request.method in {'POST', 'PATCH', 'DELETE'}:
+    if path.startswith('/api/snapshots/') and '/files' in path and request.method in {'POST', 'PUT', 'PATCH', 'DELETE'}:
         return True
 
     if path.startswith('/api/snapshots/') and '/artifacts' in path and request.method in {'POST', 'PUT', 'PATCH', 'DELETE'}:
@@ -438,6 +439,11 @@ if config.AUTH_ENABLED:
 
 
 # ========== Error Handlers ==========
+@app.errorhandler(RequestEntityTooLarge)
+def request_entity_too_large(error):
+    return error_response("Request body exceeds the maximum allowed size", 413)
+
+
 @app.errorhandler(404)
 def not_found(error):
     return jsonify({"error": "Resource not found"}), 404
@@ -3756,6 +3762,73 @@ def get_snapshot_files(name: str):
         return error_response(str(e), 400)
     except Exception as e:
         logger.error(f"Failed to get snapshot files: {e}")
+        return error_response(str(e), 500)
+
+
+@app.route('/api/snapshots/<name>/files/<filename>/content', methods=['GET'])
+def get_snapshot_file_content(name: str, filename: str):
+    """Get one uploaded snapshot config file's UTF-8 content."""
+    try:
+        file_content = snapshot_service.get_config_file_content(
+            name,
+            filename,
+            **get_snapshot_request_context(),
+        )
+        return success_response(file_content, "Snapshot file content retrieved successfully")
+
+    except PermissionError as e:
+        return error_response(str(e), 403)
+    except FileNotFoundError as e:
+        return error_response(str(e), 404)
+    except ValueError as e:
+        return error_response(str(e), 400)
+    except Exception as e:
+        logger.error(f"Failed to get snapshot file content: {e}")
+        return error_response(str(e), 500)
+
+
+@app.route('/api/snapshots/<name>/files/<filename>/content', methods=['PUT'])
+def update_snapshot_file_content(name: str, filename: str):
+    """Replace one uploaded snapshot config file's UTF-8 content."""
+    try:
+        data = request.get_json(silent=True)
+        if not isinstance(data, dict):
+            return error_response("Request body must be a JSON object", 400)
+
+        content = data.get('content')
+        expected_sha256 = data.get('expected_sha256')
+        if not isinstance(content, str):
+            return error_response("Missing or invalid 'content' in request body", 400)
+        if not isinstance(expected_sha256, str) or not expected_sha256:
+            return error_response("Missing or invalid 'expected_sha256' in request body", 400)
+        if not re.fullmatch(r'[0-9a-f]{64}', expected_sha256):
+            raise ValueError("expected_sha256 must be a 64-character lowercase hexadecimal string")
+
+        file_info = snapshot_service.update_config_file_content(
+            name,
+            filename,
+            content,
+            expected_sha256,
+            **get_snapshot_request_context(),
+        )
+        return success_response(file_info, "Snapshot file content updated successfully")
+
+    except RequestEntityTooLarge:
+        raise
+    except ConfigContentConflictError:
+        return error_response(
+            "Config file changed since it was opened. Reload the file before saving again.",
+            409,
+            code="config_content_conflict",
+        )
+    except PermissionError as e:
+        return error_response(str(e), 403)
+    except FileNotFoundError as e:
+        return error_response(str(e), 404)
+    except ValueError as e:
+        return error_response(str(e), 400)
+    except Exception as e:
+        logger.error(f"Failed to update snapshot file content: {e}")
         return error_response(str(e), 500)
 
 

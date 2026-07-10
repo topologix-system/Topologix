@@ -46,6 +46,8 @@ import type {
   UpdateSnapshotRequest,
   UpdateSnapshotFileFormatRequest,
   SnapshotFileMutationResponse,
+  ConfigFileContentResponse,
+  UpdateConfigFileContentRequest,
   DeleteSnapshotFileResponse,
   SnapshotOwnerMigrationCandidate,
   AssignSnapshotOwnerRequest,
@@ -478,6 +480,31 @@ export const snapshotAPI = {
     const response = await apiClient.patch<APIResponse<SnapshotFileMutationResponse>>(
       `/snapshots/${name}/files/${encodedFilename}/format`,
       request
+    )
+    return response.data.data
+  },
+
+  async getConfigFileContent(name: string, filename: string) {
+    const encodedFilename = encodeURIComponent(filename)
+    const response = await apiClient.get<APIResponse<ConfigFileContentResponse>>(
+      `/snapshots/${name}/files/${encodedFilename}/content`
+    )
+    return response.data.data
+  },
+
+  async updateConfigFileContent({
+    name,
+    filename,
+    content,
+    expectedSha256,
+  }: UpdateConfigFileContentRequest) {
+    const encodedFilename = encodeURIComponent(filename)
+    const response = await apiClient.put<APIResponse<SnapshotFileMutationResponse>>(
+      `/snapshots/${name}/files/${encodedFilename}/content`,
+      {
+        content,
+        expected_sha256: expectedSha256,
+      }
     )
     return response.data.data
   },

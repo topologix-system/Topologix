@@ -44,6 +44,19 @@ export interface UpdateSnapshotFileFormatRequest {
   configuration_format_override: string | null
 }
 
+export interface ConfigFileContentResponse {
+  content: string
+  sha256: string
+  size_bytes: number
+}
+
+export interface UpdateConfigFileContentRequest {
+  name: string
+  filename: string
+  content: string
+  expectedSha256: string
+}
+
 export interface SnapshotFileMutationResponse extends SnapshotFile {
   requires_reinitialize?: boolean
 }

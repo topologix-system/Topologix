@@ -1283,6 +1283,7 @@
     "chooseFilesAria": "Choose configuration or log files to upload",
     "supportedFormats": "Supported: .cfg, .conf, .txt, .log (max 10MB)",
     "uploading": "Uploading files...",
+    "uploadFailedForFile": "Failed to upload file \"{{name}}\"",
     "table": {
       "filename": "Filename",
       "filenameAndFormat": "Filename / Format",
@@ -1315,6 +1316,40 @@
         "paloAlto": "Palo Alto"
       }
     },
+    "configEditor": {
+      "viewEdit": "View/Edit",
+      "viewEditAria": "View or edit file {{name}}",
+      "title": "Editing {{name}}",
+      "rancidHint": "If a RANCID content type header is present, it is shown as the first line and can be edited.",
+      "textareaAria": "Plain text editor for {{name}}",
+      "codemirrorAria": "Code editor for {{name}}",
+      "loadingEditor": "Loading editor...",
+      "loadingContent": "Loading file content...",
+      "saving": "Saving...",
+      "discardChanges": "Discard your unsaved config changes?",
+      "saveFailed": "Failed to save file content",
+      "loadFailed": "Failed to load file content",
+      "conflict": "This file changed since it was opened. Reload latest discards the current editor text; save as new preserves the attempted edit in a new file.",
+      "reload": "Reload file",
+      "deleted": "This file was deleted before the save finished. Save the current buffer as a new file.",
+      "saveAsNew": "Save as new file",
+      "externalChange": "This file's metadata changed outside the editor. Saving may conflict; reload before continuing if you need the latest file.",
+      "largeFileTitle": "Open large file?",
+      "largeFileMessage": "\"{{name}}\" is {{size}}. Large configs can take longer to open in the editor.",
+      "openLargeFile": "Open file"
+    },
+    "pasteCreate": {
+      "open": "Paste New Config",
+      "title": "Create Config from Paste",
+      "filenameLabel": "Filename",
+      "filenameHelp": "Use .cfg, .conf, .txt, or .log. Existing names require overwrite confirmation.",
+      "contentLabel": "Config text",
+      "submit": "Create file",
+      "invalidFilename": "Enter a filename starting with a letter or number, using only letters, numbers, dots, underscores, or hyphens, with .cfg, .conf, .txt, or .log.",
+      "emptyContent": "Paste config text before creating the file.",
+      "overwriteRequired": "\"{{name}}\" already exists. Confirm overwrite before continuing.",
+      "overwriteConfirm": "Overwrite existing file \"{{name}}\""
+    },
     "deleteFile": "Delete file",
     "deleteFileAria": "Delete file {{name}}",
     "deleteFileFailed": "Failed to delete file",
@@ -1343,7 +1378,8 @@
     },
     "deleteConfirm": {
       "title": "Delete Snapshot",
-      "message": "Are you sure you want to delete \"{{name}}\"? This action cannot be undone."
+      "message": "Are you sure you want to delete \"{{name}}\"? This action cannot be undone.",
+      "unsavedConfigWarning": "An unsaved config edit in this snapshot will be lost."
     },
     "artifacts": {
       "title": "Advanced artifact data",

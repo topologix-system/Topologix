@@ -9,6 +9,7 @@ export interface RuntimeConfig {
   authEnabled: boolean
   timezone: string
   useHashRouter: boolean
+  configEditorFallback: boolean
 }
 
 function getDefaultConfig(): RuntimeConfig {
@@ -25,6 +26,7 @@ function getDefaultConfig(): RuntimeConfig {
     authEnabled: parseBool(import.meta.env.VITE_AUTH_ENABLED, false),
     timezone: import.meta.env.VITE_TIMEZONE || 'Asia/Tokyo',
     useHashRouter: parseBool(import.meta.env.VITE_USE_HASH_ROUTER, false),
+    configEditorFallback: parseBool(import.meta.env.VITE_CONFIG_EDITOR_FALLBACK, false),
   }
 }
 
@@ -44,5 +46,9 @@ export const runtimeConfig: RuntimeConfig = ((): RuntimeConfig => {
     timezone: overrides.timezone ?? defaults.timezone,
     useHashRouter:
       typeof overrides.useHashRouter === 'boolean' ? overrides.useHashRouter : defaults.useHashRouter,
+    configEditorFallback:
+      typeof overrides.configEditorFallback === 'boolean'
+        ? overrides.configEditorFallback
+        : defaults.configEditorFallback,
   }
 })()

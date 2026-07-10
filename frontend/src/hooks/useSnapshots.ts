@@ -11,6 +11,7 @@ import type {
   CreateSnapshotRequest,
   ReplaceSnapshotArtifactContentRequest,
   SnapshotArtifactPreviewRequest,
+  UpdateConfigFileContentRequest,
   UpdateSnapshotArtifactRequest,
   UpdateSnapshotRequest,
   UploadSnapshotArtifactRequest,
@@ -24,6 +25,8 @@ export const snapshotKeys = {
   all: ['snapshots'] as const,
   list: () => [...snapshotKeys.all, 'list'] as const,
   files: (name: string) => [...snapshotKeys.all, name, 'files'] as const,
+  fileContent: (name: string, filename: string) =>
+    [...snapshotKeys.all, name, 'file-content', filename] as const,
   artifactTypes: (name: string) => [...snapshotKeys.all, name, 'artifact-types'] as const,
   artifactTree: (name: string) => [...snapshotKeys.all, name, 'artifact-tree'] as const,
   migrations: () => [...snapshotKeys.all, 'migrations'] as const,
@@ -44,6 +47,12 @@ export const batfishQueryFamilies = [
   ['bgp'],
   ['snmp-security'],
 ] as const
+
+export const configFileContentQueryOptions = {
+  staleTime: Infinity,
+  refetchOnReconnect: false,
+  refetchOnWindowFocus: false,
+} as const
 
 /**
  * Query all available snapshots
@@ -73,6 +82,27 @@ export function useSnapshotFiles(name: string, enabled = true) {
     queryFn: () => snapshotAPI.getFiles(name),
     enabled: enabled && !!name,
     staleTime: 10000, // 10 seconds
+  })
+}
+
+/**
+ * Query full text content for one config file.
+ */
+export function useConfigFileContent(name: string, filename: string, enabled = true) {
+  const queryClient = useQueryClient()
+
+  return useQuery({
+    queryKey: snapshotKeys.fileContent(name, filename),
+    queryFn: async () => {
+      try {
+        return await snapshotAPI.getConfigFileContent(name, filename)
+      } catch (error) {
+        queryClient.invalidateQueries({ queryKey: snapshotKeys.files(name) })
+        throw error
+      }
+    },
+    enabled: enabled && !!name && !!filename,
+    ...configFileContentQueryOptions,
   })
 }
 
@@ -184,6 +214,10 @@ export function useUploadFile() {
     mutationFn: ({ name, file }: { name: string; file: File }) =>
       snapshotAPI.uploadFile(name, file),
     onSuccess: (_, variables) => {
+      queryClient.invalidateQueries({
+        queryKey: snapshotKeys.fileContent(variables.name, variables.file.name),
+        refetchType: 'none',
+      })
       // Invalidate files list for this snapshot
       queryClient.invalidateQueries({ queryKey: snapshotKeys.files(variables.name) })
       // Also invalidate snapshots list (file count changed)
@@ -210,8 +244,37 @@ export function useUpdateSnapshotFileFormat() {
       configurationFormatOverride: string | null
     }) => snapshotAPI.updateFileFormat(name, filename, configurationFormatOverride),
     onSuccess: (_, variables) => {
+      queryClient.invalidateQueries({
+        queryKey: snapshotKeys.fileContent(variables.name, variables.filename),
+        refetchType: 'none',
+      })
       queryClient.invalidateQueries({ queryKey: snapshotKeys.files(variables.name) })
       queryClient.invalidateQueries({ queryKey: snapshotKeys.list() })
+    },
+  })
+}
+
+/**
+ * Mutation to update one config file's full text content.
+ */
+export function useUpdateConfigFileContent() {
+  const queryClient = useQueryClient()
+
+  return useMutation({
+    mutationFn: (request: UpdateConfigFileContentRequest) =>
+      snapshotAPI.updateConfigFileContent(request),
+    onSuccess: (_data, variables) => {
+      queryClient.invalidateQueries({ queryKey: snapshotKeys.files(variables.name) })
+      queryClient.invalidateQueries({
+        queryKey: snapshotKeys.fileContent(variables.name, variables.filename),
+      })
+      queryClient.invalidateQueries({ queryKey: snapshotKeys.list() })
+    },
+    onError: (_error, variables) => {
+      queryClient.invalidateQueries({
+        queryKey: snapshotKeys.files(variables.name),
+        refetchType: 'none',
+      })
     },
   })
 }
@@ -227,6 +290,10 @@ export function useDeleteSnapshotFile() {
     mutationFn: ({ name, filename }: { name: string; filename: string }) =>
       snapshotAPI.deleteFile(name, filename),
     onSuccess: (_, variables) => {
+      queryClient.invalidateQueries({
+        queryKey: snapshotKeys.fileContent(variables.name, variables.filename),
+        refetchType: 'none',
+      })
       queryClient.invalidateQueries({ queryKey: snapshotKeys.files(variables.name) })
       queryClient.invalidateQueries({ queryKey: snapshotKeys.list() })
     },

@@ -124,7 +124,9 @@ class Config:
     PASSWORD_RESET_URL_BASE: str = os.getenv('PASSWORD_RESET_URL_BASE', 'http://localhost:3000')  # Frontend base URL
 
     # Security - File Upload
-    MAX_CONTENT_LENGTH: int = 10 * 1024 * 1024  # 10MB
+    # Allow headroom for multipart boundaries and content-PUT JSON escaping;
+    # per-file content validation stays at 10MB.
+    MAX_CONTENT_LENGTH: int = int(os.getenv('MAX_CONTENT_LENGTH', str(12 * 1024 * 1024)))
     ALLOWED_EXTENSIONS: set = {'.cfg', '.conf', '.txt', '.log'}
     UPLOAD_FOLDER: str = os.getenv('UPLOAD_FOLDER', './uploads')
 

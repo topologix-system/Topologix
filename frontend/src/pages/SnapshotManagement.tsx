@@ -6,9 +6,11 @@
  * - Zustand store integration for current snapshot state synchronization
  * - Handles multiple file uploads and snapshot lifecycle management
  */
-import { useState, useCallback, useMemo, useRef } from 'react'
-import { Link } from 'react-router-dom'
+import { useState, useCallback, useEffect, useMemo, useRef } from 'react'
+import { Link, useBlocker } from 'react-router-dom'
 import { useTranslation } from 'react-i18next'
+import { AxiosError } from 'axios'
+import { useQueryClient } from '@tanstack/react-query'
 import {
   Plus,
   Upload,
@@ -23,15 +25,21 @@ import {
   GitCompare,
   Cable,
   FileText,
+  FilePlus2,
+  Pencil,
+  RefreshCw,
 } from 'lucide-react'
 
 import {
   useSnapshots,
+  snapshotKeys,
   useSnapshotFiles,
   useCreateSnapshot,
   useDeleteSnapshot,
   useUpdateSnapshot,
   useUploadFile,
+  useConfigFileContent,
+  useUpdateConfigFileContent,
   useUpdateSnapshotFileFormat,
   useDeleteSnapshotFile,
   useActivateSnapshot,
@@ -39,8 +47,10 @@ import {
 } from '../hooks'
 import { useSnapshotStore } from '../store'
 import { ConfirmDialog } from '../components/ConfirmDialog'
+import { ConfigFileEditor } from '../components/ConfigFileEditor'
 import { SnapshotFolderCombobox } from '../components/SnapshotFolderCombobox'
 import { AdvancedArtifactPanel } from '../components/AdvancedArtifactPanel'
+import { runtimeConfig } from '../config/runtimeConfig'
 import { ParseResultSummaryCard } from '../components/validation/ParseResultDetails'
 import type { Snapshot, SnapshotFile } from '../types'
 import { extractErrorMessage } from '../types/errors'
@@ -48,6 +58,9 @@ import { extractErrorMessage } from '../types/errors'
 const UNGROUPED_GROUP_KEY = 'ungrouped'
 const AUTO_FORMAT_VALUE = 'auto'
 const UNSUPPORTED_FORMAT_PREFIX = 'unsupported:'
+const LARGE_CONFIG_WARNING_BYTES = 1024 * 1024
+const PASTE_CONFIG_ALLOWED_EXTENSIONS = ['.cfg', '.conf', '.txt', '.log'] as const
+const DEFAULT_PASTE_CONFIG_FILENAME = 'config.cfg'
 const RANCID_FORMAT_OPTIONS = [
   { value: 'a10', labelKey: 'snapshots.format.options.a10' },
   { value: 'arista', labelKey: 'snapshots.format.options.arista' },
@@ -88,6 +101,22 @@ const getFileFormatSelectValue = (file: SnapshotFile) => {
   return file.configuration_format_override || AUTO_FORMAT_VALUE
 }
 
+const getFileExtension = (filename: string) => {
+  const dotIndex = filename.lastIndexOf('.')
+  return dotIndex >= 0 ? filename.slice(dotIndex).toLowerCase() : ''
+}
+
+const isAllowedPasteConfigFilename = (filename: string) => {
+  if (!filename || filename.includes('/') || filename.includes('\\')) return false
+  if (!/^[A-Za-z0-9][A-Za-z0-9_.-]*$/.test(filename)) return false
+  return PASTE_CONFIG_ALLOWED_EXTENSIONS.includes(
+    getFileExtension(filename) as (typeof PASTE_CONFIG_ALLOWED_EXTENSIONS)[number]
+  )
+}
+
+const getErrorStatus = (error: unknown) =>
+  error instanceof AxiosError ? error.response?.status : undefined
+
 interface SnapshotGroup {
   key: string
   label: string
@@ -97,6 +126,7 @@ interface SnapshotGroup {
 
 export function SnapshotManagement() {
   const { t } = useTranslation()
+  const queryClient = useQueryClient()
   const [selectedSnapshot, setSelectedSnapshot] = useState<string | null>(null)
   const [showCreateDialog, setShowCreateDialog] = useState(false)
   const [newSnapshotName, setNewSnapshotName] = useState('')
@@ -114,6 +144,25 @@ export function SnapshotManagement() {
   const [fileDeleteConfirmOpen, setFileDeleteConfirmOpen] = useState(false)
   const [fileToDelete, setFileToDelete] = useState<{ snapshotName: string; file: SnapshotFile } | null>(null)
   const [fileChangeInProgressSnapshot, setFileChangeInProgressSnapshot] = useState<string | null>(null)
+  const [editingFileName, setEditingFileName] = useState<string | null>(null)
+  const [editingFileBaseline, setEditingFileBaseline] = useState<{
+    name: string
+    modified_at: string
+    size_bytes: number
+  } | null>(null)
+  const [largeFileToOpen, setLargeFileToOpen] = useState<SnapshotFile | null>(null)
+  const [editorError, setEditorError] = useState('')
+  const [editorConflict, setEditorConflict] = useState(false)
+  const [editorDeleted, setEditorDeleted] = useState(false)
+  const [editorRecoveryBuffer, setEditorRecoveryBuffer] = useState('')
+  const [editorDraft, setEditorDraft] = useState<string | null>(null)
+  const [editorOriginalContent, setEditorOriginalContent] = useState<string | null>(null)
+  const [editorLoadedSha256, setEditorLoadedSha256] = useState<string | null>(null)
+  const [pasteCreateOpen, setPasteCreateOpen] = useState(false)
+  const [pasteFilename, setPasteFilename] = useState(DEFAULT_PASTE_CONFIG_FILENAME)
+  const [pasteContent, setPasteContent] = useState('')
+  const [pasteError, setPasteError] = useState('')
+  const [pasteOverwriteConfirmed, setPasteOverwriteConfirmed] = useState(false)
   const fileChangeInProgressRef = useRef<string | null>(null)
   const [collapsedFolderKeys, setCollapsedFolderKeys] = useState<Set<string>>(() => new Set())
 
@@ -134,6 +183,11 @@ export function SnapshotManagement() {
    */
   const { data: snapshots, isLoading: loadingSnapshots } = useSnapshots()
   const { data: files } = useSnapshotFiles(selectedSnapshot || '', !!selectedSnapshot)
+  const configContentQuery = useConfigFileContent(
+    selectedSnapshot || '',
+    editingFileName || '',
+    !!selectedSnapshot && !!editingFileName
+  )
   const parseResult = useParseResultSummary(isSelectedSnapshotActive)
 
   /**
@@ -148,6 +202,7 @@ export function SnapshotManagement() {
   const updateMutation = useUpdateSnapshot()
   const uploadMutation = useUploadFile()
   const updateFileFormatMutation = useUpdateSnapshotFileFormat()
+  const updateConfigFileContentMutation = useUpdateConfigFileContent()
   const deleteFileMutation = useDeleteSnapshotFile()
   const activateMutation = useActivateSnapshot()
   const snapshotActivationPending = isSnapshotActivationInProgress || activateMutation.isPending
@@ -156,6 +211,70 @@ export function SnapshotManagement() {
     () => snapshots?.find((snapshot) => snapshot.name === selectedSnapshot) ?? null,
     [selectedSnapshot, snapshots]
   )
+
+  const forceConfigEditorFallback = useMemo(() => {
+    if (typeof window === 'undefined') {
+      return runtimeConfig.configEditorFallback
+    }
+
+    const queryValue = new URLSearchParams(window.location.search).get('configEditorFallback')
+    return runtimeConfig.configEditorFallback || queryValue === '1' || queryValue === 'true'
+  }, [])
+
+  const pasteFilenameExists = useMemo(
+    () => files?.some((file) => file.name === pasteFilename.trim()) ?? false,
+    [files, pasteFilename]
+  )
+
+  const currentEditingFile = useMemo(
+    () => files?.find((file) => file.name === editingFileName) ?? null,
+    [editingFileName, files]
+  )
+
+  const editingFileMetadataChanged = !!(
+    editingFileBaseline &&
+    currentEditingFile &&
+    (editingFileBaseline.modified_at !== currentEditingFile.modified_at ||
+      editingFileBaseline.size_bytes !== currentEditingFile.size_bytes)
+  )
+  const editingFileMissing = !!editingFileName && files !== undefined && !currentEditingFile
+  const isConfigEditorDirty =
+    editorDraft !== null &&
+    editorOriginalContent !== null &&
+    editorDraft !== editorOriginalContent
+  const navigationBlocker = useBlocker(isConfigEditorDirty)
+
+  useEffect(() => {
+    if (!editingFileName || !configContentQuery.data) return
+    if (editorLoadedSha256 === configContentQuery.data.sha256) return
+
+    setEditorDraft(configContentQuery.data.content)
+    setEditorOriginalContent(configContentQuery.data.content)
+    setEditorLoadedSha256(configContentQuery.data.sha256)
+    setEditorRecoveryBuffer('')
+  }, [configContentQuery.data, editingFileName, editorLoadedSha256])
+
+  useEffect(() => {
+    if (!isConfigEditorDirty) return
+
+    const handleBeforeUnload = (event: BeforeUnloadEvent) => {
+      event.preventDefault()
+      event.returnValue = ''
+    }
+
+    window.addEventListener('beforeunload', handleBeforeUnload)
+    return () => window.removeEventListener('beforeunload', handleBeforeUnload)
+  }, [isConfigEditorDirty])
+
+  useEffect(() => {
+    if (navigationBlocker.state !== 'blocked') return
+
+    if (window.confirm(t('snapshots.configEditor.discardChanges'))) {
+      navigationBlocker.proceed()
+    } else {
+      navigationBlocker.reset()
+    }
+  }, [navigationBlocker, t])
 
   const folderOptions = useMemo(() => {
     const folders = new Set<string>()
@@ -214,6 +333,22 @@ export function SnapshotManagement() {
       return next
     })
   }, [])
+
+  const clearConfigEditorStatus = useCallback(() => {
+    setEditorError('')
+    setEditorConflict(false)
+    setEditorDeleted(false)
+    setEditorRecoveryBuffer('')
+  }, [])
+
+  const resetConfigEditor = useCallback(() => {
+    setEditingFileName(null)
+    setEditingFileBaseline(null)
+    setEditorDraft(null)
+    setEditorOriginalContent(null)
+    setEditorLoadedSha256(null)
+    clearConfigEditorStatus()
+  }, [clearConfigEditorStatus])
 
   /**
    * Handle snapshot creation with validation
@@ -313,6 +448,7 @@ export function SnapshotManagement() {
       onSuccess: () => {
         if (selectedSnapshot === snapshotToDelete) {
           setSelectedSnapshot(null)
+          resetConfigEditor()
         }
         if (currentSnapshotName === snapshotToDelete) {
           setCurrentSnapshotName(null)
@@ -329,7 +465,14 @@ export function SnapshotManagement() {
         setSnapshotToDelete(null)
       },
     })
-  }, [deleteMutation, snapshotToDelete, selectedSnapshot, currentSnapshotName, setCurrentSnapshotName])
+  }, [
+    currentSnapshotName,
+    deleteMutation,
+    resetConfigEditor,
+    selectedSnapshot,
+    setCurrentSnapshotName,
+    snapshotToDelete,
+  ])
 
   /**
    * Cancel snapshot deletion
@@ -340,20 +483,31 @@ export function SnapshotManagement() {
   }, [])
 
   /**
-   * Handle file upload to selected snapshot
-   * Processes multiple files concurrently via React Query mutation
+   * Upload files to the selected snapshot and reuse active-snapshot reactivation.
    */
-  const handleFileUpload = useCallback(
-    (files: FileList | null) => {
-      if (!files || !selectedSnapshot) return
-      const uploadFiles = Array.from(files)
-      if (uploadFiles.length === 0) return
+  const uploadFilesToSelectedSnapshot = useCallback(
+    (
+      uploadFiles: File[],
+      options: {
+        onError?: (message: string) => void
+        onSuccess?: () => void
+      } = {}
+    ) => {
+      if (!selectedSnapshot || uploadFiles.length === 0) return
+
       const changedSnapshotName = selectedSnapshot
       const shouldReactivate = useSnapshotStore.getState().currentSnapshotName === changedSnapshotName
+      const reportError = (message: string) => {
+        if (options.onError) {
+          options.onError(message)
+          return
+        }
+        setUploadError((currentError) => currentError || message)
+      }
 
       if (shouldReactivate) {
         if (snapshotActivationPending || fileChangeInProgressRef.current !== null) {
-          setUploadError(t('snapshots.fileChangeBusy'))
+          reportError(t('snapshots.fileChangeBusy'))
           return
         }
         fileChangeInProgressRef.current = changedSnapshotName
@@ -361,12 +515,20 @@ export function SnapshotManagement() {
         setFileReinitializeError('')
       }
 
-      setUploadError('')
+      if (!options.onError) {
+        setUploadError('')
+      }
+
       let remainingUploads = uploadFiles.length
       let requiresReinitialize = false
+      let hadUploadError = false
       const finishUpload = () => {
         remainingUploads -= 1
         if (remainingUploads > 0) return
+
+        if (!hadUploadError) {
+          options.onSuccess?.()
+        }
 
         if (!shouldReactivate) return
 
@@ -407,9 +569,8 @@ export function SnapshotManagement() {
               finishUpload()
             },
             onError: (error: unknown) => {
-              setUploadError((currentError) => (
-                currentError || extractErrorMessage(error, `Failed to upload file '${file.name}'`)
-              ))
+              hadUploadError = true
+              reportError(extractErrorMessage(error, t('snapshots.uploadFailedForFile', { name: file.name })))
               finishUpload()
             },
           }
@@ -417,6 +578,17 @@ export function SnapshotManagement() {
       })
     },
     [activateMutation, selectedSnapshot, setCurrentSnapshotName, snapshotActivationPending, t, uploadMutation]
+  )
+
+  /**
+   * Handle file upload to selected snapshot.
+   */
+  const handleFileUpload = useCallback(
+    (files: FileList | null) => {
+      if (!files) return
+      uploadFilesToSelectedSnapshot(Array.from(files))
+    },
+    [uploadFilesToSelectedSnapshot]
   )
 
   /**
@@ -627,6 +799,219 @@ export function SnapshotManagement() {
     setFileToDelete(null)
   }, [])
 
+  const openConfigEditor = useCallback(
+    (file: SnapshotFile, skipSizeWarning = false) => {
+      if (snapshotActivationPending || fileChangeInProgressRef.current !== null) return
+      if (editingFileName === file.name) return
+
+      if (isConfigEditorDirty && !window.confirm(t('snapshots.configEditor.discardChanges'))) {
+        return
+      }
+
+      if (!skipSizeWarning && file.size_bytes > LARGE_CONFIG_WARNING_BYTES) {
+        resetConfigEditor()
+        setLargeFileToOpen(file)
+        return
+      }
+
+      resetConfigEditor()
+      setEditingFileName(file.name)
+      setEditingFileBaseline({
+        name: file.name,
+        modified_at: file.modified_at,
+        size_bytes: file.size_bytes,
+      })
+    },
+    [editingFileName, isConfigEditorDirty, resetConfigEditor, snapshotActivationPending, t]
+  )
+
+  const closeConfigEditor = useCallback(() => {
+    if (selectedSnapshot) {
+      queryClient.invalidateQueries({ queryKey: snapshotKeys.files(selectedSnapshot) })
+    }
+    resetConfigEditor()
+  }, [queryClient, resetConfigEditor, selectedSnapshot])
+
+  const requestCloseConfigEditor = useCallback(() => {
+    if (isConfigEditorDirty && !window.confirm(t('snapshots.configEditor.discardChanges'))) {
+      return
+    }
+    closeConfigEditor()
+  }, [closeConfigEditor, isConfigEditorDirty, t])
+
+  const confirmLargeFileOpen = useCallback(() => {
+    if (!largeFileToOpen) return
+    const file = largeFileToOpen
+    setLargeFileToOpen(null)
+    openConfigEditor(file, true)
+  }, [largeFileToOpen, openConfigEditor])
+
+  const cancelLargeFileOpen = useCallback(() => {
+    setLargeFileToOpen(null)
+  }, [])
+
+  const openPasteCreateDialog = useCallback((content = '', filename = DEFAULT_PASTE_CONFIG_FILENAME) => {
+    setPasteFilename(filename)
+    setPasteContent(content)
+    setPasteError('')
+    setPasteOverwriteConfirmed(false)
+    setPasteCreateOpen(true)
+  }, [])
+
+  const closePasteCreateDialog = useCallback(() => {
+    setPasteCreateOpen(false)
+    setPasteFilename(DEFAULT_PASTE_CONFIG_FILENAME)
+    setPasteContent('')
+    setPasteError('')
+    setPasteOverwriteConfirmed(false)
+  }, [])
+
+  const handlePasteCreateSubmit = useCallback(() => {
+    if (!selectedSnapshot) return
+
+    const trimmedFilename = pasteFilename.trim()
+    if (!isAllowedPasteConfigFilename(trimmedFilename)) {
+      setPasteError(t('snapshots.pasteCreate.invalidFilename'))
+      return
+    }
+
+    if (!pasteContent) {
+      setPasteError(t('snapshots.pasteCreate.emptyContent'))
+      return
+    }
+
+    if (pasteFilenameExists && !pasteOverwriteConfirmed) {
+      setPasteError(t('snapshots.pasteCreate.overwriteRequired', { name: trimmedFilename }))
+      return
+    }
+
+    const file = new File([pasteContent], trimmedFilename, { type: 'text/plain' })
+    setPasteError('')
+    uploadFilesToSelectedSnapshot([file], {
+      onError: setPasteError,
+      onSuccess: closePasteCreateDialog,
+    })
+  }, [
+    closePasteCreateDialog,
+    pasteContent,
+    pasteFilename,
+    pasteFilenameExists,
+    pasteOverwriteConfirmed,
+    selectedSnapshot,
+    t,
+    uploadFilesToSelectedSnapshot,
+  ])
+
+  const reloadConfigEditorContent = useCallback(() => {
+    if (isConfigEditorDirty && !window.confirm(t('snapshots.configEditor.discardChanges'))) {
+      return
+    }
+    void configContentQuery.refetch().then((result) => {
+      if (
+        !result.isSuccess ||
+        !result.data ||
+        !currentEditingFile ||
+        currentEditingFile.name !== editingFileName
+      ) {
+        return
+      }
+
+      clearConfigEditorStatus()
+      setEditorDraft(result.data.content)
+      setEditorOriginalContent(result.data.content)
+      setEditorLoadedSha256(result.data.sha256)
+      setEditingFileBaseline({
+        name: currentEditingFile.name,
+        modified_at: currentEditingFile.modified_at,
+        size_bytes: currentEditingFile.size_bytes,
+      })
+    })
+  }, [
+    clearConfigEditorStatus,
+    configContentQuery,
+    currentEditingFile,
+    editingFileName,
+    isConfigEditorDirty,
+    t,
+  ])
+
+  const openDeletedEditorBufferAsNew = useCallback(() => {
+    openPasteCreateDialog(
+      editorDraft ?? editorRecoveryBuffer,
+      editingFileName || DEFAULT_PASTE_CONFIG_FILENAME
+    )
+    closeConfigEditor()
+  }, [closeConfigEditor, editingFileName, editorDraft, editorRecoveryBuffer, openPasteCreateDialog])
+
+  const handleConfigEditorSave = useCallback(() => {
+      if (!selectedSnapshot || !editingFileName || !configContentQuery.data || editorDraft === null) return
+      if (snapshotActivationPending) return
+      if (!startFileChangeOperation(selectedSnapshot)) {
+        setEditorError(t('snapshots.fileChangeBusy'))
+        return
+      }
+
+      const changedSnapshotName = selectedSnapshot
+      const filename = editingFileName
+      const content = editorDraft
+      clearConfigEditorStatus()
+      setFileReinitializeError('')
+
+      updateConfigFileContentMutation.mutate(
+        {
+          name: changedSnapshotName,
+          filename,
+          content,
+          expectedSha256: configContentQuery.data.sha256,
+        },
+        {
+          onSuccess: (response) => {
+            closeConfigEditor()
+
+            if (response?.requires_reinitialize) {
+              reactivateCurrentSnapshotAfterFileChange(changedSnapshotName, () =>
+                finishFileChangeOperation(changedSnapshotName)
+              )
+              return
+            }
+
+            finishFileChangeOperation(changedSnapshotName)
+          },
+          onError: (error: unknown) => {
+            const status = getErrorStatus(error)
+            setEditorRecoveryBuffer(content)
+
+            if (status === 409) {
+              setEditorConflict(true)
+              setEditorError(t('snapshots.configEditor.conflict'))
+            } else if (status === 404) {
+              setEditorDeleted(true)
+              setEditorError(t('snapshots.configEditor.deleted'))
+            } else {
+              setEditorError(extractErrorMessage(error, t('snapshots.configEditor.saveFailed')))
+            }
+
+            finishFileChangeOperation(changedSnapshotName)
+          },
+        }
+      )
+    },
+    [
+      clearConfigEditorStatus,
+      closeConfigEditor,
+      configContentQuery.data,
+      editorDraft,
+      editingFileName,
+      finishFileChangeOperation,
+      reactivateCurrentSnapshotAfterFileChange,
+      selectedSnapshot,
+      snapshotActivationPending,
+      startFileChangeOperation,
+      t,
+      updateConfigFileContentMutation,
+    ]
+  )
+
   /**
    * Handle snapshot selection and synchronize editable folder state
    */
@@ -634,7 +1019,12 @@ export function SnapshotManagement() {
     (snapshot: Snapshot) => {
       if (fileChangeInProgressRef.current !== null) return
       if (snapshotActivationPending) return
+      if (snapshot.name === selectedSnapshot) return
+      if (isConfigEditorDirty && !window.confirm(t('snapshots.configEditor.discardChanges'))) {
+        return
+      }
 
+      resetConfigEditor()
       setSelectedSnapshot(snapshot.name)
       setFolderDraft(snapshot.folder_name || '')
       setFolderValidationError('')
@@ -643,12 +1033,21 @@ export function SnapshotManagement() {
       setFileReinitializeError('')
       setFileDeleteConfirmOpen(false)
       setFileToDelete(null)
+      setLargeFileToOpen(null)
 
       if (currentSnapshotName !== snapshot.name) {
         handleActivate(snapshot.name)
       }
     },
-    [currentSnapshotName, handleActivate, snapshotActivationPending]
+    [
+      currentSnapshotName,
+      handleActivate,
+      isConfigEditorDirty,
+      resetConfigEditor,
+      selectedSnapshot,
+      snapshotActivationPending,
+      t,
+    ]
   )
 
   /**
@@ -984,6 +1383,15 @@ export function SnapshotManagement() {
                     aria-describedby="upload-instructions"
                   />
                 </label>
+                <button
+                  type="button"
+                  onClick={() => openPasteCreateDialog()}
+                  disabled={isSelectedSnapshotFileActionBlocked}
+                  className="ml-0 mt-3 inline-flex items-center gap-2 rounded-lg border border-blue-200 bg-blue-50 px-4 py-2 font-medium text-blue-800 transition-colors hover:bg-blue-100 focus:outline-none focus:ring-2 focus:ring-primary-600 focus:ring-offset-1 disabled:cursor-not-allowed disabled:opacity-50 sm:ml-3 sm:mt-0"
+                >
+                  <FilePlus2 className="h-4 w-4" aria-hidden="true" />
+                  {t('snapshots.pasteCreate.open')}
+                </button>
                 <p id="upload-instructions" className="text-xs text-gray-700 mt-3 font-medium">
                   {t('snapshots.supportedFormats')}
                 </p>
@@ -1111,21 +1519,33 @@ export function SnapshotManagement() {
                               <td className="px-6 py-4 align-top whitespace-nowrap text-sm text-gray-700 font-medium">
                                 <div className="flex items-center justify-between gap-4">
                                   <span>{new Date(file.modified_at).toLocaleString()}</span>
-                                  <button
-                                    type="button"
-                                    onClick={() => handleFileDelete(file)}
-                                    disabled={isSelectedSnapshotFileActionBlocked}
-                                    className="inline-flex h-9 w-9 items-center justify-center rounded-md border border-red-200 text-red-600 transition-colors hover:bg-red-50 hover:text-red-700 focus:outline-none focus:ring-2 focus:ring-red-600 focus:ring-offset-1 disabled:cursor-not-allowed disabled:opacity-50"
-                                    aria-label={t('snapshots.deleteFileAria', { name: file.name })}
-                                    aria-busy={isDeletingFile}
-                                    title={t('snapshots.deleteFile')}
-                                  >
-                                    {isDeletingFile ? (
-                                      <Loader2 className="h-4 w-4 animate-spin" aria-hidden="true" />
-                                    ) : (
-                                      <Trash2 className="h-4 w-4" aria-hidden="true" />
-                                    )}
-                                  </button>
+                                  <div className="flex items-center gap-2">
+                                    <button
+                                      type="button"
+                                      onClick={() => openConfigEditor(file)}
+                                      disabled={isSelectedSnapshotFileActionBlocked}
+                                      className="inline-flex h-9 w-9 items-center justify-center rounded-md border border-blue-200 text-blue-700 transition-colors hover:bg-blue-50 hover:text-blue-800 focus:outline-none focus:ring-2 focus:ring-primary-600 focus:ring-offset-1 disabled:cursor-not-allowed disabled:opacity-50"
+                                      aria-label={t('snapshots.configEditor.viewEditAria', { name: file.name })}
+                                      title={t('snapshots.configEditor.viewEdit')}
+                                    >
+                                      <Pencil className="h-4 w-4" aria-hidden="true" />
+                                    </button>
+                                    <button
+                                      type="button"
+                                      onClick={() => handleFileDelete(file)}
+                                      disabled={isSelectedSnapshotFileActionBlocked}
+                                      className="inline-flex h-9 w-9 items-center justify-center rounded-md border border-red-200 text-red-600 transition-colors hover:bg-red-50 hover:text-red-700 focus:outline-none focus:ring-2 focus:ring-red-600 focus:ring-offset-1 disabled:cursor-not-allowed disabled:opacity-50"
+                                      aria-label={t('snapshots.deleteFileAria', { name: file.name })}
+                                      aria-busy={isDeletingFile}
+                                      title={t('snapshots.deleteFile')}
+                                    >
+                                      {isDeletingFile ? (
+                                        <Loader2 className="h-4 w-4 animate-spin" aria-hidden="true" />
+                                      ) : (
+                                        <Trash2 className="h-4 w-4" aria-hidden="true" />
+                                      )}
+                                    </button>
+                                  </div>
                                 </div>
                               </td>
                             </tr>
@@ -1139,6 +1559,84 @@ export function SnapshotManagement() {
                 <div className="text-center py-12 text-gray-700">
                   <p className="font-semibold text-base">{t('snapshots.noFiles')}</p>
                   <p className="text-sm mt-2 text-gray-700">{t('snapshots.uploadToStart')}</p>
+                </div>
+              )}
+
+              {editingFileName && (
+                <div className="mt-4 space-y-3 rounded-lg border border-gray-200 bg-white p-4 shadow">
+                  {(editorError || editingFileMissing) && (
+                    <div
+                      className="flex flex-col gap-3 rounded-lg border border-yellow-200 bg-yellow-50 px-4 py-3 text-sm font-medium text-yellow-900 sm:flex-row sm:items-center sm:justify-between"
+                      role="alert"
+                    >
+                      <span>
+                        {editorError || t('snapshots.configEditor.deleted')}
+                      </span>
+                      {(editorConflict || editorDeleted || editingFileMissing) && (
+                        <div className="flex flex-wrap gap-2">
+                          {editorConflict && !editingFileMissing && (
+                            <button
+                              type="button"
+                              onClick={reloadConfigEditorContent}
+                              className="inline-flex items-center gap-2 rounded-md border border-yellow-300 bg-white px-3 py-2 text-sm font-semibold text-yellow-900 transition-colors hover:bg-yellow-100 focus:outline-none focus:ring-2 focus:ring-yellow-600 focus:ring-offset-1"
+                            >
+                              <RefreshCw className="h-4 w-4" aria-hidden="true" />
+                              {t('snapshots.configEditor.reload')}
+                            </button>
+                          )}
+                          <button
+                            type="button"
+                            onClick={openDeletedEditorBufferAsNew}
+                            className="inline-flex items-center gap-2 rounded-md border border-yellow-300 bg-white px-3 py-2 text-sm font-semibold text-yellow-900 transition-colors hover:bg-yellow-100 focus:outline-none focus:ring-2 focus:ring-yellow-600 focus:ring-offset-1"
+                          >
+                            <FilePlus2 className="h-4 w-4" aria-hidden="true" />
+                            {t('snapshots.configEditor.saveAsNew')}
+                          </button>
+                        </div>
+                      )}
+                    </div>
+                  )}
+                  {!editorError && !editingFileMissing && editingFileMetadataChanged && (
+                    <div
+                      className="rounded-lg border border-yellow-200 bg-yellow-50 px-4 py-3 text-sm font-medium text-yellow-900"
+                      role="alert"
+                    >
+                      {t('snapshots.configEditor.externalChange')}
+                    </div>
+                  )}
+                  {configContentQuery.isLoading && (
+                    <div
+                      className="flex items-center rounded-lg border border-gray-200 bg-gray-50 px-4 py-6 text-sm font-medium text-gray-700"
+                      role="status"
+                    >
+                      <Loader2 className="mr-2 h-4 w-4 animate-spin text-blue-600" aria-hidden="true" />
+                      {t('snapshots.configEditor.loadingContent')}
+                    </div>
+                  )}
+                  {configContentQuery.isError && (
+                    <div
+                      className="rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm font-medium text-red-700"
+                      role="alert"
+                    >
+                      {extractErrorMessage(configContentQuery.error, t('snapshots.configEditor.loadFailed'))}
+                    </div>
+                  )}
+                  {configContentQuery.data && editorDraft !== null && (
+                    <ConfigFileEditor
+                      key={`${editingFileName}-${editorLoadedSha256}`}
+                      filename={editingFileName}
+                      draft={editorDraft}
+                      forceFallback={forceConfigEditorFallback}
+                      isSaving={
+                        updateConfigFileContentMutation.isPending &&
+                        updateConfigFileContentMutation.variables?.name === selectedSnapshot &&
+                        updateConfigFileContentMutation.variables?.filename === editingFileName
+                      }
+                      onDraftChange={setEditorDraft}
+                      onSave={handleConfigEditorSave}
+                      onCancel={requestCloseConfigEditor}
+                    />
+                  )}
                 </div>
               )}
 
@@ -1266,11 +1764,144 @@ export function SnapshotManagement() {
         </div>
       )}
 
+      {/* Paste-create dialog */}
+      {pasteCreateOpen && (
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center bg-black bg-opacity-50 p-4"
+          role="dialog"
+          aria-modal="true"
+          aria-labelledby="paste-create-dialog-title"
+          onClick={closePasteCreateDialog}
+        >
+          <div
+            className="max-h-[90vh] w-full max-w-3xl overflow-y-auto rounded-lg bg-white p-6 shadow-xl"
+            onClick={(event) => event.stopPropagation()}
+          >
+            <div className="mb-4 flex items-center justify-between gap-4">
+              <h3 id="paste-create-dialog-title" className="text-lg font-semibold text-gray-900">
+                {t('snapshots.pasteCreate.title')}
+              </h3>
+              <button
+                type="button"
+                onClick={closePasteCreateDialog}
+                className="rounded p-1 transition-colors hover:bg-gray-100 focus:outline-none focus:ring-2 focus:ring-primary-600"
+                aria-label={t('common.closeDialog')}
+              >
+                <X className="h-5 w-5" aria-hidden="true" />
+              </button>
+            </div>
+
+            <div className="space-y-4">
+              <div>
+                <label htmlFor="paste-config-filename" className="mb-1 block text-sm font-medium text-gray-800">
+                  {t('snapshots.pasteCreate.filenameLabel')}
+                </label>
+                <input
+                  id="paste-config-filename"
+                  type="text"
+                  value={pasteFilename}
+                  onChange={(event) => {
+                    setPasteFilename(event.target.value)
+                    setPasteError('')
+                    setPasteOverwriteConfirmed(false)
+                  }}
+                  className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm text-gray-900 focus:border-primary-600 focus:outline-none focus:ring-2 focus:ring-primary-600"
+                  aria-describedby="paste-config-filename-help"
+                />
+                <p id="paste-config-filename-help" className="mt-2 text-xs text-gray-600">
+                  {t('snapshots.pasteCreate.filenameHelp')}
+                </p>
+              </div>
+
+              <div>
+                <label htmlFor="paste-config-content" className="mb-1 block text-sm font-medium text-gray-800">
+                  {t('snapshots.pasteCreate.contentLabel')}
+                </label>
+                <textarea
+                  id="paste-config-content"
+                  value={pasteContent}
+                  onChange={(event) => {
+                    setPasteContent(event.target.value)
+                    setPasteError('')
+                  }}
+                  spellCheck={false}
+                  className="h-80 w-full resize-y rounded-lg border border-gray-300 p-3 font-mono text-sm leading-6 text-gray-900 focus:border-primary-600 focus:outline-none focus:ring-2 focus:ring-primary-600"
+                />
+              </div>
+
+              {pasteFilenameExists && (
+                <label className="flex items-start gap-3 rounded-lg border border-yellow-200 bg-yellow-50 px-4 py-3 text-sm text-yellow-900">
+                  <input
+                    type="checkbox"
+                    checked={pasteOverwriteConfirmed}
+                    onChange={(event) => {
+                      setPasteOverwriteConfirmed(event.target.checked)
+                      setPasteError('')
+                    }}
+                    className="mt-1 h-4 w-4 rounded border-yellow-300 text-yellow-700 focus:ring-yellow-600"
+                  />
+                  <span>
+                    {t('snapshots.pasteCreate.overwriteConfirm', { name: pasteFilename.trim() })}
+                  </span>
+                </label>
+              )}
+
+              {pasteError && (
+                <p className="rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm font-medium text-red-700" role="alert">
+                  {pasteError}
+                </p>
+              )}
+
+              <div className="flex flex-wrap justify-end gap-3">
+                <button
+                  type="button"
+                  onClick={closePasteCreateDialog}
+                  className="rounded-lg px-4 py-2 font-medium text-gray-800 transition-colors hover:bg-gray-100 focus:outline-none focus:ring-2 focus:ring-primary-600 focus:ring-offset-1"
+                >
+                  {t('common.cancel')}
+                </button>
+                <button
+                  type="button"
+                  onClick={handlePasteCreateSubmit}
+                  disabled={uploadMutation.isPending}
+                  className="inline-flex items-center gap-2 rounded-lg bg-blue-600 px-4 py-2 font-medium text-white transition-colors hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-primary-600 focus:ring-offset-1 disabled:cursor-not-allowed disabled:opacity-50"
+                  aria-busy={uploadMutation.isPending}
+                >
+                  {uploadMutation.isPending && <Loader2 className="h-4 w-4 animate-spin" aria-hidden="true" />}
+                  {uploadMutation.isPending ? t('snapshots.uploading') : t('snapshots.pasteCreate.submit')}
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* Delete confirmation dialog */}
+      <ConfirmDialog
+        isOpen={!!largeFileToOpen}
+        title={t('snapshots.configEditor.largeFileTitle')}
+        message={t('snapshots.configEditor.largeFileMessage', {
+          name: largeFileToOpen?.name ?? '',
+          size: largeFileToOpen ? formatBytes(largeFileToOpen.size_bytes) : '',
+        })}
+        confirmText={t('snapshots.configEditor.openLargeFile')}
+        cancelText={t('common.cancel')}
+        onConfirm={confirmLargeFileOpen}
+        onCancel={cancelLargeFileOpen}
+        variant="warning"
+      />
       <ConfirmDialog
         isOpen={deleteConfirmOpen}
         title={t('snapshots.deleteConfirm.title', 'Delete Snapshot')}
-        message={t('snapshots.deleteConfirm.message', { name: snapshotToDelete }) || `Are you sure you want to delete "${snapshotToDelete}"? This action cannot be undone.`}
+        message={[
+          t('snapshots.deleteConfirm.message', { name: snapshotToDelete }) ||
+            `Are you sure you want to delete "${snapshotToDelete}"? This action cannot be undone.`,
+          isConfigEditorDirty && snapshotToDelete === selectedSnapshot
+            ? t('snapshots.deleteConfirm.unsavedConfigWarning')
+            : '',
+        ]
+          .filter(Boolean)
+          .join('\n\n')}
         confirmText={t('common.delete', 'Delete')}
         cancelText={t('common.cancel', 'Cancel')}
         onConfirm={confirmDelete}

@@ -1283,6 +1283,7 @@
     "chooseFilesAria": "アップロードする設定ファイルまたはログファイルを選択",
     "supportedFormats": "対応形式: .cfg, .conf, .txt, .log (最大10MB)",
     "uploading": "ファイルをアップロード中...",
+    "uploadFailedForFile": "ファイル「{{name}}」のアップロードに失敗しました",
     "table": {
       "filename": "ファイル名",
       "filenameAndFormat": "ファイル名 / フォーマット",
@@ -1315,6 +1316,40 @@
         "paloAlto": "Palo Alto"
       }
     },
+    "configEditor": {
+      "viewEdit": "表示/編集",
+      "viewEditAria": "{{name}} を表示または編集",
+      "title": "{{name}} を編集中",
+      "rancidHint": "RANCID content type header がある場合は先頭行として表示され、そのまま編集できます。",
+      "textareaAria": "{{name}} のプレーンテキストエディター",
+      "codemirrorAria": "{{name}} のコードエディター",
+      "loadingEditor": "エディターを読み込み中...",
+      "loadingContent": "ファイル内容を読み込み中...",
+      "saving": "保存中...",
+      "discardChanges": "保存されていない設定変更を破棄しますか？",
+      "saveFailed": "ファイル内容の保存に失敗しました",
+      "loadFailed": "ファイル内容の読み込みに失敗しました",
+      "conflict": "このファイルは開いた後に変更されています。最新を再読み込みすると現在のエディター内容は破棄されます。新規ファイルとして保存すると、保存しようとした編集内容を別ファイルに保持できます。",
+      "reload": "ファイルを再読み込み",
+      "deleted": "保存完了前にこのファイルは削除されました。現在の内容を新しいファイルとして保存してください。",
+      "saveAsNew": "新規ファイルとして保存",
+      "externalChange": "このファイルのメタデータがエディター外で変更されました。保存すると競合する可能性があります。最新内容が必要な場合は続行前に再読み込みしてください。",
+      "largeFileTitle": "大きなファイルを開きますか？",
+      "largeFileMessage": "「{{name}}」は {{size}} です。大きな設定ファイルはエディターで開くまで時間がかかる場合があります。",
+      "openLargeFile": "ファイルを開く"
+    },
+    "pasteCreate": {
+      "open": "設定を貼り付け",
+      "title": "貼り付けから設定ファイルを作成",
+      "filenameLabel": "ファイル名",
+      "filenameHelp": ".cfg、.conf、.txt、.log を使用できます。既存名の場合は上書き確認が必要です。",
+      "contentLabel": "設定テキスト",
+      "submit": "ファイルを作成",
+      "invalidFilename": "英数字で始まり、.cfg、.conf、.txt、.log のいずれかで終わる、英数字・ドット・アンダースコア・ハイフンのみのファイル名を入力してください。",
+      "emptyContent": "ファイル作成前に設定テキストを貼り付けてください。",
+      "overwriteRequired": "「{{name}}」は既に存在します。続行するには上書きを確認してください。",
+      "overwriteConfirm": "既存ファイル「{{name}}」を上書きする"
+    },
     "deleteFile": "ファイルを削除",
     "deleteFileAria": "{{name}} を削除",
     "deleteFileFailed": "ファイル削除に失敗しました",
@@ -1343,7 +1378,8 @@
     },
     "deleteConfirm": {
       "title": "スナップショットを削除",
-      "message": "「{{name}}」を削除してもよろしいですか？この操作は取り消せません。"
+      "message": "「{{name}}」を削除してもよろしいですか？この操作は取り消せません。",
+      "unsavedConfigWarning": "このスナップショットの未保存の設定編集は失われます。"
     },
     "artifacts": {
       "title": "高度なアーティファクトデータ",
