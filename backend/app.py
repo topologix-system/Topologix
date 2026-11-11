@@ -13,8 +13,9 @@ import sys
 import time
 from pathlib import Path
 from typing import Any
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 import hashlib
+import ipaddress
 import json
 from threading import RLock
 
@@ -23,11 +24,17 @@ from flask_cors import CORS
 from flask_compress import Compress
 from werkzeug.middleware.proxy_fix import ProxyFix
 from werkzeug.exceptions import BadRequest, RequestEntityTooLarge, UnsupportedMediaType
+from pybatfish.datamodel.route import BgpRoute
 
 from config import config
 from services import BatfishQueryError, BatfishService, SnapshotService
+from services.batfish_service import (
+    BATFISH_NOT_INITIALIZED_MESSAGE,
+    JAVA_STACK_FRAME_IN_TEXT,
+    BatfishSnapshotLoadError,
+)
 from services.snapshot_service import ConfigContentConflictError
-from security.validation import validate_path
+from security.validation import RequestValidationError, validate_path
 
 # Configure logging early so it's available during conditional imports
 logging.basicConfig(
@@ -160,6 +167,7 @@ if config.AUTH_ENABLED:
     AUTH_EXEMPT_ROUTES = {
         '/api/health',
         '/api/auth/login',
+        '/api/auth/logout',
         '/api/auth/refresh',
         '/api/auth/password-reset-request',
         '/api/auth/password-reset',
@@ -359,6 +367,71 @@ def request_uses_batfish() -> bool:
     return False
 
 
+# Endpoints that read a multipart/form-data upload instead of a JSON body
+NON_JSON_BODY_ENDPOINTS = frozenset({
+    'upload_snapshot_file',
+    'upload_snapshot_artifact',
+    'replace_snapshot_artifact_content',
+})
+
+# POST/PUT/PATCH endpoints that run without a request body or read it optionally
+OPTIONAL_BODY_ENDPOINTS = frozenset({
+    'logout',
+    'refresh_token',
+    'get_reachability',
+    'compare_peer_group_policies',
+    'update_snapshot_file_content',
+    'update_snapshot_file_format',
+    'preview_snapshot_artifact_change',
+    'update_snapshot_artifact',
+    'validate_snapshot_artifacts',
+    'activate_snapshot',
+})
+
+BODY_METHODS = frozenset({'POST', 'PUT', 'PATCH'})
+
+
+@app.before_request
+def reject_unreadable_request_body():
+    """Answer oversized, malformed, missing or non-JSON bodies before route handlers catch the parse errors."""
+    max_content_length = request.max_content_length
+    if max_content_length is not None and (request.content_length or 0) > max_content_length:
+        raise RequestEntityTooLarge()
+
+    if (
+        request.method not in BODY_METHODS
+        or request.endpoint is None
+        or request.endpoint in NON_JSON_BODY_ENDPOINTS
+    ):
+        return None
+
+    # The CSRF check may already have parsed a form body out of the request stream
+    has_body = bool(request.get_data(cache=True).strip()) or bool(request.form) or bool(request.files)
+    if not has_body:
+        if request.endpoint in OPTIONAL_BODY_ENDPOINTS:
+            return None
+    elif request.is_json:
+        try:
+            data = request.get_json()
+        except BadRequest:
+            pass
+        else:
+            if data is None or isinstance(data, dict):
+                return None
+            return error_response(
+                "Request body must be a JSON object",
+                400,
+                code="invalid_json",
+                hints=["Send a JSON object (not an array or a scalar value) with Content-Type: application/json."],
+            )
+    return error_response(
+        "Request body must be valid JSON",
+        400,
+        code="invalid_json",
+        hints=["Send a well-formed JSON document with Content-Type: application/json."],
+    )
+
+
 @app.before_request
 def prepare_batfish_request_context():
     """Serialize Batfish operations and switch to the request-specific network namespace."""
@@ -403,7 +476,9 @@ if config.AUTH_ENABLED:
 
         active_snapshot_name = session.get('current_snapshot_name')
         if not active_snapshot_name:
-            return None
+            # Sessions without an active snapshot get the uninitialized-service error;
+            # the shared Batfish state stays as other sessions left it.
+            return error_response(BATFISH_NOT_INITIALIZED_MESSAGE, 400)
 
         try:
             snapshot_path = snapshot_service.get_snapshot_path(
@@ -412,7 +487,7 @@ if config.AUTH_ENABLED:
             )
 
             if batfish_service.current_snapshot_name != active_snapshot_name:
-                batfish_service.initialize_network(str(snapshot_path), snapshot_name=active_snapshot_name)
+                activate_batfish_snapshot(snapshot_path, active_snapshot_name)
                 logger.info(
                     "Synchronized Batfish snapshot for user=%s snapshot=%s",
                     getattr(request, 'username', 'unknown'),
@@ -434,6 +509,14 @@ if config.AUTH_ENABLED:
                 active_snapshot_name,
             )
             return error_response("Active snapshot not found", 404)
+        except Exception as e:
+            logger.error(
+                "Failed to synchronize Batfish snapshot for user=%s snapshot=%s: %s",
+                getattr(request, 'username', 'unknown'),
+                active_snapshot_name,
+                e,
+            )
+            return snapshot_activation_error_response(active_snapshot_name, e)
 
         return None
 
@@ -441,7 +524,17 @@ if config.AUTH_ENABLED:
 # ========== Error Handlers ==========
 @app.errorhandler(RequestEntityTooLarge)
 def request_entity_too_large(error):
-    return error_response("Request body exceeds the maximum allowed size", 413)
+    return error_response("Request body exceeds the maximum allowed size", 413, code="request_too_large")
+
+
+@app.errorhandler(UnsupportedMediaType)
+def unsupported_media_type(error):
+    return error_response("Request body must be valid JSON", 400, code="invalid_json")
+
+
+@app.errorhandler(BadRequest)
+def bad_request(error):
+    return error_response("Bad request", 400, code="bad_request")
 
 
 @app.errorhandler(404)
@@ -678,6 +771,113 @@ def batfish_query_error_response(error: BatfishQueryError) -> tuple:
     )
 
 
+def validation_error_response(error: RequestValidationError) -> tuple:
+    """Create a structured response for request input rejected by validation."""
+    return error_response(
+        str(error),
+        400,
+        code="validation_error",
+        details={"field": error.field} if error.field else None,
+    )
+
+
+_BATFISH_FAILURE_REASON_PATTERN = re.compile(
+    r"(?:Caused by: |exception:)(?:[A-Za-z0-9_.$]+(?:Exception|Error): )?([^\n\"]+)"
+)
+_UUID_PATTERN = re.compile(r"\b[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}\b")
+
+
+def extract_batfish_failure_reason(message: str) -> str | None:
+    """Return the innermost exception reason of a Batfish work log without stack frames, ids or secret-like values."""
+    reasons = _BATFISH_FAILURE_REASON_PATTERN.findall(message)
+    if not reasons:
+        return None
+    reason = JAVA_STACK_FRAME_IN_TEXT.split(reasons[-1])[0]
+    reason = sanitize_error_text(reason)
+    reason = _UUID_PATTERN.sub("[id]", reason).strip()
+    return reason[:300] or None
+
+
+def snapshot_has_config_files(snapshot_path: Path) -> bool:
+    """Check whether a snapshot holds any input file outside Topologix metadata and Batfish supplemental data."""
+    for file_path in snapshot_path.rglob('*'):
+        relative_parts = file_path.relative_to(snapshot_path).parts
+        if len(relative_parts) > 1 and relative_parts[0] != 'batfish' and file_path.is_file():
+            return True
+    return False
+
+
+def activate_batfish_snapshot(snapshot_path: Path, name: str) -> dict[str, Any]:
+    """Initialize Batfish with a snapshot, leaving the snapshot inactive when Batfish rejects it."""
+    previous_snapshot_name = batfish_service.current_snapshot_name
+    try:
+        return batfish_service.initialize_network(str(snapshot_path), name)
+    except Exception:
+        # No snapshot stays active when re-initializing the active one fails
+        batfish_service.current_snapshot_name = (
+            None if previous_snapshot_name == name else previous_snapshot_name
+        )
+        if config.AUTH_ENABLED and session.get('current_snapshot_name') == name:
+            session.pop('current_snapshot_name', None)
+        raise
+
+
+def snapshot_activation_error_response(name: str, error: Exception) -> tuple:
+    """Create a sanitized response for a snapshot activation that Batfish did not complete."""
+    message = str(error)
+    if "Work terminated abnormally" not in message:
+        return error_response(
+            f"Failed to activate snapshot '{name}'",
+            500,
+            code="snapshot_activation_error",
+            details={"snapshot": name},
+            hints=["Check that the Batfish service is reachable, then retry."],
+        )
+
+    details: dict[str, Any] = {"snapshot": name}
+    reason = extract_batfish_failure_reason(message)
+    if reason:
+        details["reason"] = reason
+    return error_response(
+        f"Batfish could not initialize snapshot '{name}'",
+        422,
+        code="snapshot_activation_failed",
+        details=details,
+        hints=[
+            "Check that the snapshot contains device configuration files Batfish can parse.",
+            "Fix the reported problem in the snapshot files, then activate the snapshot again.",
+        ],
+    )
+
+
+def snapshot_load_error_response(error: BatfishSnapshotLoadError, role: str | None = None) -> tuple:
+    """Create a sanitized 422 response for a snapshot Batfish rejected while loading it for queries by name.
+
+    role names the side of a comparison ('base', 'comparison', 'reference' or 'snapshot') that failed;
+    the message names every role except 'snapshot', which would only repeat the word.
+    """
+    name = error.snapshot_name
+    reason = extract_batfish_failure_reason(str(error))
+    role_label = f"{role} " if role and role != "snapshot" else ""
+    message = f"Batfish could not load {role_label}snapshot '{name}'"
+    details: dict[str, Any] = {"snapshot": name}
+    if role:
+        details["role"] = role
+    if reason:
+        message = f"{message}: {reason}"
+        details["reason"] = reason
+    return error_response(
+        message,
+        422,
+        code="snapshot_load_failed",
+        details=details,
+        hints=[
+            "Check that the snapshot contains device configuration files Batfish can parse.",
+            "Fix the reported problem in the snapshot files, then retry.",
+        ],
+    )
+
+
 def get_snapshot_request_context() -> dict[str, Any]:
     """Build per-request snapshot authorization context."""
     return {
@@ -695,15 +895,19 @@ def get_snapshot_creation_context() -> dict[str, Any]:
     }
 
 
-def require_snapshot_access(snapshot_name: str | None) -> None:
-    """Validate that the current requester can access a named snapshot."""
+def require_snapshot_access(snapshot_name: str | None) -> Path | None:
+    """Validate that the current requester can access a named snapshot and return its directory."""
     if not snapshot_name:
-        return
-    snapshot_service.get_snapshot_path(snapshot_name, **get_snapshot_request_context())
+        return None
+    return snapshot_service.get_snapshot_path(snapshot_name, **get_snapshot_request_context())
 
 
-def normalize_batfish_specifier(value: Any) -> str | None:
-    """Normalize UI list or comma text into a Batfish regex-style specifier."""
+def normalize_batfish_specifier(value: Any, separator: str = ",") -> str | None:
+    """Normalize UI list or comma text into a Batfish specifier.
+
+    List items are joined with ',' (the specifier grammar's union operator);
+    pass separator='|' for regex-typed parameters such as vrfs.
+    """
     if value is None:
         return None
     if isinstance(value, str):
@@ -711,7 +915,7 @@ def normalize_batfish_specifier(value: Any) -> str | None:
         return cleaned or None
     if isinstance(value, (list, tuple, set)):
         parts = [str(item).strip() for item in value if str(item).strip()]
-        return "|".join(parts) if parts else None
+        return separator.join(parts) if parts else None
     return str(value).strip() or None
 
 
@@ -740,17 +944,132 @@ def parse_optional_bool(value: Any, default: bool | None = None) -> bool | None:
     return default
 
 
-def reload_active_snapshot_after_layer1_change(name: str) -> None:
-    """Reload Batfish when Layer1 changes affect the active snapshot context."""
+ROUTE_POLICY_DIRECTIONS = frozenset({"in", "out"})
+SEARCH_ROUTE_POLICIES_PATH_OPTIONS = ("SINGLE", "PER_PATH", "NON_OVERLAP")
+BGP_ROUTE_REQUIRED_FIELDS = ("network", "originatorIp", "originType", "protocol")
+BGP_ROUTE_STRING_FIELDS = ("network", "originatorIp", "originType", "protocol", "nextHopIp", "sourceProtocol")
+BGP_ROUTE_LIST_FIELDS = ("asPath", "communities")
+BGP_ROUTE_INTEGER_FIELDS = ("localPreference", "metric", "tag", "weight")
+BGP_ROUTE_FIELDS = frozenset(BGP_ROUTE_STRING_FIELDS + BGP_ROUTE_LIST_FIELDS + BGP_ROUTE_INTEGER_FIELDS)
+BGP_ROUTE_IP_FIELDS = ("originatorIp", "nextHopIp")
+
+
+def is_ipv4_prefix(value: str) -> bool:
+    """Return True for an IPv4 prefix with an explicit length, such as 192.0.2.0/24 (host bits allowed)."""
+    _, separator, length = value.partition("/")
+    if not separator or not length.isdigit():
+        return False
+    try:
+        return ipaddress.ip_network(value, strict=False).version == 4
+    except ValueError:
+        return False
+
+
+def is_ipv4_address(value: str) -> bool:
+    """Return True for a dotted-quad IPv4 address such as 192.0.2.1."""
+    try:
+        return ipaddress.ip_address(value).version == 4
+    except ValueError:
+        return False
+
+
+def parse_route_policy_direction(value: Any) -> str:
+    """Return a testRoutePolicies direction in the lowercase form Batfish accepts."""
+    direction = value.strip().lower() if isinstance(value, str) else None
+    if direction not in ROUTE_POLICY_DIRECTIONS:
+        raise RequestValidationError("'direction' must be 'in' or 'out'", field="direction")
+    return direction
+
+
+def parse_bgp_input_routes(value: Any) -> list[BgpRoute]:
+    """Convert one route object or a list of route objects into pybatfish BgpRoute values."""
+    routes = [value] if isinstance(value, dict) else value
+    if not isinstance(routes, list) or not routes:
+        raise RequestValidationError(
+            "'inputRoutes' must be a route object or a non-empty list of route objects",
+            field="inputRoutes",
+        )
+
+    parsed: list[BgpRoute] = []
+    for index, route in enumerate(routes):
+        route_field = f"inputRoutes[{index}]"
+        if not isinstance(route, dict):
+            raise RequestValidationError(f"{route_field} must be a JSON object", field=route_field)
+
+        fields = dict(route)
+        fields.pop("class", None)
+        if "srcProtocol" in fields and "sourceProtocol" not in fields:
+            fields["sourceProtocol"] = fields.pop("srcProtocol")
+
+        missing = [name for name in BGP_ROUTE_REQUIRED_FIELDS if fields.get(name) in (None, "")]
+        if missing:
+            raise RequestValidationError(
+                f"{route_field} is missing required field(s): {', '.join(missing)}",
+                field=f"{route_field}.{missing[0]}",
+            )
+        unknown = sorted(set(fields) - BGP_ROUTE_FIELDS)
+        if unknown:
+            raise RequestValidationError(
+                f"{route_field} has unsupported field(s): {', '.join(unknown)}",
+                field=f"{route_field}.{unknown[0]}",
+            )
+        for name in BGP_ROUTE_STRING_FIELDS:
+            if fields.get(name) is not None and not isinstance(fields[name], str):
+                raise RequestValidationError(f"{route_field}.{name} must be a string", field=f"{route_field}.{name}")
+        for name in BGP_ROUTE_LIST_FIELDS:
+            if name in fields and not isinstance(fields[name], list):
+                raise RequestValidationError(f"{route_field}.{name} must be a list", field=f"{route_field}.{name}")
+        for name in BGP_ROUTE_INTEGER_FIELDS:
+            if name in fields and (not isinstance(fields[name], int) or isinstance(fields[name], bool)):
+                raise RequestValidationError(f"{route_field}.{name} must be an integer", field=f"{route_field}.{name}")
+        if not is_ipv4_prefix(fields["network"]):
+            raise RequestValidationError(
+                f"{route_field}.network must be an IPv4 prefix such as 192.0.2.0/24",
+                field=f"{route_field}.network",
+            )
+        for name in BGP_ROUTE_IP_FIELDS:
+            if fields.get(name) is not None and not is_ipv4_address(fields[name]):
+                raise RequestValidationError(
+                    f"{route_field}.{name} must be an IPv4 address such as 192.0.2.1",
+                    field=f"{route_field}.{name}",
+                )
+
+        parsed.append(BgpRoute(**fields))
+    return parsed
+
+
+def parse_search_route_policies_path_option(value: Any) -> str | None:
+    """Return a searchRoutePolicies pathOption in the enum form Batfish accepts, or None when unset."""
+    if value is None or (isinstance(value, str) and not value.strip()):
+        return None
+    path_option = value.strip().upper() if isinstance(value, str) else None
+    if path_option not in SEARCH_ROUTE_POLICIES_PATH_OPTIONS:
+        raise RequestValidationError(
+            f"'pathOption' must be one of {', '.join(SEARCH_ROUTE_POLICIES_PATH_OPTIONS)}",
+            field="pathOption",
+        )
+    return path_option
+
+
+def reload_active_snapshot_after_layer1_change(name: str) -> tuple | None:
+    """Reload Batfish when Layer1 changes affect the active snapshot context.
+
+    Returns the activation error response when Batfish fails to reload the snapshot.
+    """
     if config.AUTH_ENABLED:
         if session.get('current_snapshot_name') != name:
-            return
+            return None
     elif batfish_service.current_snapshot_name != name:
-        return
+        return None
 
     snapshot_path = snapshot_service.get_snapshot_path(name, **get_snapshot_request_context())
-    batfish_service.initialize_network(str(snapshot_path), snapshot_name=name)
+    try:
+        activate_batfish_snapshot(snapshot_path, name)
+    except Exception as e:
+        logger.error("Failed to reload Batfish snapshot after Layer1 change: snapshot=%s error=%s", name, e)
+        return snapshot_activation_error_response(name, e)
     logger.info("Reloaded Batfish snapshot after Layer1 change: snapshot=%s", name)
+    return None
 
 
 # ========== User Management Validation Functions ==========
@@ -850,6 +1169,27 @@ def health_check():
 
 # ========== Authentication Endpoints (only if AUTH_ENABLED) ==========
 if config.AUTH_ENABLED:
+    def set_token_cookies(response, tokens: dict) -> None:
+        """Set a login session's access and refresh tokens as HTTP-only cookies"""
+        is_secure = config.ENV == 'production'
+        response.set_cookie(
+            'access_token',
+            tokens['access_token'],
+            secure=is_secure,
+            httponly=True,
+            samesite='Lax',
+            max_age=config.JWT_ACCESS_TOKEN_EXPIRES
+        )
+        response.set_cookie(
+            'refresh_token',
+            tokens['refresh_token'],
+            secure=is_secure,
+            httponly=True,
+            samesite='Lax',
+            path='/api/auth/refresh',
+            max_age=config.JWT_REFRESH_TOKEN_EXPIRES
+        )
+
     @app.route('/api/auth/login', methods=['POST'])
     def login():
         """Authenticate user and return JWT tokens"""
@@ -888,8 +1228,6 @@ if config.AUTH_ENABLED:
 
             logger.info(f"Successful login for {username} from {request.remote_addr}")
 
-            is_secure = config.ENV == 'production'
-
             response = jsonify({
                 "status": "success",
                 "message": "Login successful",
@@ -910,26 +1248,12 @@ if config.AUTH_ENABLED:
                 csrf_protect.set_csrf_cookie(response, csrf_token)
 
             # Set tokens as HTTP-only cookies (not returned in JSON body)
-            response.set_cookie(
-                'access_token',
-                tokens['access_token'],
-                secure=is_secure,
-                httponly=True,
-                samesite='Lax',
-                max_age=config.JWT_ACCESS_TOKEN_EXPIRES
-            )
-            response.set_cookie(
-                'refresh_token',
-                tokens['refresh_token'],
-                secure=is_secure,
-                httponly=True,
-                samesite='Lax',
-                path='/api/auth/refresh',
-                max_age=config.JWT_REFRESH_TOKEN_EXPIRES
-            )
+            set_token_cookies(response, tokens)
 
             return response, 200
 
+        except RequestValidationError as e:
+            return validation_error_response(e)
         except ValueError as e:
             return error_response(str(e), 400)
         except Exception as e:
@@ -937,17 +1261,20 @@ if config.AUTH_ENABLED:
             return error_response("Login failed", 500)
 
     @app.route('/api/auth/logout', methods=['POST'])
-    @require_auth
     def logout():
-        """Logout user and invalidate token"""
-        try:
-            username = request.jwt_payload.get('username')
-            logger.info(f"Logout for {username} from {request.remote_addr}")
+        """Logout user and invalidate token
 
-            # Revoke the access token before clearing session
+        Succeeds without a valid access token (expired, revoked, or of an inactive or
+        deleted user) so clients can always end their login state; only a token whose
+        signature verifies is revoked.
+        """
+        try:
+            # Revoke the access token and its login session before clearing session
             token = jwt_manager._extract_token()
-            if token:
-                jwt_manager.revoke_token(token)
+            payload = jwt_manager.revoke_token(token) if token else None
+            username = payload.get('username') if payload else None
+            logger.info(f"Logout for {username or 'unknown user'} from {request.remote_addr}")
+            if payload:
                 logger.info(f"Token revoked for user {username}")
 
             session.clear()
@@ -1014,9 +1341,10 @@ if config.AUTH_ENABLED:
                 if not user:
                     return error_response("User not found", 401)
 
-            # Generate new access token
+            # Generate new access token within the refresh token's login session
             tokens = jwt_manager.generate_tokens(
-                user['id'], user['username'], user['roles']
+                user['id'], user['username'], user['roles'],
+                session_id=payload.get('sid') or payload.get('jti')
             )
 
             is_secure = config.ENV == 'production'
@@ -1170,6 +1498,8 @@ if config.AUTH_ENABLED:
 
                 return success_response(new_user.to_dict(), "User created successfully", status_code=201)
 
+        except RequestValidationError as e:
+            return validation_error_response(e)
         except Exception as e:
             logger.error(f"User creation error: {e}")
             return error_response(f"Failed to create user: {str(e)}", 500)
@@ -1322,7 +1652,10 @@ if config.AUTH_ENABLED:
                         target_user.full_name = data['full_name']
 
                     if 'is_active' in data:
-                        target_user.is_active = bool(data['is_active'])
+                        is_active = bool(data['is_active'])
+                        if target_user.is_active and not is_active:
+                            target_user.tokens_invalid_before = datetime.now(timezone.utc)
+                        target_user.is_active = is_active
 
                     if 'roles' in data:
                         # Update roles
@@ -1342,6 +1675,8 @@ if config.AUTH_ENABLED:
                 logger.info(f"User updated: {target_user.username} (ID: {user_id}) by {request.username}")
                 return success_response(target_user.to_dict(), "User updated successfully")
 
+        except RequestValidationError as e:
+            return validation_error_response(e)
         except Exception as e:
             logger.error(f"Update user error: {e}")
             return error_response(f"Failed to update user: {str(e)}", 500)
@@ -1386,9 +1721,16 @@ if config.AUTH_ENABLED:
                 user.set_password(data['new_password'])
                 db.commit()
 
-                logger.info(f"Password changed for user: {user.username} (ID: {user_id})")
-                return success_response(None, "Password changed successfully")
+                # New login session for the client that changed the password
+                tokens = jwt_manager.generate_tokens(user.id, user.username, [role.name for role in user.roles])
+                response = make_response(success_response(None, "Password changed successfully"))
+                set_token_cookies(response, tokens)
 
+                logger.info(f"Password changed for user: {user.username} (ID: {user_id})")
+                return response
+
+        except RequestValidationError as e:
+            return validation_error_response(e)
         except Exception as e:
             logger.error(f"Change password error: {e}")
             return error_response(f"Failed to change password: {str(e)}", 500)
@@ -1739,6 +2081,8 @@ if config.AUTH_ENABLED:
             return error_response(str(e), 403)
         except FileNotFoundError as e:
             return error_response(str(e), 404)
+        except RequestValidationError as e:
+            return validation_error_response(e)
         except ValueError as e:
             return error_response(str(e), 400)
         except (BadRequest, UnsupportedMediaType):
@@ -1878,6 +2222,8 @@ if config.AUTH_ENABLED:
 
                 return success_response(None, "Password has been reset successfully")
 
+        except RequestValidationError as e:
+            return validation_error_response(e)
         except Exception as e:
             logger.error(f"Password reset error: {e}")
             return error_response("Failed to reset password", 500)
@@ -1904,12 +2250,11 @@ def initialize_network():
         snapshot_name = data.get('snapshot_name')
 
         if config.AUTH_ENABLED:
-            resolved_snapshot_name = snapshot_name or Path(str(snapshot_dir)).name
+            snapshot_name = snapshot_name or Path(str(snapshot_dir)).name
             safe_path = snapshot_service.get_snapshot_path(
-                resolved_snapshot_name,
+                snapshot_name,
                 **get_snapshot_request_context(),
             )
-            snapshot_name = resolved_snapshot_name
         else:
             # Validate snapshot directory path against allowed base path
             try:
@@ -1918,7 +2263,8 @@ def initialize_network():
                 return error_response(f"Invalid snapshot directory: {e}", 400)
 
         # Initialize network
-        result = batfish_service.initialize_network(str(safe_path), snapshot_name)
+        snapshot_name = snapshot_name or safe_path.name
+        result = activate_batfish_snapshot(safe_path, snapshot_name)
 
         if config.AUTH_ENABLED:
             session['current_snapshot_name'] = result.get('snapshot')
@@ -1931,7 +2277,7 @@ def initialize_network():
         return error_response(str(e), 404)
     except Exception as e:
         logger.error(f"Failed to initialize network: {e}")
-        return error_response(f"Initialization failed: {str(e)}", 500)
+        return snapshot_activation_error_response(snapshot_name, e)
 
 
 # ========== Query Endpoints (22 types) ==========
@@ -2200,11 +2546,13 @@ def get_reachability():
     }
     """
     try:
-        data = request.get_json() if request.is_json else {}
+        data = request.get_json(silent=True) or {}
         headers = data.get('headers') if data else None
 
         flow_traces = batfish_service.get_reachability(headers)
         return success_response([f.to_dict() for f in flow_traces])
+    except BatfishQueryError as e:
+        return batfish_query_error_response(e)
     except RuntimeError as e:
         return error_response(str(e), 400)
     except Exception as e:
@@ -2379,6 +2727,8 @@ def test_filters():
 
         results = batfish_service.test_filters(headers, nodes, filters, startLocation)
         return success_response(results)
+    except BatfishQueryError as e:
+        return batfish_query_error_response(e)
     except RuntimeError as e:
         return error_response(str(e), 400)
     except Exception as e:
@@ -2429,6 +2779,8 @@ def search_filters():
 
         results = batfish_service.search_filters(headers, action, filters, nodes)
         return success_response(results)
+    except BatfishQueryError as e:
+        return batfish_query_error_response(e)
     except RuntimeError as e:
         return error_response(str(e), 400)
     except Exception as e:
@@ -2456,6 +2808,8 @@ def find_matching_filter_lines():
 
         results = batfish_service.find_matching_filter_lines(headers, filters, nodes)
         return success_response(results)
+    except BatfishQueryError as e:
+        return batfish_query_error_response(e)
     except RuntimeError as e:
         return error_response(str(e), 400)
     except Exception as e:
@@ -2478,15 +2832,20 @@ def traceroute():
             "srcPorts": "1000-2000",
             "dstPorts": "80,443",
             "applications": ["DNS", "SSH"],
-            "icmpTypes": [0, 8],
-            "icmpCodes": [0],
-            "dscps": [0],
-            "ecns": [0]
+            "icmpTypes": "0,8",
+            "icmpCodes": "0",
+            "dscps": "0",
+            "ecns": "0"
         },
         "startLocation": "router1[GigabitEthernet0/1]",
         "maxTraces": 10,
         "ignoreFilters": false
     }
+
+    Integer header fields (srcPorts, dstPorts, icmpTypes, icmpCodes, dscps,
+    ecns, packetLengths, fragmentOffsets) take comma-separated values and
+    ranges such as "0,8" or "0-8"; an integer or a list of integers is
+    converted to that form.
     """
     try:
         data = request.get_json() or {}
@@ -2502,6 +2861,8 @@ def traceroute():
             maxTraces=maxTraces,
         )
         return success_response(results)
+    except BatfishQueryError as e:
+        return batfish_query_error_response(e)
     except RuntimeError as e:
         return error_response(str(e), 400)
     except Exception as e:
@@ -2517,7 +2878,8 @@ def bidirectional_traceroute():
     Tests reachability in both directions with detailed configuration options.
 
     Request body supports:
-    - headers: detailed packet specifications (srcIps, dstIps, ipProtocols, ports, ICMP, DSCP, ECN)
+    - headers: detailed packet specifications (srcIps, dstIps, ipProtocols, ports, ICMP, DSCP, ECN);
+      integer fields take comma-separated values and ranges such as "0,8" or "0-8"
     - startLocation: starting device/interface
     - maxTraces: limit result count
     - ignoreFilters: bypass ACLs
@@ -2549,6 +2911,8 @@ def bidirectional_traceroute():
             maxTraces=maxTraces,
         )
         return success_response(results)
+    except BatfishQueryError as e:
+        return batfish_query_error_response(e)
     except RuntimeError as e:
         return error_response(str(e), 400)
     except Exception as e:
@@ -2625,6 +2989,8 @@ def resolve_filter_specifier():
 
         results = batfish_service.resolve_filter_specifier(filters, nodes, grammar_version)
         return success_response(results)
+    except BatfishQueryError as e:
+        return batfish_query_error_response(e)
     except RuntimeError as e:
         return error_response(str(e), 400)
     except Exception as e:
@@ -2649,6 +3015,8 @@ def resolve_node_specifier():
 
         results = batfish_service.resolve_node_specifier(nodes, grammar_version)
         return success_response(results)
+    except BatfishQueryError as e:
+        return batfish_query_error_response(e)
     except RuntimeError as e:
         return error_response(str(e), 400)
     except Exception as e:
@@ -2678,6 +3046,8 @@ def resolve_interface_specifier():
 
         results = batfish_service.resolve_interface_specifier(interfaces, nodes, grammar_version)
         return success_response(results)
+    except BatfishQueryError as e:
+        return batfish_query_error_response(e)
     except RuntimeError as e:
         return error_response(str(e), 400)
     except Exception as e:
@@ -3118,7 +3488,7 @@ def get_lpm_routes():
         data = request.get_json() or {}
         ip = data.get('ip')
         nodes = normalize_batfish_specifier(data.get('nodes'))
-        vrfs = normalize_batfish_specifier(data.get('vrfs'))
+        vrfs = normalize_batfish_specifier(data.get('vrfs'), separator='|')
 
         if not ip:
             return error_response("Missing 'ip' parameter", 400)
@@ -3193,8 +3563,8 @@ def get_differential_reachability():
         if not reference_snapshot:
             return error_response("Missing required 'reference_snapshot' for differential reachability", 400)
 
-        require_snapshot_access(reference_snapshot)
-        require_snapshot_access(snapshot)
+        reference_snapshot_path = require_snapshot_access(reference_snapshot)
+        snapshot_path = require_snapshot_access(snapshot)
 
         results = batfish_service.get_differential_reachability(
             reference_snapshot=reference_snapshot,
@@ -3205,8 +3575,16 @@ def get_differential_reachability():
             maxTraces=max_traces,
             invertSearch=invert_search,
             ignoreFilters=ignore_filters,
+            reference_snapshot_path=reference_snapshot_path,
+            snapshot_path=snapshot_path,
         )
         return success_response(results)
+    except BatfishQueryError as e:
+        return batfish_query_error_response(e)
+    except BatfishSnapshotLoadError as e:
+        role = "reference" if e.snapshot_name == reference_snapshot else "snapshot"
+        logger.error(f"Failed to load {role} snapshot '{e.snapshot_name}' for differential reachability")
+        return snapshot_load_error_response(e, role)
     except RuntimeError as e:
         return error_response(str(e), 400)
     except PermissionError:
@@ -3246,6 +3624,8 @@ def get_bidirectional_reachability():
             returnFlowType=return_flow_type,
         )
         return success_response(results)
+    except BatfishQueryError as e:
+        return batfish_query_error_response(e)
     except RuntimeError as e:
         return error_response(str(e), 400)
     except Exception as e:
@@ -3270,6 +3650,8 @@ def resolve_location_specifier():
 
         results = batfish_service.resolve_location_specifier(locations, grammar_version)
         return success_response(results)
+    except BatfishQueryError as e:
+        return batfish_query_error_response(e)
     except RuntimeError as e:
         return error_response(str(e), 400)
     except Exception as e:
@@ -3294,6 +3676,8 @@ def resolve_ip_specifier():
 
         results = batfish_service.resolve_ip_specifier(ips, grammar_version)
         return success_response(results)
+    except BatfishQueryError as e:
+        return batfish_query_error_response(e)
     except RuntimeError as e:
         return error_response(str(e), 400)
     except Exception as e:
@@ -3321,6 +3705,8 @@ def resolve_ips_of_location_specifier():
 
         results = batfish_service.resolve_ips_of_location_specifier(locations, grammar_version)
         return success_response(results)
+    except BatfishQueryError as e:
+        return batfish_query_error_response(e)
     except RuntimeError as e:
         return error_response(str(e), 400)
     except Exception as e:
@@ -3388,15 +3774,22 @@ def test_route_policies():
 
     Request body:
     {
-        "direction": "IN",
+        "direction": "in",
         "inputRoutes": [{
             "network": "192.0.2.0/24",
-            "nextHopIp": "198.51.100.1",
-            "protocol": "bgp"
+            "originatorIp": "0.0.0.0",
+            "originType": "igp",
+            "protocol": "bgp",
+            "nextHopIp": "198.51.100.1"
         }],
         "nodes": "router1",
         "policies": "POLICY_NAME"
     }
+
+    direction is "in" or "out" (case-insensitive). inputRoutes is one route
+    object or a list of them; network, originatorIp, originType and protocol
+    are required, and asPath, communities, localPreference, metric,
+    nextHopIp, sourceProtocol, tag and weight are optional.
     """
     try:
         data = request.get_json() or {}
@@ -3412,13 +3805,15 @@ def test_route_policies():
             return error_response("Missing required 'inputRoutes' for testRoutePolicies", 400)
 
         results = batfish_service.test_route_policies(
-            direction=direction,
-            inputRoutes=inputRoutes,
+            direction=parse_route_policy_direction(direction),
+            inputRoutes=parse_bgp_input_routes(inputRoutes),
             nodes=nodes,
             policies=policies,
             bgpSessionProperties=bgpSessionProperties,
         )
         return success_response(results)
+    except RequestValidationError as e:
+        return validation_error_response(e)
     except BatfishQueryError as e:
         return batfish_query_error_response(e)
     except RuntimeError as e:
@@ -3592,7 +3987,12 @@ def get_vi_model():
 
 @app.route('/api/advanced/search-route-policies', methods=['POST'])
 def advanced_search_route_policies():
-    """Search route policies"""
+    """Search route policies
+
+    pathOption is SINGLE, PER_PATH or NON_OVERLAP (case-insensitive). perPath
+    is the deprecated boolean form of PER_PATH; perPath true together with a
+    pathOption is rejected, and perPath false is dropped when pathOption is set.
+    """
     try:
         data = request.get_json() or {}
         nodes = normalize_batfish_specifier(data.get('nodes', '.*'))
@@ -3601,7 +4001,14 @@ def advanced_search_route_policies():
         input_constraints = data.get('inputConstraints')
         output_constraints = data.get('outputConstraints')
         per_path = parse_optional_bool(data.get('perPath'))
-        path_option = data.get('pathOption')
+        path_option = parse_search_route_policies_path_option(data.get('pathOption'))
+        if path_option is not None:
+            if per_path:
+                raise RequestValidationError(
+                    "'perPath' and 'pathOption' cannot both be set; use pathOption 'PER_PATH' instead of perPath",
+                    field="pathOption",
+                )
+            per_path = None
 
         results = batfish_service.get_search_route_policies(
             nodes=nodes,
@@ -3613,6 +4020,8 @@ def advanced_search_route_policies():
             pathOption=path_option,
         )
         return success_response(results)
+    except RequestValidationError as e:
+        return validation_error_response(e)
     except BatfishQueryError as e:
         return batfish_query_error_response(e)
     except RuntimeError as e:
@@ -3643,6 +4052,8 @@ def reduce_reachability():
             ignoreFilters=ignore_filters,
         )
         return success_response([f.to_dict() for f in flow_traces])
+    except BatfishQueryError as e:
+        return batfish_query_error_response(e)
     except RuntimeError as e:
         return error_response(str(e), 400)
     except Exception as e:
@@ -3656,6 +4067,11 @@ def list_snapshots():
     """List all available snapshots"""
     try:
         snapshots = snapshot_service.list_snapshots(**get_snapshot_request_context())
+        active_snapshot_name = (
+            session.get('current_snapshot_name') if config.AUTH_ENABLED else batfish_service.current_snapshot_name
+        )
+        for snapshot in snapshots:
+            snapshot['active'] = snapshot['name'] == active_snapshot_name
         return success_response(snapshots)
     except PermissionError as e:
         return error_response(str(e), 403)
@@ -3729,10 +4145,20 @@ def update_snapshot(name: str):
 def delete_snapshot(name: str):
     """Delete a snapshot"""
     try:
-        snapshot_service.delete_snapshot(name, **get_snapshot_request_context())
+        # Serialized with Batfish requests so that an activation in progress
+        # cannot leave the deleted snapshot active.
+        with batfish_request_lock:
+            snapshot_service.delete_snapshot(name, **get_snapshot_request_context())
 
-        if config.AUTH_ENABLED and session.get('current_snapshot_name') == name:
-            session.pop('current_snapshot_name', None)
+            if config.AUTH_ENABLED and session.get('current_snapshot_name') == name:
+                session.pop('current_snapshot_name', None)
+
+            if (
+                batfish_service.network_name == get_batfish_request_network_name()
+                and batfish_service.current_snapshot_name == name
+            ):
+                batfish_service.clear_active_snapshot()
+                logger.info("Cleared the active Batfish snapshot after deletion: snapshot=%s", name)
 
         return success_response({"name": name}, "Snapshot deleted successfully")
 
@@ -4114,7 +4540,16 @@ def activate_snapshot(name: str):
     """
     try:
         snapshot_path = snapshot_service.get_snapshot_path(name, **get_snapshot_request_context())
-        result = batfish_service.initialize_network(str(snapshot_path), name)
+        if not snapshot_has_config_files(snapshot_path):
+            return error_response(
+                f"Snapshot '{name}' has no configuration files to analyze",
+                400,
+                code="snapshot_empty",
+                details={"snapshot": name},
+                hints=["Upload at least one device configuration file to the snapshot, then activate it again."],
+            )
+
+        result = activate_batfish_snapshot(snapshot_path, name)
 
         if config.AUTH_ENABLED:
             session['current_snapshot_name'] = name
@@ -4131,7 +4566,7 @@ def activate_snapshot(name: str):
         import traceback
         logger.error(f"Failed to activate snapshot: {e}")
         logger.error(f"Traceback: {traceback.format_exc()}")
-        return error_response(str(e), 500)
+        return snapshot_activation_error_response(name, e)
 
 
 # ========== Snapshot Comparison Endpoint ==========
@@ -4175,6 +4610,10 @@ def compare_snapshots():
 
         return success_response(result, "Snapshots compared successfully")
 
+    except BatfishSnapshotLoadError as e:
+        role = "base" if e.snapshot_name == base_snapshot else "comparison"
+        logger.error(f"Failed to load {role} snapshot '{e.snapshot_name}' for comparison: {e}")
+        return snapshot_load_error_response(e, role)
     except PermissionError as e:
         return error_response(str(e), 403)
     except FileNotFoundError as e:
@@ -4244,7 +4683,9 @@ def save_snapshot_layer1_topology(name: str):
             **get_snapshot_request_context(),
         )
 
-        reload_active_snapshot_after_layer1_change(name)
+        reload_error = reload_active_snapshot_after_layer1_change(name)
+        if reload_error:
+            return reload_error
 
         return success_response(result, "Layer1 topology saved successfully")
 
@@ -4271,7 +4712,9 @@ def delete_snapshot_layer1_topology(name: str):
     """
     try:
         snapshot_service.delete_layer1_topology(name, **get_snapshot_request_context())
-        reload_active_snapshot_after_layer1_change(name)
+        reload_error = reload_active_snapshot_after_layer1_change(name)
+        if reload_error:
+            return reload_error
         return success_response({"snapshot": name}, "Layer1 topology deleted successfully")
     except PermissionError as e:
         return error_response(str(e), 403)
@@ -4299,6 +4742,9 @@ def get_snapshot_interfaces(name: str):
             **get_snapshot_request_context(),
         )
         return success_response(interfaces, "Snapshot interfaces retrieved successfully")
+    except BatfishSnapshotLoadError as e:
+        logger.error(f"Failed to load snapshot '{e.snapshot_name}' for interface lookup: {e}")
+        return snapshot_load_error_response(e)
     except PermissionError as e:
         return error_response(str(e), 403)
     except FileNotFoundError as e:

@@ -161,7 +161,7 @@ See [.env.example](.env.example) for the full template. Key variables:
 | `SQLALCHEMY_ECHO` | SQL statement logging | Default is `false`. Keep disabled because SQL values can include password hashes and sensitive operational data. |
 | `VITE_API_BASE_URL` | Frontend API base URL | Empty value uses nginx `/api` reverse proxy in the Docker frontend. |
 | `BATFISH_IMAGE` | Batfish container image | Compose defaults to a digest validated with the pinned pybatfish version. Override to test another Batfish release. The `/api/health` response reports the pybatfish version and, after the first snapshot initialization, the running Batfish server version. |
-| `BATFISH_QUERY_TIMEOUT_SECONDS` | Upper bound for one Batfish query | Default is `120` (minimum 10). Prevents a stuck query from blocking all Batfish-backed API requests. |
+| `BATFISH_QUERY_TIMEOUT_SECONDS` | Upper bound for one Batfish query | Default is `120`. The value must be an integer; values below 10 are raised to 10, and a non-integer stops backend startup. It prevents a stuck query from blocking other Batfish-backed requests, and both maintained Compose files explicitly pass it to the backend container. |
 | `BEHIND_REVERSE_PROXY` | Enables proxy-aware request handling | Must match actual infrastructure to avoid trusting spoofed proxy headers. |
 | `TRUSTED_PROXY_COUNT` | Number of trusted proxy layers | Set according to the real proxy chain. |
 | `VITE_TIMEZONE` | UI timestamp timezone | Default is `Asia/Tokyo`. |
@@ -262,7 +262,7 @@ snapshot を選択すると、file list のファイル名横に format dropdown
 - snapshot の保存先はスタックごとに異なります: 開発用 compose はリポジトリの `./snapshots` をバインドし、配布用 compose は named volume(`snapshots-data`)に保存します。同一ホストで両者を切り替えると、もう一方で作成した snapshot は表示されません。
 - reverse proxy を使う場合、`BEHIND_REVERSE_PROXY` と `TRUSTED_PROXY_COUNT` を実際の構成に合わせてください。
 - Batfish container image は、固定した pybatfish バージョンで検証済みの digest を既定値としています。別バージョンを試す場合は `BATFISH_IMAGE` で上書きしてください。`/api/health` は pybatfish バージョンと、最初の snapshot 初期化後は稼働中の Batfish サーバーバージョンを返します。
-- 1 つの Batfish クエリの実行上限は `BATFISH_QUERY_TIMEOUT_SECONDS`(既定 120 秒)で調整できます。
+- 1 つの Batfish クエリの実行上限は `BATFISH_QUERY_TIMEOUT_SECONDS`(既定 120 秒)で調整できます。値は整数で指定し、10 未満は 10 に引き上げられ、整数でない場合は backend が起動を停止します。両 Compose はこの値を backend コンテナへ明示的に渡します。
 
 ## License
 

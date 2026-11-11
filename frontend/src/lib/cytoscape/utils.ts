@@ -13,7 +13,7 @@ import { logger } from '../../utils/logger'
  * Generate stable edge ID from edge properties
  * Uses source-target-type-ports composite key for uniqueness
  */
-function generateStableEdgeId(
+export function generateStableEdgeId(
   source: string,
   target: string,
   edgeType: string,
@@ -591,4 +591,167 @@ export function buildGraphElements(
     nodes: cytoscapeNodes,
     edges: cytoscapeEdges,
   }
+}
+
+export const STABLE_EDGE_TYPES = ['physical', 'layer1', 'layer3', 'ospf', 'bgp', 'vxlan', 'eigrp', 'isis', 'ipsec'] as const
+
+export type StableEdgeType = typeof STABLE_EDGE_TYPES[number]
+
+/**
+ * Edge collections keyed by the edge type used in stable edge IDs
+ * Same shape as the edges argument of buildGraphElements
+ */
+export interface StableEdgeCollections {
+  physical?: PhysicalEdge[]
+  layer1?: Layer1Edge[]
+  layer3?: Layer3Edge[]
+  ospf?: OSPFEdge[]
+  bgp?: BGPEdge[]
+  vxlan?: VXLANEdge[]
+  eigrp?: EIGRPEdge[]
+  isis?: ISISEdge[]
+  ipsec?: IPsecEdge[]
+}
+
+export type StableEdgeMatch =
+  | { type: 'physical'; edge: PhysicalEdge; source: string; target: string }
+  | { type: 'layer1'; edge: Layer1Edge; source: string; target: string }
+  | { type: 'layer3'; edge: Layer3Edge; source: string; target: string }
+  | { type: 'ospf'; edge: OSPFEdge; source: string; target: string }
+  | { type: 'bgp'; edge: BGPEdge; source: string; target: string }
+  | { type: 'vxlan'; edge: VXLANEdge; source: string; target: string }
+  | { type: 'eigrp'; edge: EIGRPEdge; source: string; target: string }
+  | { type: 'isis'; edge: ISISEdge; source: string; target: string }
+  | { type: 'ipsec'; edge: IPsecEdge; source: string; target: string }
+
+/**
+ * Edge type encoded in a stable edge ID ("edge-<type>-..."), or null for other IDs
+ */
+export function getStableEdgeType(edgeId: string): StableEdgeType | null {
+  const match = /^edge-([a-z0-9]+)-/.exec(edgeId)
+  if (!match) return null
+  const type = match[1]
+  return (STABLE_EDGE_TYPES as readonly string[]).includes(type) ? type as StableEdgeType : null
+}
+
+function findInterfaceEdge<T extends { interface: string; remote_interface: string }>(
+  edges: T[] | undefined,
+  edgeType: StableEdgeType,
+  edgeId: string
+): { edge: T; source: string; target: string } | null {
+  for (const edge of edges ?? []) {
+    if (!edge || !edge.interface || !edge.remote_interface) continue
+    const [source, sourcePort] = parseInterface(edge.interface)
+    const [target, targetPort] = parseInterface(edge.remote_interface)
+    if (generateStableEdgeId(source, target, edgeType, sourcePort, targetPort) === edgeId) {
+      return { edge, source, target }
+    }
+  }
+  return null
+}
+
+function findNodePairEdge<T extends { node: string; remote_node: string }>(
+  edges: T[] | undefined,
+  edgeType: StableEdgeType,
+  edgeId: string
+): { edge: T; source: string; target: string } | null {
+  for (const edge of edges ?? []) {
+    if (!edge || !edge.node || !edge.remote_node) continue
+    if (generateStableEdgeId(edge.node, edge.remote_node, edgeType) === edgeId) {
+      return { edge, source: edge.node, target: edge.remote_node }
+    }
+  }
+  return null
+}
+
+function findBgpEdge(edges: BGPEdge[] | undefined, edgeId: string): { edge: BGPEdge; source: string; target: string } | null {
+  for (const edge of edges ?? []) {
+    if (!edge || !edge.node || !edge.remote_node) continue
+    const sourcePort = edge.interface ? parseInterface(edge.interface)[1] : ''
+    const targetPort = edge.remote_interface ? parseInterface(edge.remote_interface)[1] : ''
+    if (generateStableEdgeId(edge.node, edge.remote_node, 'bgp', sourcePort, targetPort) === edgeId) {
+      return { edge, source: edge.node, target: edge.remote_node }
+    }
+  }
+  return null
+}
+
+/**
+ * Find the source edge record of a Cytoscape edge by rebuilding the stable ID of every candidate
+ * Uses the same ID derivation as the convert*EdgesToElements functions
+ * @param edgeId - Cytoscape edge ID produced by buildGraphElements
+ * @param edges - Edge collections the graph was built from
+ * @returns Matching edge with its type and endpoint node names, or null
+ */
+export function findEdgeByStableId(edgeId: string, edges: StableEdgeCollections): StableEdgeMatch | null {
+  const type = getStableEdgeType(edgeId)
+  if (!type) return null
+
+  switch (type) {
+    case 'physical': {
+      const match = findInterfaceEdge(edges.physical, type, edgeId)
+      return match && { type, ...match }
+    }
+    case 'layer1': {
+      const match = findInterfaceEdge(edges.layer1, type, edgeId)
+      return match && { type, ...match }
+    }
+    case 'layer3': {
+      const match = findInterfaceEdge(edges.layer3, type, edgeId)
+      return match && { type, ...match }
+    }
+    case 'ospf': {
+      const match = findInterfaceEdge(edges.ospf, type, edgeId)
+      return match && { type, ...match }
+    }
+    case 'eigrp': {
+      const match = findInterfaceEdge(edges.eigrp, type, edgeId)
+      return match && { type, ...match }
+    }
+    case 'isis': {
+      const match = findInterfaceEdge(edges.isis, type, edgeId)
+      return match && { type, ...match }
+    }
+    case 'bgp': {
+      const match = findBgpEdge(edges.bgp, edgeId)
+      return match && { type, ...match }
+    }
+    case 'vxlan': {
+      const match = findNodePairEdge(edges.vxlan, type, edgeId)
+      return match && { type, ...match }
+    }
+    case 'ipsec': {
+      const match = findNodePairEdge(edges.ipsec, type, edgeId)
+      return match && { type, ...match }
+    }
+  }
+}
+
+/**
+ * Resolve the edge type and endpoint node names encoded in a stable edge ID
+ * Node names may contain "-", so endpoints are matched against the known node names (longest first)
+ * @param edgeId - Cytoscape edge ID produced by buildGraphElements
+ * @param nodeNames - Node names of the snapshot
+ * @returns Edge type with endpoints (null when they cannot be resolved), or null for IDs without a known type
+ */
+export function resolveStableEdgeEndpoints(
+  edgeId: string,
+  nodeNames: readonly string[]
+): { type: StableEdgeType; source: string | null; target: string | null } | null {
+  const type = getStableEdgeType(edgeId)
+  if (!type) return null
+
+  const rest = edgeId.slice(`edge-${type}-`.length)
+  const names = Array.from(new Set(nodeNames.filter(Boolean))).sort((left, right) => right.length - left.length)
+
+  for (const source of names) {
+    if (!rest.startsWith(`${source}-`)) continue
+    const afterSource = rest.slice(source.length + 1)
+    const target = names.find((name) => afterSource === name || afterSource.startsWith(`${name}-`))
+    if (target) {
+      return { type, source, target }
+    }
+  }
+
+  return { type, source: null, target: null }
 }

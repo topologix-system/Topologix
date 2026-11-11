@@ -12,6 +12,7 @@ import secrets
 from datetime import datetime, timedelta, timezone
 from typing import List, Optional
 from sqlalchemy import String, Integer, Boolean, DateTime, ForeignKey, Table, Column, Index
+from sqlalchemy.dialects import mysql
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, relationship
 from werkzeug.security import generate_password_hash, check_password_hash
 
@@ -70,7 +71,14 @@ class User(Base):
     # Security tracking
     failed_login_attempts: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
     account_locked_until: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True))
-    password_changed_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True))
+    # Token cutoffs keep microseconds on MySQL, whose plain DATETIME stores whole seconds
+    password_changed_at: Mapped[Optional[datetime]] = mapped_column(
+        DateTime(timezone=True).with_variant(mysql.DATETIME(fsp=6), "mysql")
+    )
+    # Tokens issued before this time are rejected (set when the user is deactivated)
+    tokens_invalid_before: Mapped[Optional[datetime]] = mapped_column(
+        DateTime(timezone=True).with_variant(mysql.DATETIME(fsp=6), "mysql")
+    )
     last_login_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True))
     last_login_ip: Mapped[Optional[str]] = mapped_column(String(45))  # IPv6 max length
 
@@ -94,10 +102,11 @@ class User(Base):
         lazy="selectin"  # Avoid N+1 queries
     )
 
-    # Indexes
+    # Indexes; SQLite AUTOINCREMENT keeps ids of deleted users from being reassigned
     __table_args__ = (
         Index('idx_users_email_active', 'email', 'is_active'),
         Index('idx_users_created', 'created_at'),
+        {'sqlite_autoincrement': True},
     )
 
     def set_password(self, password: str) -> None:

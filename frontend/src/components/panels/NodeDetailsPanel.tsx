@@ -11,6 +11,7 @@ import { useTranslation } from 'react-i18next'
 import { useVirtualizer } from '@tanstack/react-virtual'
 import { useUIStore } from '../../store'
 import { useAllNetworkData } from '../../hooks'
+import { useRovingTabIndex } from '../../hooks/useRovingTabIndex'
 import type {
   NodeProperties,
   InterfaceProperties,
@@ -59,6 +60,23 @@ import {
 
 type TabType = 'basic' | 'interfaces' | 'routing' | 'ospf' | 'services' | 'security' | 'validation' | 'bgp' | 'acl' | 'vlan' | 'config' | 'eigrp' | 'isis' | 'vxlan'
 
+const NODE_TAB_ORDER: readonly TabType[] = [
+  'basic',
+  'interfaces',
+  'vlan',
+  'routing',
+  'ospf',
+  'bgp',
+  'eigrp',
+  'isis',
+  'vxlan',
+  'services',
+  'security',
+  'acl',
+  'config',
+  'validation',
+]
+
 // Extended interface type with hostname from backend response
 type InterfaceWithHostname = InterfaceProperties & { hostname?: string }
 
@@ -82,6 +100,12 @@ export const NodeDetailsPanel = memo(function NodeDetailsPanel() {
   const handleTabChange = useCallback((tabId: TabType) => {
     setActiveTab(tabId)
   }, [])
+
+  const { getItemProps: getTabProps } = useRovingTabIndex({
+    items: NODE_TAB_ORDER,
+    activeItem: activeTab,
+    onSelect: handleTabChange,
+  })
 
   // Compute node (not a hook - always execute)
   const node = selectedNodeId
@@ -198,15 +222,23 @@ export const NodeDetailsPanel = memo(function NodeDetailsPanel() {
   }, [data?.switched_vlan_properties, selectedNodeId])
 
   // Configuration structures data
-  const nodeDefinedStructures = useMemo(() => {
+  const allDefinedStructures = useMemo(() => {
     if (!data?.defined_structures) return []
     return data.defined_structures
   }, [data?.defined_structures])
 
+  const nodeConfigFiles = useMemo(() => {
+    if (!selectedNodeId) return new Set<string>()
+    return getNodeConfigFiles(data?.file_parse_status, selectedNodeId)
+  }, [data?.file_parse_status, selectedNodeId])
+
+  const nodeDefinedStructures = useMemo(() => {
+    return filterStructuresByFiles(data?.defined_structures, nodeConfigFiles)
+  }, [data?.defined_structures, nodeConfigFiles])
+
   const nodeReferencedStructures = useMemo(() => {
-    if (!data?.referenced_structures) return []
-    return data.referenced_structures
-  }, [data?.referenced_structures])
+    return filterStructuresByFiles(data?.referenced_structures, nodeConfigFiles)
+  }, [data?.referenced_structures, nodeConfigFiles])
 
   const nodeNamedStructures = useMemo(() => {
     if (!selectedNodeId || !data?.named_structures) return []
@@ -271,7 +303,7 @@ export const NodeDetailsPanel = memo(function NodeDetailsPanel() {
   ]
 
   return (
-    <div className="flex flex-col h-full" role="region" aria-label="Node details">
+    <div className="flex flex-col h-full" role="region" aria-label={t('nodeDetails.regionLabel')}>
       {/* Header */}
       <div className="border-b pb-4 mb-4">
         <h2 className="text-lg font-semibold text-gray-900">{node.hostname || node.node}</h2>
@@ -279,7 +311,7 @@ export const NodeDetailsPanel = memo(function NodeDetailsPanel() {
       </div>
 
       {/* Tabs */}
-      <div className="flex gap-1 mb-4 flex-wrap" role="tablist" aria-label="Node information tabs">
+      <div className="flex gap-1 mb-4 flex-wrap" role="tablist" aria-label={t('nodeDetails.tabListLabel')}>
         {tabs.map((tab) => (
           <button
             key={tab.id}
@@ -288,7 +320,7 @@ export const NodeDetailsPanel = memo(function NodeDetailsPanel() {
             aria-selected={activeTab === tab.id}
             aria-controls={`node-tabpanel-${tab.id}`}
             id={`node-tab-${tab.id}`}
-            tabIndex={activeTab === tab.id ? 0 : -1}
+            {...getTabProps(tab.id as TabType)}
             className={`flex items-center gap-1 px-3 py-1.5 text-xs font-medium rounded-lg transition-colors focus:outline-none focus:ring-2 focus:ring-primary-600 focus:ring-offset-1 ${
               activeTab === tab.id
                 ? 'bg-blue-100 text-blue-800'
@@ -362,7 +394,7 @@ export const NodeDetailsPanel = memo(function NodeDetailsPanel() {
             allInterfaces={data?.interface_properties || []}
             allIpOwners={data?.ip_owners || []}
             namedStructures={nodeNamedStructures}
-            definedStructures={nodeDefinedStructures}
+            definedStructures={allDefinedStructures}
           />
         )}
         {activeTab === 'config' && (
@@ -1886,16 +1918,66 @@ function formatSourceRefs(sourceRefs: string[]): string {
   return sourceRefs.join(', ')
 }
 
-function hasVlanData(iface: InterfaceProperties): boolean {
-  return Boolean(
-    iface.switchport ||
-    iface.switchport_mode ||
+/**
+ * Whether an interface carries VLAN data
+ * - Switchport attributes (mode other than "NONE", access/native/allowed VLANs) count unless switchport is false
+ * - VLAN interface and encapsulation VLAN IDs always count
+ */
+export function hasVlanData(iface: InterfaceProperties): boolean {
+  const switchportMode = typeof iface.switchport_mode === 'string' ? iface.switchport_mode.trim().toUpperCase() : ''
+  const hasAllowedVlans = Array.isArray(iface.allowed_vlans)
+    ? iface.allowed_vlans.length > 0
+    : Boolean(iface.allowed_vlans && String(iface.allowed_vlans).trim())
+  const hasSwitchportData = iface.switchport !== false && (
+    iface.switchport === true ||
+    (switchportMode !== '' && switchportMode !== 'NONE') ||
     iface.access_vlan != null ||
     iface.native_vlan != null ||
-    iface.vlan != null ||
-    iface.encapsulation_vlan != null ||
-    (Array.isArray(iface.allowed_vlans) ? iface.allowed_vlans.length > 0 : iface.allowed_vlans)
+    hasAllowedVlans
   )
+  return hasSwitchportData || iface.vlan != null || iface.encapsulation_vlan != null
+}
+
+/**
+ * Configuration file name of a structure source line ("<file>:[<lines>]" or { filename })
+ */
+export function getSourceLineFilename(sourceLine: unknown): string | null {
+  if (typeof sourceLine === 'string') {
+    const match = /^(.*):\[[^\]]*\]$/.exec(sourceLine)
+    return match ? match[1] : getSourceFilename(sourceLine)
+  }
+  if (sourceLine && typeof sourceLine === 'object') {
+    const filename = (sourceLine as { filename?: unknown }).filename
+    return typeof filename === 'string' ? filename : null
+  }
+  return null
+}
+
+/**
+ * Configuration files parsed into the given node (file_parse_status entries listing the node)
+ */
+export function getNodeConfigFiles(fileParseStatus: FileParseStatus[] | undefined, nodeId: string): Set<string> {
+  const files = new Set<string>()
+  for (const status of fileParseStatus ?? []) {
+    if (status?.file_name && Array.isArray(status.nodes) && status.nodes.includes(nodeId)) {
+      files.add(status.file_name)
+    }
+  }
+  return files
+}
+
+/**
+ * Structures with at least one source line in the given configuration files
+ */
+export function filterStructuresByFiles<T extends { source_lines?: unknown }>(structures: T[] | undefined, files: ReadonlySet<string>): T[] {
+  if (!structures || files.size === 0) return []
+  return structures.filter((structure) => {
+    const sourceLines = Array.isArray(structure.source_lines) ? structure.source_lines : [structure.source_lines]
+    return sourceLines.some((sourceLine) => {
+      const filename = getSourceLineFilename(sourceLine)
+      return filename !== null && files.has(filename)
+    })
+  })
 }
 
 function formatInterfaceValue(value: unknown): string {

@@ -3,6 +3,11 @@
     "title": "Topologix",
     "subtitle": "Network Topology Visualization"
   },
+  "routeError": {
+    "title": "This page could not be displayed",
+    "message": "An unexpected error occurred while loading this page.",
+    "backHome": "Back to Topologix"
+  },
   "header": {
     "snapshot": "Snapshot",
     "selectSnapshot": "Select snapshot...",
@@ -445,7 +450,9 @@
         "compatible": "Compatible",
         "checkConfig": "Check Config"
       }
-    }
+    },
+    "regionLabel": "Node details",
+    "tabListLabel": "Node information tabs"
   },
   "nodeSelector": {
     "label": "Select node",
@@ -466,7 +473,11 @@
       "connection": "Connection",
       "layer3Info": "Layer 3 Information",
       "ospfInfo": "OSPF Information",
-      "bgpInfo": "BGP Information"
+      "bgpInfo": "BGP Information",
+      "eigrpInfo": "EIGRP Information",
+      "isisInfo": "IS-IS Information",
+      "vxlanInfo": "VXLAN Information",
+      "ipsecInfo": "IPsec Information"
     },
     "fields": {
       "sourceNode": "Source Node",
@@ -488,8 +499,15 @@
       "localIp": "Local IP",
       "remoteIp": "Remote IP",
       "importPolicy": "Import Policy",
-      "exportPolicy": "Export Policy"
-    }
+      "exportPolicy": "Export Policy",
+      "level": "Level",
+      "vni": "VNI",
+      "vtepAddress": "VTEP Address",
+      "remoteVtepAddress": "Remote VTEP Address",
+      "multicastGroup": "Multicast Group",
+      "tunnelInterfaces": "Tunnel Interfaces"
+    },
+    "regionLabel": "Edge details"
   },
   "validation": {
     "title": "Validation",
@@ -690,7 +708,8 @@
         "testFiltersResults": "Test filters results",
         "matchingLinesResults": "Find matching filter lines results",
         "searchFiltersResults": "Search filters results"
-      }
+      },
+      "ignoreComposites": "Ignore composites"
     },
     "advanced": {
       "searchRoutePoliciesDesc": "Search route policies by action across devices",
@@ -748,15 +767,20 @@
   "comparison": {
     "title": "Snapshot Comparison",
     "description": "Compare network configurations between two snapshots",
+    "backToTopologyAria": "Back to topology view",
     "selectSnapshots": "Select Snapshots to Compare",
     "baseSnapshot": "Base Snapshot (Before)",
     "comparisonSnapshot": "Comparison Snapshot (After)",
     "selectBase": "-- Select Base Snapshot --",
     "selectComparison": "-- Select Comparison Snapshot --",
+    "selectBaseAria": "Select base snapshot",
+    "selectComparisonAria": "Select comparison snapshot",
     "compareButton": "Compare Snapshots",
+    "compareAria": "Compare selected snapshots",
     "comparing": "Comparing...",
     "noResults": "No comparison results yet",
     "selectToCompare": "Select two snapshots and click Compare to see differences",
+    "tabsAria": "Comparison tabs",
     "tabs": {
       "nodes": "Nodes",
       "topology": "Topology",
@@ -771,7 +795,8 @@
       "changesDetected": "changes detected",
       "added": "added",
       "removed": "removed",
-      "modified": "modified"
+      "modified": "modified",
+      "notComputed": "could not be computed"
     },
     "nodes": {
       "title": "Node Changes",
@@ -791,6 +816,8 @@
       "removedRoutes": "Removed Routes ({{count}})",
       "modifiedRoutes": "Modified Routes ({{count}})",
       "noChanges": "No routing table changes detected",
+      "nextHopAbbr": "NH",
+      "protocolAbbr": "Proto",
       "fields": {
         "node": "Node",
         "vrf": "VRF",
@@ -803,12 +830,15 @@
     "reachability": {
       "title": "Reachability Changes",
       "changeType": "Change Type",
-      "noChanges": "No reachability changes detected"
+      "noChanges": "No reachability changes detected",
+      "unavailable": "Differential reachability could not be computed for these snapshots. Node, topology and route changes are still shown.",
+      "reason": "Reason: {{reason}}"
     },
     "errors": {
       "selectBoth": "Please select both base and comparison snapshots",
       "selectDifferent": "Please select different snapshots to compare",
-      "comparisonFailed": "Comparison failed: {{message}}"
+      "comparisonFailed": "Comparison failed: {{message}}",
+      "unknown": "Unknown error"
     }
   },
   "topologyViewer": {
@@ -866,7 +896,8 @@
     },
     "partialData": {
       "title": "Partial topology data",
-      "description": "{{count}} BGP or route-policy query failed. Some topology layers may be incomplete."
+      "description": "{{count}} BGP or route-policy query failed. Some topology layers may be incomplete.",
+      "dismiss": "Dismiss warning"
     },
     "retry": "Retry loading network data",
     "exportFailed": "Export Failed",
@@ -914,6 +945,7 @@
     "interfaces": "Interfaces",
     "routes": "Routes",
     "backToDashboard": "Back to Dashboard",
+    "back": "Back",
     "accessDenied": "Access Denied",
     "adminRequired": "You need admin privileges to access this page.",
     "updateFailed": "Update failed",
@@ -1023,7 +1055,11 @@
     "newUser": "New User",
     "editUser": "Edit User",
     "deleteUser": "Delete User",
+    "editUserAria": "Edit user {{name}}",
+    "deleteUserAria": "Delete user {{name}}",
     "confirmDelete": "Are you sure you want to delete this user?",
+    "confirmDeleteAria": "Confirm delete",
+    "cancelDeleteAria": "Cancel delete",
     "userDeleted": "User deleted successfully",
     "deleteFailed": "Failed to delete user",
     "cannotDeleteSelf": "Cannot delete your own account",
@@ -1031,7 +1067,18 @@
     "failedToLoadUser": "Failed to load user",
     "registeredCount": "{{count}} users registered",
     "usernameImmutable": "Username cannot be changed",
-    "superuser": "Superuser"
+    "superuser": "Superuser",
+    "table": {
+      "id": "ID",
+      "username": "Username",
+      "email": "Email",
+      "roles": "Roles",
+      "status": "Status",
+      "actions": "Actions"
+    },
+    "active": "Active",
+    "inactive": "Inactive",
+    "youMarker": "(You)"
   },
   "snapshotMigration": {
     "title": "Snapshot Owner Migration",
@@ -1348,7 +1395,10 @@
       "invalidFilename": "Enter a filename starting with a letter or number, using only letters, numbers, dots, underscores, or hyphens, with .cfg, .conf, .txt, or .log.",
       "emptyContent": "Paste config text before creating the file.",
       "overwriteRequired": "\"{{name}}\" already exists. Confirm overwrite before continuing.",
-      "overwriteConfirm": "Overwrite existing file \"{{name}}\""
+      "overwriteConfirm": "Overwrite existing file \"{{name}}\"",
+      "discardTitle": "Discard pasted config?",
+      "discardMessage": "The config text in this dialog has not been saved. Closing the dialog discards it.",
+      "discardConfirm": "Discard"
     },
     "deleteFile": "Delete file",
     "deleteFileAria": "Delete file {{name}}",
@@ -1489,7 +1539,9 @@
           "description": "External BGP route injection data stored at snapshot root."
         }
       }
-    }
+    },
+    "createFailed": "Failed to create snapshot",
+    "folderUpdateFailed": "Failed to update snapshot folder"
   },
   "layer1Editor": {
     "title": "Layer 1 Topology Editor",
@@ -1538,7 +1590,10 @@
       "noSnapshot": "No snapshot selected",
       "selfConnection": "Cannot connect device to itself",
       "saveFailed": "Failed to save topology",
-      "unknown": "An unknown error occurred"
+      "unknown": "An unknown error occurred",
+      "loadFailed": "Failed to load the Layer 1 topology",
+      "accessDenied": "Access denied: you do not have permission to open snapshot \"{{name}}\".",
+      "notFound": "Snapshot \"{{name}}\" was not found."
     }
   },
   "batfishTools": {
@@ -1681,7 +1736,8 @@
       "permit": "permit",
       "deny": "deny",
       "in": "IN",
-      "out": "OUT"
+      "out": "OUT",
+      "pathOptionNone": "Not set"
     },
     "results": {
       "resolveNodes": "Resolve nodes",

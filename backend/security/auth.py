@@ -13,7 +13,7 @@ from functools import wraps
 from typing import Optional, Dict, Any, List
 
 import jwt
-from flask import request, jsonify, current_app
+from flask import request, jsonify, current_app, g
 from werkzeug.security import generate_password_hash, check_password_hash
 from sqlalchemy import select
 
@@ -182,18 +182,27 @@ class JWTManager:
                 except jwt.InvalidTokenError as e:
                     logger.warning(f"Invalid token attempted from {get_client_ip()}: {e}")
 
-    def generate_tokens(self, user_id: str, username: str, roles: List[str]) -> Dict[str, str]:
+    def generate_tokens(self, user_id: str, username: str, roles: List[str],
+                        session_id: Optional[str] = None) -> Dict[str, str]:
         """Generate access and refresh tokens
+
+        Both tokens carry the login session id ("sid"); revoking the sid revokes every
+        token of that session. "iat" has sub-second precision so it can be compared
+        with the user's password_changed_at.
 
         Args:
             user_id: User identifier
             username: Username
             roles: List of user roles
+            session_id: Login session id to keep (token refresh); a new login session
+                uses the refresh token's jti
 
         Returns:
             Dictionary containing access_token and refresh_token
         """
         now = datetime.now(timezone.utc)
+        refresh_jti = secrets.token_urlsafe(16)
+        session_id = session_id or refresh_jti
 
         # Access token payload
         access_payload = {
@@ -201,18 +210,20 @@ class JWTManager:
             "username": username,
             "roles": roles,
             "type": "access",
-            "iat": now,
+            "iat": now.timestamp(),
             "exp": now + self.access_token_expires,
-            "jti": secrets.token_urlsafe(16)  # JWT ID for revocation
+            "jti": secrets.token_urlsafe(16),  # JWT ID for revocation
+            "sid": session_id
         }
 
         # Refresh token payload
         refresh_payload = {
             "user_id": user_id,
             "type": "refresh",
-            "iat": now,
+            "iat": now.timestamp(),
             "exp": now + self.refresh_token_expires,
-            "jti": secrets.token_urlsafe(16)
+            "jti": refresh_jti,
+            "sid": session_id
         }
 
         access_token = jwt.encode(access_payload, self.secret_key, algorithm=self.algorithm)
@@ -230,6 +241,11 @@ class JWTManager:
     def decode_token(self, token: str) -> Dict[str, Any]:
         """Decode and validate JWT token
 
+        When AUTH_ENABLED=true, the token's user must still exist, be active, and not have
+        changed the password or had its tokens invalidated after the token was issued; the
+        roles claim of an access token is replaced with the user's current roles from the
+        database.
+
         Args:
             token: JWT token string
 
@@ -244,16 +260,16 @@ class JWTManager:
         if token in self.token_blacklist:
             raise jwt.InvalidTokenError("Token has been revoked")
 
-        # Check persistent blacklist by JTI
+        # Check persistent blacklist by JTI and login session id
         try:
             pre_payload = jwt.decode(token, self.secret_key, algorithms=[self.algorithm], options={"verify_exp": False})
-            jti = pre_payload.get('jti')
-            if jti:
+            revocation_ids = [value for value in (pre_payload.get('jti'), pre_payload.get('sid')) if value]
+            if revocation_ids:
                 from database.session import get_db
                 from database.models import RevokedToken
                 from sqlalchemy import select
                 with next(get_db()) as db:
-                    if db.scalars(select(RevokedToken).filter_by(jti=jti)).first() is not None:
+                    if db.scalars(select(RevokedToken).where(RevokedToken.jti.in_(revocation_ids))).first() is not None:
                         self.token_blacklist.add(token)
                         raise jwt.InvalidTokenError("Token has been revoked")
         except jwt.InvalidTokenError:
@@ -272,6 +288,9 @@ class JWTManager:
             if "type" not in payload:
                 raise jwt.InvalidTokenError("Invalid token structure")
 
+            if current_app.config.get('AUTH_ENABLED', False):
+                self._check_token_user(payload)
+
             return payload
 
         except jwt.ExpiredSignatureError:
@@ -281,29 +300,140 @@ class JWTManager:
             logger.debug(f"Invalid token: {e}")
             raise
 
-    def revoke_token(self, token: str):
-        """Revoke a token by adding it to blacklist (in-memory + persistent DB)
+    def _check_token_user(self, payload: Dict[str, Any]) -> None:
+        """Validate the token's user against the database
+
+        Args:
+            payload: Decoded token payload; the roles claim of an access token is
+                replaced with the user's current roles
+
+        Raises:
+            jwt.InvalidTokenError: If the user no longer exists, is inactive, or changed
+                the password or had its tokens invalidated after the token was issued
+        """
+        user_state = self._load_token_user(payload.get("user_id"))
+        if user_state is None:
+            raise jwt.InvalidTokenError("Token user no longer exists")
+        if not user_state["is_active"]:
+            raise jwt.InvalidTokenError("Token user is inactive")
+
+        password_changed_at = user_state["password_changed_at"]
+        if password_changed_at is not None and float(payload.get("iat", 0)) < password_changed_at:
+            raise jwt.InvalidTokenError("Token was issued before the last password change")
+
+        tokens_invalid_before = user_state["tokens_invalid_before"]
+        if tokens_invalid_before is not None and float(payload.get("iat", 0)) < tokens_invalid_before:
+            raise jwt.InvalidTokenError("Token was issued before the user's tokens were revoked")
+
+        if payload.get("type") == "access":
+            payload["roles"] = user_state["roles"]
+
+    def _load_token_user(self, user_id: Any) -> Optional[Dict[str, Any]]:
+        """Load a token user's active flag, token cutoff times and roles
+
+        Uses a single query and caches the result for the current request.
+
+        Args:
+            user_id: user_id claim of the token
+
+        Returns:
+            Dictionary with is_active, password_changed_at and tokens_invalid_before
+            (POSIX timestamps or None) and roles, or None if the user does not exist
+
+        Raises:
+            jwt.InvalidTokenError: If the user cannot be loaded from the database
+        """
+        try:
+            user_id = int(user_id)
+        except (TypeError, ValueError):
+            return None
+
+        cache = g.setdefault('token_user_cache', {})
+        if user_id in cache:
+            return cache[user_id]
+
+        from database.session import get_db
+        from database.models import User, Role, user_roles
+
+        stmt = (
+            select(User.is_active, User.password_changed_at, User.tokens_invalid_before, Role.name)
+            .select_from(User)
+            .outerjoin(user_roles, user_roles.c.user_id == User.id)
+            .outerjoin(Role, Role.id == user_roles.c.role_id)
+            .where(User.id == user_id)
+        )
+        try:
+            with next(get_db()) as db:
+                rows = db.execute(stmt).all()
+        except Exception as e:
+            logger.error(f"Failed to load token user {user_id}: {e}")
+            raise jwt.InvalidTokenError("Token user could not be verified")
+
+        def to_timestamp(value: Optional[datetime]) -> Optional[float]:
+            if value is None:
+                return None
+            if value.tzinfo is None:
+                value = value.replace(tzinfo=timezone.utc)
+            return value.timestamp()
+
+        user_state = None
+        if rows:
+            user_state = {
+                "is_active": rows[0].is_active,
+                "password_changed_at": to_timestamp(rows[0].password_changed_at),
+                "tokens_invalid_before": to_timestamp(rows[0].tokens_invalid_before),
+                "roles": [row.name for row in rows if row.name is not None],
+            }
+
+        cache[user_id] = user_state
+        return user_state
+
+    def revoke_token(self, token: str) -> Optional[Dict[str, Any]]:
+        """Revoke a token and its login session (in-memory + persistent DB)
+
+        Revoking the session id ("sid") also rejects the session's refresh token and
+        every access token minted from it. Expired tokens are revoked as well; a token
+        whose signature does not verify is ignored.
 
         Args:
             token: JWT token to revoke
+
+        Returns:
+            The revoked token's payload, or None if the token could not be verified
         """
-        self.token_blacklist.add(token)
         try:
             payload = jwt.decode(token, self.secret_key, algorithms=[self.algorithm], options={"verify_exp": False})
+        except jwt.InvalidTokenError as e:
+            logger.warning(f"Ignored revocation of an unverifiable token from {get_client_ip()}: {e}")
+            return None
+
+        self.token_blacklist.add(token)
+        try:
             jti = payload.get('jti')
             exp = payload.get('exp')
+            sid = payload.get('sid')
+            revocations = {}
             if jti and exp:
+                revocations[jti] = datetime.fromtimestamp(exp, tz=timezone.utc)
+            if sid and sid not in revocations:
+                revocations[sid] = datetime.now(timezone.utc) + max(
+                    self.refresh_token_expires, self.access_token_expires
+                )
+            if revocations:
                 from database.session import get_db
                 from database.models import RevokedToken
                 with next(get_db()) as db:
-                    db.add(RevokedToken(
-                        jti=jti,
-                        expires_at=datetime.fromtimestamp(exp, tz=timezone.utc)
+                    already_revoked = set(db.scalars(
+                        select(RevokedToken.jti).where(RevokedToken.jti.in_(list(revocations)))
                     ))
+                    for revoked_id, expires_at in revocations.items():
+                        if revoked_id not in already_revoked:
+                            db.add(RevokedToken(jti=revoked_id, expires_at=expires_at))
                     db.commit()
         except Exception as e:
             logger.warning(f"Failed to persist token revocation to DB: {e}")
         logger.info(f"Token revoked for {get_client_ip()}")
+        return payload
 
     def _extract_token(self) -> Optional[str]:
         """Extract JWT token from request

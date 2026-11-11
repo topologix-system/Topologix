@@ -106,6 +106,7 @@ class SnapshotOwnerMigrationTest(unittest.TestCase):
                 "CSRF_SECRET_KEY": "route-test-csrf-secret-key",
                 "AUTH_DEFAULT_ADMIN_PASS": "RouteTestPassword123!",
                 "DATABASE_URL": f"sqlite:///{Path(temp_dir) / 'route-test.db'}",
+                "PYTHONPATH": str(Path(__file__).resolve().parents[1]),
             })
             script = r'''
 import json
@@ -160,6 +161,7 @@ with app.test_client() as client:
                 capture_output=True,
                 text=True,
                 env=env,
+                cwd=temp_dir,
             )
 
         result = json.loads(completed.stdout.strip().splitlines()[-1])

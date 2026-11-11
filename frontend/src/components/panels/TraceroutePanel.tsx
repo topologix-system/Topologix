@@ -32,6 +32,62 @@ import {
 } from 'lucide-react'
 import { ProtocolSelector } from '../ProtocolSelector'
 import { useSnapshotStore } from '../../store'
+import { extractAxiosErrorMessage } from '../../types/errors'
+import { useRovingTabIndex } from '../../hooks/useRovingTabIndex'
+
+const TRACE_MODES = ['unidirectional', 'bidirectional'] as const
+type TraceMode = typeof TRACE_MODES[number]
+
+const NUMERIC_LIST_HEADER_FIELDS = ['icmpTypes', 'icmpCodes', 'dscps', 'ecns'] as const
+
+export type HeaderListField = 'applications' | typeof NUMERIC_LIST_HEADER_FIELDS[number]
+
+/**
+ * Raw text of the comma-separated header inputs, keyed by header field
+ */
+export type HeaderListText = Record<HeaderListField, string>
+
+export const EMPTY_HEADER_LIST_TEXT: HeaderListText = {
+  applications: '',
+  icmpTypes: '',
+  icmpCodes: '',
+  dscps: '',
+  ecns: '',
+}
+
+/**
+ * Split a comma-separated input into trimmed, non-empty items
+ */
+export function splitCommaList(value: string): string[] {
+  return value.split(',').map((item) => item.trim()).filter(Boolean)
+}
+
+/**
+ * Build the traceroute request from the form state and the raw comma-separated header inputs
+ * - applications: list of names
+ * - icmpTypes / icmpCodes / dscps / ecns: Batfish integer space strings such as "0,8" or "0-63"
+ */
+export function buildTracerouteRequest(formData: TracerouteRequest, listText: HeaderListText): TracerouteRequest {
+  const headers: NonNullable<TracerouteRequest['headers']> = { ...formData.headers }
+
+  const applications = splitCommaList(listText.applications)
+  if (applications.length > 0) {
+    headers.applications = applications
+  } else {
+    delete headers.applications
+  }
+
+  for (const field of NUMERIC_LIST_HEADER_FIELDS) {
+    const values = splitCommaList(listText[field])
+    if (values.length > 0) {
+      headers[field] = values.join(',')
+    } else {
+      delete headers[field]
+    }
+  }
+
+  return { ...formData, headers }
+}
 
 export function TraceroutePanel() {
   const { t } = useTranslation()
@@ -56,13 +112,12 @@ export function TraceroutePanel() {
 
 function TraceroutePanelContent() {
   const { t } = useTranslation()
-  const [tracerouteMode, setTracerouteMode] = useState<'unidirectional' | 'bidirectional'>(
-    'unidirectional'
-  )
+  const [tracerouteMode, setTracerouteMode] = useState<TraceMode>('unidirectional')
 
   const [formData, setFormData] = useState<TracerouteRequest>({
     headers: {},
   })
+  const [headerListText, setHeaderListText] = useState<HeaderListText>(EMPTY_HEADER_LIST_TEXT)
 
   const [showAdvanced, setShowAdvanced] = useState(false)
 
@@ -76,12 +131,28 @@ function TraceroutePanelContent() {
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault()
 
+    const request = buildTracerouteRequest(formData, headerListText)
     if (tracerouteMode === 'bidirectional') {
-      bidirectionalTraceroute.mutate(formData)
+      bidirectionalTraceroute.mutate(request)
     } else {
-      traceroute.mutate(formData)
+      traceroute.mutate(request)
     }
   }
+
+  const selectTracerouteMode = (mode: TraceMode) => {
+    setTracerouteMode(mode)
+    if (mode === 'unidirectional') {
+      bidirectionalTraceroute.reset()
+    } else {
+      traceroute.reset()
+    }
+  }
+
+  const { getItemProps: getModeRadioProps } = useRovingTabIndex({
+    items: TRACE_MODES,
+    activeItem: tracerouteMode,
+    onSelect: selectTracerouteMode,
+  })
 
   /**
    * Reset form and clear all traceroute results
@@ -89,6 +160,7 @@ function TraceroutePanelContent() {
    */
   const handleReset = () => {
     setFormData({ headers: {} })
+    setHeaderListText(EMPTY_HEADER_LIST_TEXT)
     setShowAdvanced(false)
     traceroute.reset()
     bidirectionalTraceroute.reset()
@@ -98,7 +170,7 @@ function TraceroutePanelContent() {
    * Update packet header fields in form data
    * Merges new field value into existing headers object
    */
-  const updateHeaders = (field: string, value: string | string[] | number[] | undefined) => {
+  const updateHeaders = (field: string, value: string | string[] | undefined) => {
     setFormData((prev) => ({
       ...prev,
       headers: {
@@ -106,6 +178,13 @@ function TraceroutePanelContent() {
         [field]: value,
       },
     }))
+  }
+
+  /**
+   * Update the raw text of a comma-separated header input (parsed on submit)
+   */
+  const updateHeaderListText = (field: HeaderListField, value: string) => {
+    setHeaderListText((prev) => ({ ...prev, [field]: value }))
   }
 
   const isLoading = traceroute.isPending || bidirectionalTraceroute.isPending
@@ -137,11 +216,8 @@ function TraceroutePanelContent() {
               type="button"
               role="radio"
               aria-checked={tracerouteMode === 'unidirectional'}
-              tabIndex={tracerouteMode === 'unidirectional' ? 0 : -1}
-              onClick={() => {
-                setTracerouteMode('unidirectional')
-                bidirectionalTraceroute.reset()
-              }}
+              {...getModeRadioProps('unidirectional')}
+              onClick={() => selectTracerouteMode('unidirectional')}
               className={`flex items-center gap-2 px-4 py-2 rounded-lg border-2 transition-colors ${
                 tracerouteMode === 'unidirectional'
                   ? 'border-primary-600 bg-primary-50 text-primary-700'
@@ -155,11 +231,8 @@ function TraceroutePanelContent() {
               type="button"
               role="radio"
               aria-checked={tracerouteMode === 'bidirectional'}
-              tabIndex={tracerouteMode === 'bidirectional' ? 0 : -1}
-              onClick={() => {
-                setTracerouteMode('bidirectional')
-                traceroute.reset()
-              }}
+              {...getModeRadioProps('bidirectional')}
+              onClick={() => selectTracerouteMode('bidirectional')}
               className={`flex items-center gap-2 px-4 py-2 rounded-lg border-2 transition-colors ${
                 tracerouteMode === 'bidirectional'
                   ? 'border-primary-600 bg-primary-50 text-primary-700'
@@ -271,8 +344,8 @@ function TraceroutePanelContent() {
                   <input
                     type="text"
                     id="applications"
-                    value={formData.headers?.applications?.join(',') || ''}
-                    onChange={(e) => updateHeaders('applications', e.target.value ? e.target.value.split(',').map(a => a.trim()).filter(a => a) : undefined)}
+                    value={headerListText.applications}
+                    onChange={(e) => updateHeaderListText('applications', e.target.value)}
                     placeholder={t('traceroute.placeholders.applications')}
                     className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-primary-600 focus:border-transparent"
                   />
@@ -315,8 +388,8 @@ function TraceroutePanelContent() {
                   <input
                     type="text"
                     id="icmpTypes"
-                    value={formData.headers?.icmpTypes?.join(',') || ''}
-                    onChange={(e) => updateHeaders('icmpTypes', e.target.value ? e.target.value.split(',').map(t => Number(t.trim())).filter(t => !isNaN(t)) : undefined)}
+                    value={headerListText.icmpTypes}
+                    onChange={(e) => updateHeaderListText('icmpTypes', e.target.value)}
                     placeholder={t('traceroute.placeholders.icmpTypes')}
                     className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-primary-600 focus:border-transparent"
                   />
@@ -329,8 +402,8 @@ function TraceroutePanelContent() {
                   <input
                     type="text"
                     id="icmpCodes"
-                    value={formData.headers?.icmpCodes?.join(',') || ''}
-                    onChange={(e) => updateHeaders('icmpCodes', e.target.value ? e.target.value.split(',').map(c => Number(c.trim())).filter(c => !isNaN(c)) : undefined)}
+                    value={headerListText.icmpCodes}
+                    onChange={(e) => updateHeaderListText('icmpCodes', e.target.value)}
                     placeholder={t('traceroute.placeholders.icmpCodes')}
                     className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-primary-600 focus:border-transparent"
                   />
@@ -344,8 +417,8 @@ function TraceroutePanelContent() {
                   <input
                     type="text"
                     id="dscps"
-                    value={formData.headers?.dscps?.join(',') || ''}
-                    onChange={(e) => updateHeaders('dscps', e.target.value ? e.target.value.split(',').map(d => Number(d.trim())).filter(d => !isNaN(d)) : undefined)}
+                    value={headerListText.dscps}
+                    onChange={(e) => updateHeaderListText('dscps', e.target.value)}
                     placeholder={t('traceroute.placeholders.dscpValues')}
                     className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-primary-600 focus:border-transparent"
                   />
@@ -358,8 +431,8 @@ function TraceroutePanelContent() {
                   <input
                     type="text"
                     id="ecns"
-                    value={formData.headers?.ecns?.join(',') || ''}
-                    onChange={(e) => updateHeaders('ecns', e.target.value ? e.target.value.split(',').map(n => Number(n.trim())).filter(n => !isNaN(n)) : undefined)}
+                    value={headerListText.ecns}
+                    onChange={(e) => updateHeaderListText('ecns', e.target.value)}
                     placeholder={t('traceroute.placeholders.ecnValues')}
                     className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-primary-600 focus:border-transparent"
                   />
@@ -423,7 +496,7 @@ function TraceroutePanelContent() {
             <XCircle className="w-5 h-5 text-red-600 flex-shrink-0 mt-0.5" aria-hidden="true" />
             <div>
               <h4 className="text-sm font-semibold text-red-900">{t('common.error')}</h4>
-              <p className="text-sm text-red-700 mt-1">{error.message || t('traceroute.messages.failed')}</p>
+              <p className="text-sm text-red-700 mt-1">{extractAxiosErrorMessage(error, t('traceroute.messages.failed'))}</p>
             </div>
           </div>
         </div>
@@ -565,6 +638,8 @@ function FlowDisplay({ flow }: { flow: TracerouteFlow | string | null }) {
     return <pre className="text-xs text-gray-600 whitespace-pre-wrap font-mono">{flow}</pre>
   }
 
+  const icmpType = flow.icmpVar ?? flow.icmpType
+
   return (
     <dl className="grid grid-cols-2 gap-x-4 gap-y-1 text-xs">
       {flow.srcIp && <><dt className="text-gray-500">Source IP</dt><dd className="font-mono">{flow.srcIp}</dd></>}
@@ -572,7 +647,7 @@ function FlowDisplay({ flow }: { flow: TracerouteFlow | string | null }) {
       {flow.ipProtocol && <><dt className="text-gray-500">Protocol</dt><dd className="font-mono">{flow.ipProtocol}</dd></>}
       {flow.srcPort != null && <><dt className="text-gray-500">Src Port</dt><dd className="font-mono">{flow.srcPort}</dd></>}
       {flow.dstPort != null && <><dt className="text-gray-500">Dst Port</dt><dd className="font-mono">{flow.dstPort}</dd></>}
-      {flow.icmpType != null && <><dt className="text-gray-500">ICMP Type</dt><dd className="font-mono">{flow.icmpType}</dd></>}
+      {icmpType != null && <><dt className="text-gray-500">ICMP Type</dt><dd className="font-mono">{icmpType}</dd></>}
       {flow.icmpCode != null && <><dt className="text-gray-500">ICMP Code</dt><dd className="font-mono">{flow.icmpCode}</dd></>}
       {flow.dscp != null && <><dt className="text-gray-500">DSCP</dt><dd className="font-mono">{flow.dscp}</dd></>}
       {flow.ecn != null && <><dt className="text-gray-500">ECN</dt><dd className="font-mono">{flow.ecn}</dd></>}

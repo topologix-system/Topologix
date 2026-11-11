@@ -7,6 +7,7 @@
  * - Only active when VITE_AUTH_ENABLED=true
  */
 import { create } from 'zustand'
+import i18n from 'i18next'
 import { authAPI } from '../services/api'
 import { logger } from '../utils/logger'
 import { extractErrorMessage } from '../types/errors'
@@ -91,7 +92,7 @@ export const useAuthStore = create<AuthStore>((set, get) => ({
         error: null,
       })
     } catch (error: unknown) {
-      const errorMessage = extractErrorMessage(error, 'Login failed. Please check your credentials.')
+      const errorMessage = extractErrorMessage(error, i18n.t('auth.loginFailed'))
       set({
         isLoading: false,
         error: errorMessage,

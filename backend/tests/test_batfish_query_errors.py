@@ -1,7 +1,13 @@
 import contextlib
+import json
 import unittest
 from pathlib import Path
+from unittest import mock
 
+import requests
+
+import app as app_module
+from services import batfish_service as batfish_service_module
 from services.batfish_service import BatfishQueryError, BatfishService
 
 # Sanitized reproduction of a failed Batfish work item (RFC 5737 style
@@ -42,6 +48,112 @@ SANITIZED_WORK_LOG_FAILURE_JSON_LINE = (
     '(RegexAtomicPredicates.java:61)",""]}],"question":{"class":'
     '"org.batfish.minesweeper.question.searchroutepolicies.SearchRoutePoliciesQuestion"}'
 )
+
+
+# Sanitized reproduction of a failed testRoutePolicies work item as observed
+# through the Flask API path: the JSON-encoded stack trace carries
+# module-qualified JDK frames ('at java.base/...'), and the cause rethrown by
+# reflection repeats the inner exception class name.
+SANITIZED_WORK_LOG_FAILURE_JDK_FRAMES = (
+    "Work terminated abnormally "
+    'work_item: {"containerName": "example_network"} '
+    '["org.batfish.common.BatfishException: Failed to answer question TestRoutePoliciesQuestion",'
+    '"   at org.batfish.main.Batfish.answer(Batfish.java:544)",'
+    '"   at java.base/java.lang.Thread.run(Thread.java:840)",'
+    '"Caused by: java.lang.IllegalStateException: java.lang.IllegalStateException: '
+    'Expected BGP session properties",'
+    '"   at java.base/jdk.internal.reflect.NativeConstructorAccessorImpl.newInstance0(Native Method)",'
+    '"   at java.base/jdk.internal.reflect.NativeConstructorAccessorImpl.newInstance('
+    'NativeConstructorAccessorImpl.java:77)",'
+    '"   at java.base/java.lang.reflect.Constructor.newInstanceWithCaller(Constructor.java:500)",'
+    '"   at java.base/java.util.concurrent.ForkJoinTask.getThrowableException(ForkJoinTask.java:564)",'
+    '""]}]'
+)
+
+# Same failure as a multi-line work log with tab-indented JDK frames.
+SANITIZED_WORK_LOG_FAILURE_JDK_FRAMES_MULTILINE = (
+    "Work terminated abnormally\n"
+    'work_item: {"containerName": "example_network"}\n'
+    "Caused by: java.lang.IllegalStateException: java.lang.IllegalStateException: "
+    "Expected BGP session properties\n"
+    "\tat java.base/jdk.internal.reflect.NativeConstructorAccessorImpl.newInstance0(Native Method)\n"
+    "\tat java.base/java.util.concurrent.ForkJoinTask.getThrowableException(ForkJoinTask.java:564)\n"
+)
+
+# A JSON-encoded work log whose causes share one physical line; the innermost
+# cause is followed only by a constructor frame.
+SANITIZED_WORK_LOG_FAILURE_NESTED_CAUSES = (
+    "Work terminated abnormally "
+    'work_item: {"containerName": "example_network"} '
+    '["Caused by: java.lang.RuntimeException: Failed to compute the answer",'
+    '"   at java.base/java.util.concurrent.ForkJoinTask.invoke(ForkJoinTask.java:686)",'
+    '"Caused by: java.lang.IllegalStateException: Expected BGP session properties",'
+    '"   at org.batfish.minesweeper.question.testroutepolicies.TestRoutePoliciesAnswerer.<init>('
+    'TestRoutePoliciesAnswerer.java:90)",'
+    '""]}]'
+)
+
+
+# Sanitized reproductions of Batfish coordinator HTTP 500 bodies for rejected
+# question JSON (synthetic ids, no real environment data).
+SANITIZED_COORDINATOR_CONFLICT_BODY = (
+    "org.batfish.common.BatfishException: Invalid question example_network/"
+    "__searchRoutePolicies_00000000-0000-0000-0000-000000000000: Could not parse JSON question: "
+    "Cannot construct instance of `org.batfish.minesweeper.question.searchroutepolicies."
+    "SearchRoutePoliciesQuestion`, problem: perPath and pathOption cannot both be set (perPath is deprecated)\n"
+    " at [Source: REDACTED (`StreamReadFeature.INCLUDE_SOURCE_IN_LOCATION` disabled); line: 1, column: 3209]\n"
+    "\tat org.batfish.coordinator.WorkMgr.uploadQuestion(WorkMgr.java:1402)\n"
+    "\tat org.batfish.coordinator.resources.QuestionResource.putQuestion(QuestionResource.java:60)\n"
+    "Caused by: com.fasterxml.jackson.databind.exc.ValueInstantiationException: Cannot construct instance of "
+    "`org.batfish.minesweeper.question.searchroutepolicies.SearchRoutePoliciesQuestion`, problem: "
+    "perPath and pathOption cannot both be set (perPath is deprecated)\n"
+    " at [Source: REDACTED (`StreamReadFeature.INCLUDE_SOURCE_IN_LOCATION` disabled); line: 1, column: 3209]\n"
+    "\tat com.fasterxml.jackson.databind.exc.ValueInstantiationException.from(ValueInstantiationException.java:47)\n"
+    "\t... 45 more\n"
+    "Caused by: java.lang.IllegalArgumentException: perPath and pathOption cannot both be set (perPath is deprecated)\n"
+    "\tat com.google.common.base.Preconditions.checkArgument(Preconditions.java:143)\n"
+    "\t... 52 more\n"
+)
+SANITIZED_COORDINATOR_ARRAY_BODY = (
+    "org.batfish.common.BatfishException: Invalid question example_network/"
+    "__traceroute_00000000-0000-0000-0000-000000000000: Could not parse JSON question: "
+    "Cannot deserialize value of type `org.batfish.datamodel.IntegerSpace$Builder` from Array value "
+    "(token `JsonToken.START_ARRAY`)\n"
+    " at [Source: REDACTED (`StreamReadFeature.INCLUDE_SOURCE_IN_LOCATION` disabled); line: 1, column: 129] "
+    '(through reference chain: org.batfish.question.traceroute.TracerouteQuestion["headers"]->'
+    'org.batfish.datamodel.PacketHeaderConstraints["icmpTypes"])\n'
+    "\tat org.batfish.coordinator.WorkMgr.uploadQuestion(WorkMgr.java:1402)\n"
+    "Caused by: com.fasterxml.jackson.databind.exc.MismatchedInputException: Cannot deserialize value of type "
+    "`org.batfish.datamodel.IntegerSpace$Builder` from Array value (token `JsonToken.START_ARRAY`)\n"
+    " at [Source: REDACTED (`StreamReadFeature.INCLUDE_SOURCE_IN_LOCATION` disabled); line: 1, column: 129] "
+    '(through reference chain: org.batfish.question.traceroute.TracerouteQuestion["headers"]->'
+    'org.batfish.datamodel.PacketHeaderConstraints["icmpTypes"])\n'
+    "\tat com.fasterxml.jackson.databind.exc.MismatchedInputException.from(MismatchedInputException.java:59)\n"
+)
+SANITIZED_COORDINATOR_JDK_FRAMES_BODY = (
+    "org.batfish.common.BatfishException: Invalid question example_network/"
+    "__testRoutePolicies_00000000-0000-0000-0000-000000000000: Could not parse JSON question: "
+    "Cannot construct instance of `org.batfish.minesweeper.question.testroutepolicies.TestRoutePoliciesQuestion`\n"
+    "\tat org.batfish.coordinator.WorkMgr.uploadQuestion(WorkMgr.java:1402)\n"
+    "Caused by: java.lang.IllegalStateException: Expected BGP session properties\n"
+    "\tat java.base/jdk.internal.reflect.NativeConstructorAccessorImpl.newInstance0(Native Method)\n"
+    "\tat java.base/jdk.internal.reflect.NativeConstructorAccessorImpl.newInstance("
+    "NativeConstructorAccessorImpl.java:77)\n"
+    "\tat java.base@17.0.12/java.lang.reflect.Constructor.newInstance(Constructor.java:480)\n"
+    "\tat com.example.loader//org.batfish.minesweeper.question.testroutepolicies."
+    "TestRoutePoliciesQuestion.<init>(TestRoutePoliciesQuestion.java:90)\n"
+    "\t... 12 more\n"
+)
+STACK_MARKERS = ("\tat ", "at org.", "at com.", "at java.", "at [Source", "Exception:", "00000000-0000")
+
+
+def coordinator_response(status_code: int, body: str) -> requests.Response:
+    response = requests.Response()
+    response.status_code = status_code
+    response.reason = "Internal Server Error"
+    response.url = "http://batfish:9996/v2/networks/example_network/questions/__example"
+    response._content = body.encode("utf-8")
+    return response
 
 
 class BatfishQueryErrorClassificationTest(unittest.TestCase):
@@ -203,6 +315,31 @@ class BatfishQueryErrorClassificationTest(unittest.TestCase):
         self.assertLess(len(error.message), 300)
         self.assertEqual(error.error_type, "route_policy_constraint_no_match")
 
+    def test_work_log_with_jdk_module_frames_is_reduced_to_root_cause(self):
+        for message in (SANITIZED_WORK_LOG_FAILURE_JDK_FRAMES, SANITIZED_WORK_LOG_FAILURE_JDK_FRAMES_MULTILINE):
+            with self.subTest(message=message[:40]):
+                self.assertEqual(
+                    BatfishService._extract_batfish_root_cause(message),
+                    "Batfish work failed: Expected BGP session properties",
+                )
+
+    def test_route_policy_query_error_has_no_jdk_module_frames(self):
+        error = self.service._build_query_error(
+            "testRoutePolicies",
+            RuntimeError(SANITIZED_WORK_LOG_FAILURE_JDK_FRAMES),
+            query_params={"nodes": "r1"},
+        )
+
+        self.assertEqual(error.message, "Batfish work failed: Expected BGP session properties")
+        self.assertEqual(error.status_code, 400)
+        self.assertNotIn("java.base/", json.dumps({"message": error.message, "details": error.details}))
+
+    def test_innermost_cause_on_a_shared_line_is_the_root_cause(self):
+        self.assertEqual(
+            BatfishService._extract_batfish_root_cause(SANITIZED_WORK_LOG_FAILURE_NESTED_CAUSES),
+            "Batfish work failed: Expected BGP session properties",
+        )
+
     def test_constraint_failure_is_classified_as_constraint_no_match(self):
         error = self.service._build_query_error(
             "searchRoutePolicies",
@@ -351,6 +488,136 @@ class PybatfishHttpHardeningTest(unittest.TestCase):
             context.close()
         else:
             self.assertIsInstance(context, contextlib.nullcontext)
+
+
+class CoordinatorHttpErrorTest(unittest.TestCase):
+    def setUp(self):
+        self.service = BatfishService()
+
+    def raise_coordinator_error(self, status_code: int, body: str) -> requests.HTTPError:
+        with self.assertRaises(requests.HTTPError) as raised:
+            batfish_service_module._check_coordinator_response_status(coordinator_response(status_code, body))
+        return raised.exception
+
+    def assert_no_stack(self, text: str):
+        for marker in STACK_MARKERS:
+            self.assertNotIn(marker, text)
+
+    def test_reason_is_the_innermost_exception_message(self):
+        reason = batfish_service_module._extract_coordinator_error_reason(SANITIZED_COORDINATOR_CONFLICT_BODY)
+
+        self.assertEqual(reason, "perPath and pathOption cannot both be set (perPath is deprecated)")
+
+    def test_reason_keeps_the_jackson_reference_chain_without_source_location(self):
+        reason = batfish_service_module._extract_coordinator_error_reason(SANITIZED_COORDINATOR_ARRAY_BODY)
+
+        self.assertIn("Cannot deserialize value of type", reason)
+        self.assertIn('PacketHeaderConstraints["icmpTypes"]', reason)
+        self.assert_no_stack(reason)
+
+    def test_reason_drops_module_qualified_jdk_frames(self):
+        reason = batfish_service_module._extract_coordinator_error_reason(SANITIZED_COORDINATOR_JDK_FRAMES_BODY)
+
+        self.assertEqual(reason, "Expected BGP session properties")
+
+    def test_http_error_for_jdk_frames_carries_no_stack_trace(self):
+        error = self.raise_coordinator_error(500, SANITIZED_COORDINATOR_JDK_FRAMES_BODY)
+
+        self.assertEqual(str(error), "Batfish coordinator returned HTTP 500: Expected BGP session properties")
+        self.assert_no_stack(str(error))
+
+    def test_reason_of_an_empty_body_is_none(self):
+        self.assertIsNone(batfish_service_module._extract_coordinator_error_reason(""))
+        self.assertIsNone(batfish_service_module._extract_coordinator_error_reason(None))
+
+    def test_long_reasons_are_truncated(self):
+        reason = batfish_service_module._extract_coordinator_error_reason("x" * 2000)
+
+        self.assertLessEqual(len(reason), 503)
+
+    def test_http_error_carries_status_and_reason_but_no_stack_trace(self):
+        error = self.raise_coordinator_error(500, SANITIZED_COORDINATOR_CONFLICT_BODY)
+
+        self.assertEqual(
+            str(error),
+            "Batfish coordinator returned HTTP 500: perPath and pathOption cannot both be set (perPath is deprecated)",
+        )
+        self.assertEqual(error.response.status_code, 500)
+        self.assertNotIn("9996", str(error))
+
+    def test_successful_responses_do_not_raise(self):
+        batfish_service_module._check_coordinator_response_status(coordinator_response(200, "{}"))
+
+    def test_coordinator_500_is_a_502_with_the_batfish_reason_in_details(self):
+        error = self.service._build_query_error(
+            "searchRoutePolicies",
+            self.raise_coordinator_error(500, SANITIZED_COORDINATOR_CONFLICT_BODY),
+            query_params={"nodes": "r1", "perPath": False, "pathOption": "NON_OVERLAP"},
+        )
+
+        self.assertEqual(error.error_type, "batfish_coordinator_error")
+        self.assertEqual(error.status_code, 502)
+        self.assertEqual(error.details["batfish_status_code"], 500)
+        self.assertEqual(
+            error.details["reason"],
+            "perPath and pathOption cannot both be set (perPath is deprecated)",
+        )
+        self.assertIn("perPath and pathOption cannot both be set", error.message)
+        self.assert_no_stack(json.dumps({"message": error.message, "details": error.details}))
+
+    def test_wrapped_coordinator_errors_are_classified_from_the_message(self):
+        http_error = self.raise_coordinator_error(500, SANITIZED_COORDINATOR_ARRAY_BODY)
+        error = self.service._build_query_error("traceroute", RuntimeError(f"Unknown error: {http_error}"))
+
+        self.assertEqual(error.error_type, "batfish_coordinator_error")
+        self.assertIn('PacketHeaderConstraints["icmpTypes"]', error.details["reason"])
+
+    def test_coordinator_4xx_keeps_the_query_error_classification(self):
+        error = self.service._build_query_error(
+            "nodeProperties",
+            self.raise_coordinator_error(404, "Snapshot example not found"),
+        )
+
+        self.assertEqual(error.error_type, "query_error")
+        self.assertEqual(error.status_code, 400)
+        self.assertEqual(error.details["batfish_status_code"], 404)
+        self.assertEqual(error.details["reason"], "Snapshot example not found")
+
+    def test_route_response_exposes_the_reason_without_stack_trace(self):
+        query_error = self.service._build_query_error(
+            "searchRoutePolicies",
+            self.raise_coordinator_error(500, SANITIZED_COORDINATOR_CONFLICT_BODY),
+        )
+        client = app_module.app.test_client()
+
+        with mock.patch.object(app_module.batfish_service, "get_search_route_policies", side_effect=query_error):
+            response = client.post("/api/advanced/search-route-policies", json={"nodes": "r1"})
+
+        self.assertEqual(response.status_code, 502, response.get_data(as_text=True)[:300])
+        payload = response.get_json()
+        self.assertEqual(payload["code"], "batfish_coordinator_error")
+        self.assertEqual(
+            payload["details"]["reason"],
+            "perPath and pathOption cannot both be set (perPath is deprecated)",
+        )
+        self.assert_no_stack(response.get_data(as_text=True))
+
+    def test_pybatfish_status_check_and_retry_policy_return_the_last_response(self):
+        from pybatfish.client import restv2helper
+
+        self.assertIs(restv2helper._check_response_status, batfish_service_module._check_coordinator_response_status)
+        for http_session in (
+            restv2helper._requests_session,
+            restv2helper._requests_session_fail_fast,
+        ):
+            adapter = http_session.get_adapter("http://batfish:9996")
+            self.assertFalse(adapter.max_retries.raise_on_status)
+            self.assertIn(500, adapter.max_retries.status_forcelist)
+
+    def test_pybatfish_set_network_still_sees_the_404_response(self):
+        error = self.raise_coordinator_error(404, "Network not found")
+
+        self.assertEqual(error.response.status_code, 404)
 
 
 if __name__ == "__main__":

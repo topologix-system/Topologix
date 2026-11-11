@@ -14,6 +14,7 @@ import { Network, AlertCircle, CheckCircle, ArrowLeft } from 'lucide-react'
 import { authAPI } from '../services/api'
 import { APP_VERSION, IS_PRODUCTION } from '../constants'
 import { logger } from '../utils/logger'
+import { extractErrorMessage } from '../types/errors'
 
 export function PasswordResetRequestPage() {
   const { t } = useTranslation()
@@ -92,9 +93,7 @@ export function PasswordResetRequestPage() {
               >
                 <AlertCircle className="w-5 h-5 text-red-600 flex-shrink-0 mt-0.5" aria-hidden="true" />
                 <p className="text-sm text-red-800">
-                  {mutation.error instanceof Error
-                    ? mutation.error.message
-                    : t('passwordReset.error')}
+                  {extractErrorMessage(mutation.error, t('passwordReset.error'))}
                 </p>
               </div>
             )}

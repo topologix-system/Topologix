@@ -535,7 +535,7 @@ export function useCytoscapeLazy(config?: CytoscapeConfig): UseCytoscapeLazyRetu
 
   const exportPNG = useCallback(() => {
     if (!cyRef.current) return ''
-    return cyRef.current.png({ output: 'base64', full: true, scale: 2 })
+    return cyRef.current.png({ output: 'base64uri', full: true, scale: 2 })
   }, [])
 
   const exportJSON = useCallback(() => {

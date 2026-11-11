@@ -16,6 +16,7 @@ import { authAPI } from '../services/api'
 import { PasswordPolicyHelper } from '../components/PasswordPolicyHelper'
 import { APP_VERSION, IS_PRODUCTION } from '../constants'
 import { logger } from '../utils/logger'
+import { extractErrorMessage } from '../types/errors'
 
 export function PasswordResetPage() {
   const { t } = useTranslation()
@@ -39,7 +40,7 @@ export function PasswordResetPage() {
     onSuccess: () => {
       // Redirect to login after a brief delay
       setTimeout(() => {
-        navigate('/login', { state: { message: t('passwordReset.resetSuccess') } })
+        navigate('/login', { state: { message: 'passwordReset.resetSuccess' } })
       }, 2000)
     },
     onError: (error: any) => {
@@ -135,9 +136,7 @@ export function PasswordResetPage() {
               >
                 <AlertCircle className="w-5 h-5 text-red-600 flex-shrink-0 mt-0.5" aria-hidden="true" />
                 <p className="text-sm text-red-800">
-                  {mutation.error instanceof Error
-                    ? mutation.error.message
-                    : t('passwordReset.resetError')}
+                  {extractErrorMessage(mutation.error, t('passwordReset.resetError'))}
                 </p>
               </div>
             )}

@@ -6,10 +6,10 @@
  * - Links to registration and password reset flows for user convenience
  * - Displays app version in development mode only
  */
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import { useNavigate, useLocation, Link } from 'react-router-dom'
 import { useTranslation } from 'react-i18next'
-import { Network, AlertCircle } from 'lucide-react'
+import { Network, AlertCircle, CheckCircle } from 'lucide-react'
 import { useAuthStore } from '../store/useAuthStore'
 import { APP_VERSION, IS_PRODUCTION } from '../constants'
 import { logger } from '../utils/logger'
@@ -37,6 +37,31 @@ export function LoginPage() {
    * Preserves original route from ProtectedRoute or defaults to home
    */
   const from = (location.state as any)?.from?.pathname || '/'
+
+  /**
+   * i18n key of a success message passed in navigation state (e.g. after a password reset)
+   * Read once on mount so the banner survives the history-state cleanup below
+   */
+  const [successMessageKey] = useState<string | null>(() => {
+    const stateMessageKey = (location.state as { message?: unknown } | null)?.message
+    return typeof stateMessageKey === 'string' ? stateMessageKey : null
+  })
+  const successMessage = successMessageKey ? t(successMessageKey, { defaultValue: '' }) : ''
+
+  /**
+   * Drop the one-time message from history state so reload / back does not show the banner again
+   */
+  useEffect(() => {
+    const state = location.state as Record<string, unknown> | null
+    if (!state || typeof state !== 'object' || !('message' in state)) return
+
+    const remainingState = { ...state }
+    delete remainingState.message
+    navigate(
+      { pathname: location.pathname, search: location.search, hash: location.hash },
+      { replace: true, state: remainingState }
+    )
+  }, [location, navigate])
 
   /**
    * Handle login form submission
@@ -67,6 +92,16 @@ export function LoginPage() {
 
         {/* Login Form */}
         <form onSubmit={handleSubmit} className="space-y-6">
+          {successMessage && (
+            <div
+              className="bg-green-50 border border-green-200 rounded-lg p-3 flex items-start gap-2"
+              role="status"
+            >
+              <CheckCircle className="w-5 h-5 text-green-600 flex-shrink-0 mt-0.5" aria-hidden="true" />
+              <p className="text-sm text-green-800">{successMessage}</p>
+            </div>
+          )}
+
           {authModeMismatch && (
             <div
               className="bg-red-50 border border-red-200 rounded-lg p-3 flex items-start gap-2"

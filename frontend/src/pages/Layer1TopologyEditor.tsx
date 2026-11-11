@@ -1,6 +1,7 @@
 import { useState, useCallback } from 'react'
 import { useParams, Link } from 'react-router-dom'
 import { useTranslation } from 'react-i18next'
+import { AxiosError } from 'axios'
 import { ArrowLeft, Save, AlertCircle, CheckCircle } from 'lucide-react'
 import { Layer1ConnectionForm } from '../components/Layer1ConnectionForm'
 import { Layer1ConnectionTable } from '../components/Layer1ConnectionTable'
@@ -11,23 +12,30 @@ import {
   useSaveLayer1TopologyEditor,
 } from '../hooks'
 import type { Layer1Edge } from '../types/layer1'
+import { extractErrorMessage } from '../types/errors'
 
 export function Layer1TopologyEditor() {
   const { snapshotName } = useParams<{ snapshotName: string }>()
   const { t } = useTranslation()
 
-  const { data: topology, isLoading: topologyLoading } = useLayer1TopologyEditor(
-    snapshotName || '',
-    !!snapshotName
-  )
-  const { data: interfaces, isLoading: interfacesLoading } = useSnapshotInterfacesList(
-    snapshotName || '',
-    !!snapshotName
-  )
+  const {
+    data: topology,
+    isLoading: topologyLoading,
+    isLoadingError: topologyLoadFailed,
+    error: topologyError,
+  } = useLayer1TopologyEditor(snapshotName || '', !!snapshotName)
+  const {
+    data: interfaces,
+    isLoading: interfacesLoading,
+    isLoadingError: interfacesLoadFailed,
+    error: interfacesError,
+  } = useSnapshotInterfacesList(snapshotName || '', !!snapshotName)
   const saveMutation = useSaveLayer1TopologyEditor()
 
   const [localEdges, setLocalEdges] = useState<Layer1Edge[]>([])
   const [editingIndex, setEditingIndex] = useState<number | null>(null)
+  // Remount key of the connection form: changes when an edit starts or ends, not when the edited row shifts
+  const [formSession, setFormSession] = useState(0)
   const [hasChanges, setHasChanges] = useState(false)
   const [saveSuccess, setSaveSuccess] = useState(false)
 
@@ -43,6 +51,7 @@ export function Layer1TopologyEditor() {
         newEdges[editingIndex] = edge
         setLocalEdges(newEdges)
         setEditingIndex(null)
+        setFormSession((session) => session + 1)
       } else {
         setLocalEdges([...currentEdges, edge])
       }
@@ -52,9 +61,14 @@ export function Layer1TopologyEditor() {
     [localEdges, editingIndex, hasChanges, topology?.edges]
   )
 
-  const handleEditConnection = useCallback((_edge: Layer1Edge, index: number) => {
-    setEditingIndex(index)
-  }, [])
+  const handleEditConnection = useCallback(
+    (_edge: Layer1Edge, index: number) => {
+      if (index === editingIndex) return
+      setEditingIndex(index)
+      setFormSession((session) => session + 1)
+    },
+    [editingIndex]
+  )
 
   const handleDeleteConnection = useCallback(
     (index: number) => {
@@ -65,6 +79,9 @@ export function Layer1TopologyEditor() {
       setSaveSuccess(false)
       if (editingIndex === index) {
         setEditingIndex(null)
+        setFormSession((session) => session + 1)
+      } else if (editingIndex !== null && index < editingIndex) {
+        setEditingIndex(editingIndex - 1)
       }
     },
     [localEdges, editingIndex, hasChanges, topology?.edges]
@@ -72,6 +89,7 @@ export function Layer1TopologyEditor() {
 
   const handleCancelEdit = useCallback(() => {
     setEditingIndex(null)
+    setFormSession((session) => session + 1)
   }, [])
 
   const handleSaveAll = useCallback(() => {
@@ -104,6 +122,7 @@ export function Layer1TopologyEditor() {
   }
 
   const isLoading = topologyLoading || interfacesLoading
+  const loadError = topologyLoadFailed ? topologyError : interfacesLoadFailed ? interfacesError : null
 
   if (isLoading) {
     return (
@@ -114,6 +133,13 @@ export function Layer1TopologyEditor() {
         </div>
       </div>
     )
+  }
+
+  const getLoadErrorMessage = (error: unknown) => {
+    const status = error instanceof AxiosError ? error.response?.status : undefined
+    if (status === 403) return t('layer1Editor.errors.accessDenied', { name: snapshotName })
+    if (status === 404) return t('layer1Editor.errors.notFound', { name: snapshotName })
+    return extractErrorMessage(error, t('layer1Editor.errors.unknown'))
   }
 
   return (
@@ -137,29 +163,31 @@ export function Layer1TopologyEditor() {
             </div>
           </div>
 
-          <div className="flex items-center gap-3">
-            {saveSuccess && (
-              <div className="flex items-center gap-2 px-3 py-1 bg-green-50 text-green-700 rounded-md">
-                <CheckCircle className="w-4 h-4" />
-                <span className="text-sm">{t('layer1Editor.saved')}</span>
-              </div>
-            )}
+          {!loadError && (
+            <div className="flex items-center gap-3">
+              {saveSuccess && (
+                <div className="flex items-center gap-2 px-3 py-1 bg-green-50 text-green-700 rounded-md">
+                  <CheckCircle className="w-4 h-4" />
+                  <span className="text-sm">{t('layer1Editor.saved')}</span>
+                </div>
+              )}
 
-            {hasChanges && (
-              <span className="text-sm text-orange-600">
-                {t('layer1Editor.unsavedChanges')}
-              </span>
-            )}
+              {hasChanges && (
+                <span className="text-sm text-orange-600">
+                  {t('layer1Editor.unsavedChanges')}
+                </span>
+              )}
 
-            <button
-              onClick={handleSaveAll}
-              disabled={!hasChanges || saveMutation.isPending}
-              className="inline-flex items-center gap-2 px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:bg-gray-300 disabled:cursor-not-allowed"
-            >
-              <Save className="w-4 h-4" />
-              {saveMutation.isPending ? t('layer1Editor.saving') : t('layer1Editor.saveAll')}
-            </button>
-          </div>
+              <button
+                onClick={handleSaveAll}
+                disabled={!hasChanges || saveMutation.isPending}
+                className="inline-flex items-center gap-2 px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:bg-gray-300 disabled:cursor-not-allowed"
+              >
+                <Save className="w-4 h-4" />
+                {saveMutation.isPending ? t('layer1Editor.saving') : t('layer1Editor.saveAll')}
+              </button>
+            </div>
+          )}
         </div>
 
         {saveMutation.isError && (
@@ -171,9 +199,7 @@ export function Layer1TopologyEditor() {
                   {t('layer1Editor.errors.saveFailed')}
                 </p>
                 <p className="text-sm text-red-700 mt-1">
-                  {saveMutation.error instanceof Error
-                    ? saveMutation.error.message
-                    : t('layer1Editor.errors.unknown')}
+                  {extractErrorMessage(saveMutation.error, t('layer1Editor.errors.unknown'))}
                 </p>
               </div>
             </div>
@@ -181,33 +207,53 @@ export function Layer1TopologyEditor() {
         )}
       </header>
 
-      <div className="flex-1 overflow-hidden">
-        <div className="grid grid-cols-12 gap-6 p-6 h-full">
-          <div className="col-span-3 overflow-y-auto">
-            <Layer1DeviceList
-              interfaces={interfaces}
-              isLoading={interfacesLoading}
-            />
-          </div>
-
-          <div className="col-span-6 overflow-y-auto space-y-6">
-            <Layer1ConnectionTable
-              edges={displayEdges}
-              onEdit={handleEditConnection}
-              onDelete={handleDeleteConnection}
-            />
-          </div>
-
-          <div className="col-span-3 overflow-y-auto">
-            <Layer1ConnectionForm
-              interfaces={interfaces}
-              editingEdge={editingEdge}
-              onSubmit={handleAddConnection}
-              onCancel={handleCancelEdit}
-            />
+      {loadError ? (
+        <div className="flex-1 overflow-y-auto p-6">
+          <div
+            className="max-w-xl mx-auto mt-12 p-6 bg-white border border-red-200 rounded-lg shadow"
+            role="alert"
+          >
+            <div className="flex gap-3">
+              <AlertCircle className="w-6 h-6 text-red-600 flex-shrink-0" aria-hidden="true" />
+              <div className="flex-1">
+                <h2 className="text-base font-semibold text-red-800">
+                  {t('layer1Editor.errors.loadFailed')}
+                </h2>
+                <p className="text-sm text-red-700 mt-1">{getLoadErrorMessage(loadError)}</p>
+              </div>
+            </div>
           </div>
         </div>
-      </div>
+      ) : (
+        <div className="flex-1 overflow-hidden">
+          <div className="grid grid-cols-12 gap-6 p-6 h-full">
+            <div className="col-span-3 overflow-y-auto">
+              <Layer1DeviceList
+                interfaces={interfaces}
+                isLoading={interfacesLoading}
+              />
+            </div>
+
+            <div className="col-span-6 overflow-y-auto space-y-6">
+              <Layer1ConnectionTable
+                edges={displayEdges}
+                onEdit={handleEditConnection}
+                onDelete={handleDeleteConnection}
+              />
+            </div>
+
+            <div className="col-span-3 overflow-y-auto">
+              <Layer1ConnectionForm
+                key={formSession}
+                interfaces={interfaces}
+                editingEdge={editingEdge}
+                onSubmit={handleAddConnection}
+                onCancel={handleCancelEdit}
+              />
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   )
 }

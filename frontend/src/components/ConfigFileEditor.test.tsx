@@ -67,6 +67,25 @@ describe('ConfigFileEditor', () => {
     expect(loadNetworkConfigCodeMirror).not.toHaveBeenCalled()
   })
 
+  it('keeps the CRLF line breaks of a CRLF file when the textarea fallback is edited', () => {
+    const onDraftChange = vi.fn()
+    render(
+      <ConfigFileEditor
+        filename="router.cfg"
+        draft={'hostname router1\r\ninterface Ethernet0\r\n'}
+        forceFallback
+        onDraftChange={onDraftChange}
+        onSave={vi.fn()}
+        onCancel={vi.fn()}
+      />
+    )
+
+    const textarea = screen.getByRole('textbox', { name: /plain text editor for router\.cfg/i }) as HTMLTextAreaElement
+    expect(textarea.value).toBe('hostname router1\ninterface Ethernet0\n')
+    fireEvent.change(textarea, { target: { value: 'hostname router2\ninterface Ethernet0\n' } })
+    expect(onDraftChange).toHaveBeenCalledWith('hostname router2\r\ninterface Ethernet0\r\n')
+  })
+
   it('renders textarea fallback when the CodeMirror dynamic import rejects', async () => {
     const onSave = vi.fn()
     render(

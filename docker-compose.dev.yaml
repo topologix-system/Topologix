@@ -38,6 +38,8 @@ services:
       - FLASK_DEBUG=${FLASK_DEBUG:-False}
       - BATFISH_HOST=${BATFISH_HOST:-batfish}
       - BATFISH_PORT=${BATFISH_PORT:-9996}
+      # Explicitly pass the per-query timeout into the backend container.
+      - BATFISH_QUERY_TIMEOUT_SECONDS=${BATFISH_QUERY_TIMEOUT_SECONDS:-120}
       - CORS_ORIGINS=${CORS_ORIGINS:-http://localhost:3000,http://127.0.0.1:3000}
       - AUTH_ENABLED=${AUTH_ENABLED:-false}
       - AUTH_DEFAULT_ADMIN_USER=${AUTH_DEFAULT_ADMIN_USER:-admin}

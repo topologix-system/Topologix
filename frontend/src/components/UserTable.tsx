@@ -56,22 +56,22 @@ export function UserTable({ users, currentUserId, onDelete, isDeleting }: UserTa
           <thead className="bg-gray-50 border-b border-gray-200">
             <tr>
               <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                ID
+                {t('users.table.id')}
               </th>
               <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                {t('register.username')}
+                {t('users.table.username')}
               </th>
               <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                {t('register.email')}
+                {t('users.table.email')}
               </th>
               <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                Roles
+                {t('users.table.roles')}
               </th>
               <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                {t('common.status')}
+                {t('users.table.status')}
               </th>
               <th className="px-6 py-3 text-right text-xs font-medium text-gray-500 uppercase tracking-wider">
-                Actions
+                {t('users.table.actions')}
               </th>
             </tr>
           </thead>
@@ -83,10 +83,10 @@ export function UserTable({ users, currentUserId, onDelete, isDeleting }: UserTa
                   <div className="flex items-center gap-2">
                     <span className="text-sm font-medium text-gray-900">{user.username}</span>
                     {user.is_superuser && (
-                      <Shield className="w-4 h-4 text-primary-600" aria-label="Superuser" />
+                      <Shield className="w-4 h-4 text-primary-600" aria-label={t('users.superuser')} />
                     )}
                     {user.id === currentUserId && (
-                      <span className="text-xs text-primary-600 font-medium">(You)</span>
+                      <span className="text-xs text-primary-600 font-medium">{t('users.youMarker')}</span>
                     )}
                   </div>
                   {user.full_name && (
@@ -110,12 +110,12 @@ export function UserTable({ users, currentUserId, onDelete, isDeleting }: UserTa
                   {user.is_active ? (
                     <span className="inline-flex items-center gap-1 px-2 py-1 rounded-full text-xs font-medium bg-green-100 text-green-800">
                       <CheckCircle className="w-3 h-3" aria-hidden="true" />
-                      Active
+                      {t('users.active')}
                     </span>
                   ) : (
                     <span className="inline-flex items-center gap-1 px-2 py-1 rounded-full text-xs font-medium bg-red-100 text-red-800">
                       <XCircle className="w-3 h-3" aria-hidden="true" />
-                      Inactive
+                      {t('users.inactive')}
                     </span>
                   )}
                 </td>
@@ -126,7 +126,7 @@ export function UserTable({ users, currentUserId, onDelete, isDeleting }: UserTa
                         onClick={() => handleDeleteConfirm(user.id)}
                         disabled={isDeleting}
                         className="text-red-600 hover:text-red-900 disabled:opacity-50 disabled:cursor-not-allowed"
-                        aria-label="Confirm delete"
+                        aria-label={t('users.confirmDeleteAria')}
                       >
                         {t('common.confirm')}
                       </button>
@@ -134,7 +134,7 @@ export function UserTable({ users, currentUserId, onDelete, isDeleting }: UserTa
                         onClick={handleDeleteCancel}
                         disabled={isDeleting}
                         className="text-gray-600 hover:text-gray-900 disabled:opacity-50 disabled:cursor-not-allowed"
-                        aria-label="Cancel delete"
+                        aria-label={t('users.cancelDeleteAria')}
                       >
                         {t('common.cancel')}
                       </button>
@@ -144,7 +144,7 @@ export function UserTable({ users, currentUserId, onDelete, isDeleting }: UserTa
                       <Link
                         to={`/admin/users/${user.id}/edit`}
                         className="text-gray-600 hover:text-gray-900 transition-colors"
-                        aria-label={`Edit user ${user.username}`}
+                        aria-label={t('users.editUserAria', { name: user.username })}
                         title={t('users.editUser')}
                       >
                         <Edit2 className="w-4 h-4" aria-hidden="true" />
@@ -153,7 +153,7 @@ export function UserTable({ users, currentUserId, onDelete, isDeleting }: UserTa
                         onClick={() => handleDeleteClick(user.id)}
                         disabled={user.id === currentUserId || isDeleting}
                         className="text-red-600 hover:text-red-900 disabled:opacity-30 disabled:cursor-not-allowed"
-                        aria-label={`Delete user ${user.username}`}
+                        aria-label={t('users.deleteUserAria', { name: user.username })}
                         title={
                           user.id === currentUserId
                             ? t('users.cannotDeleteSelf')

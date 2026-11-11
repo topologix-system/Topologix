@@ -151,3 +151,17 @@ export interface Route {
   admin_distance?: number
   tag?: number
 }
+
+export interface LpmRoute {
+  node: string
+  vrf: string
+  ip: string
+  network: string
+  num_routes: number | null
+  /** @deprecated lpmRoutes has no such column */
+  next_hop: string
+  /** @deprecated lpmRoutes has no such column */
+  next_hop_interface: string | null
+  /** @deprecated lpmRoutes has no such column */
+  protocol: string
+}

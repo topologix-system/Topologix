@@ -221,7 +221,7 @@ def seed_admin_user(
         print(f"\n{'=' * 60}")
         print(f"  GENERATED ADMIN PASSWORD (save securely):")
         print(f"  {admin_password}")
-        print(f"{'=' * 60}\n")
+        print(f"{'=' * 60}\n", flush=True)
 
     # Create admin user
     admin_user = User(

@@ -31,6 +31,7 @@ import {
   useUserProvidedLayer1Edges,
 } from '../../hooks'
 import { getStructuredApiError, type StructuredApiError } from '../../utils/apiError'
+import type { LpmRoute } from '../../types'
 
 type MutationLike = {
   data?: unknown
@@ -95,6 +96,31 @@ type ResultKey =
   | 'comparePeerGroups'
   | 'a10VirtualServers'
   | 'userLayer1Edges'
+
+type LpmRouteDisplay = Pick<LpmRoute, 'node' | 'vrf' | 'ip' | 'network' | 'num_routes'>
+
+export function projectLpmRoutesForDisplay(routes: LpmRoute[]): LpmRouteDisplay[] {
+  return routes.map(({ node, vrf, ip, network, num_routes }) => ({
+    node,
+    vrf,
+    ip,
+    network,
+    num_routes,
+  }))
+}
+
+export const ROUTE_POLICY_PATH_OPTIONS = ['SINGLE', 'PER_PATH', 'NON_OVERLAP'] as const
+
+/**
+ * Mutually exclusive searchRoutePolicies path parameters: pathOption when selected, otherwise perPath only when checked
+ */
+export function buildRoutePolicyPathParams(perPath: boolean, pathOption: string): { perPath?: boolean; pathOption?: string } {
+  const option = pathOption.trim()
+  if (option) {
+    return { pathOption: option }
+  }
+  return perPath ? { perPath: true } : {}
+}
 
 function parseJsonObject(value: string, fieldKey: string, messages: ValidationMessages): { value?: object; error?: ValidationError } {
   if (!value.trim()) {
@@ -349,7 +375,7 @@ export function BatfishFeatureTools() {
   const [outputConstraints, setOutputConstraints] = useState('')
   const [perPath, setPerPath] = useState(false)
   const [pathOption, setPathOption] = useState('')
-  const [testDirection, setTestDirection] = useState('IN')
+  const [testDirection, setTestDirection] = useState('in')
   const [testInputRoutes, setTestInputRoutes] = useState('')
   const [testNodes, setTestNodes] = useState('')
   const [testPolicies, setTestPolicies] = useState('')
@@ -406,7 +432,13 @@ export function BatfishFeatureTools() {
     resolveIps: { title: t('batfishTools.results.resolveIps'), mutation: resolveIps },
     resolveIpsOfLocation: { title: t('batfishTools.results.resolveIpsOfLocation'), mutation: resolveIpsOfLocation },
     compareFilters: { title: t('batfishTools.results.compareFilters'), mutation: compareFilters },
-    lpmRoutes: { title: t('batfishTools.results.lpmRoutes'), mutation: lpmRoutes },
+    lpmRoutes: {
+      title: t('batfishTools.results.lpmRoutes'),
+      mutation: {
+        ...lpmRoutes,
+        data: lpmRoutes.data === undefined ? undefined : projectLpmRoutesForDisplay(lpmRoutes.data),
+      },
+    },
     prefixTracer: { title: t('batfishTools.results.prefixTracer'), mutation: prefixTracer },
     bidirectionalReachability: { title: t('batfishTools.results.bidirectionalReachability'), mutation: bidirectionalReachability },
     searchRoutePolicies: { title: t('batfishTools.results.searchRoutePolicies'), mutation: searchRoutePolicies },
@@ -487,8 +519,7 @@ export function BatfishFeatureTools() {
       policies: routePolicyPolicies.trim() || undefined,
       inputConstraints: input.value,
       outputConstraints: output.value,
-      perPath,
-      pathOption: pathOption.trim() || undefined,
+      ...buildRoutePolicyPathParams(perPath, pathOption),
     })
   }
 
@@ -767,12 +798,17 @@ export function BatfishFeatureTools() {
                     <textarea className={textareaClass} rows={3} value={outputConstraints} onChange={(event) => setOutputConstraints(event.target.value)} />
                   </Field>
                   <Field label={t('batfishTools.fields.pathOption')}>
-                    <input className={textInputClass} value={pathOption} onChange={(event) => setPathOption(event.target.value)} />
+                    <select className={textInputClass} value={pathOption} disabled={perPath} onChange={(event) => setPathOption(event.target.value)}>
+                      <option value="">{t('batfishTools.options.pathOptionNone')}</option>
+                      {ROUTE_POLICY_PATH_OPTIONS.map((option) => (
+                        <option key={option} value={option}>{option}</option>
+                      ))}
+                    </select>
                   </Field>
                 </div>
                 <div className={checkboxActionRowClass}>
                   <label className={checkboxLabelClass}>
-                    <input type="checkbox" checked={perPath} onChange={(event) => setPerPath(event.target.checked)} />
+                    <input type="checkbox" checked={perPath} disabled={pathOption !== ''} onChange={(event) => setPerPath(event.target.checked)} />
                     {t('batfishTools.checkboxes.perPath')}
                   </label>
                   <button type="button" className={buttonClass} disabled={searchRoutePolicies.isPending} onClick={runSearchRoutePolicies}>
@@ -787,8 +823,8 @@ export function BatfishFeatureTools() {
                 <div className="grid gap-3 md:grid-cols-2">
                   <Field label={t('batfishTools.fields.testDirection')}>
                     <select className={textInputClass} value={testDirection} onChange={(event) => setTestDirection(event.target.value)}>
-                      <option value="IN">{t('batfishTools.options.in')}</option>
-                      <option value="OUT">{t('batfishTools.options.out')}</option>
+                      <option value="in">{t('batfishTools.options.in')}</option>
+                      <option value="out">{t('batfishTools.options.out')}</option>
                     </select>
                   </Field>
                   <Field label={t('batfishTools.fields.testNodes')}>

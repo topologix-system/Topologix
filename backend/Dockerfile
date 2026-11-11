@@ -3,6 +3,9 @@ FROM python:3.11.11-slim
 
 WORKDIR /app
 
+# Unbuffered stdout/stderr for container logs
+ENV PYTHONUNBUFFERED=1
+
 # Install system dependencies (libmagic for python-magic, gosu for privilege dropping)
 RUN apt-get update && \
     apt-get install -y --no-install-recommends libmagic1 gosu && \

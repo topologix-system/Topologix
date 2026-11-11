@@ -5,6 +5,7 @@
 import { useQuery, useMutation } from '@tanstack/react-query'
 import { topologyAPI } from '../services/api'
 import { useSnapshotStore } from '../store'
+import type { LpmRoute } from '../types'
 
 const inactiveSnapshotKey = 'no-active-snapshot'
 const snapshotSegment = (snapshotName: string | null) => snapshotName ?? inactiveSnapshotKey
@@ -179,7 +180,7 @@ export function useIPSpaceAssignment(enabled = true) {
  */
 export function useLpmRoutes() {
   return useMutation({
-    mutationFn: (request: { ip: string; nodes?: string | string[]; vrfs?: string | string[] }) =>
+    mutationFn: (request: { ip: string; nodes?: string | string[]; vrfs?: string | string[] }): Promise<LpmRoute[]> =>
       topologyAPI.getLpmRoutes(request),
   })
 }

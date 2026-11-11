@@ -47,6 +47,14 @@ ALLOWED_MIME_TYPES = {
 }
 MAX_FILE_SIZE = 10 * 1024 * 1024  # 10MB
 
+
+class RequestValidationError(ValueError):
+    """Request input rejected by validation; field names the offending input when known."""
+
+    def __init__(self, message: str, field: Optional[str] = None):
+        super().__init__(message)
+        self.field = field
+
 # Dangerous patterns in file content
 DANGEROUS_PATTERNS = [
     re.compile(rb'<\s*script', re.IGNORECASE),
@@ -396,17 +404,17 @@ def validate_json_input(data: dict, required_fields: List[str],
         Validated data dictionary
 
     Raises:
-        ValueError: If validation fails
+        RequestValidationError: If validation fails
     """
     if not isinstance(data, dict):
-        raise ValueError("Input must be a JSON object")
+        raise RequestValidationError("Input must be a JSON object")
 
     validated = {}
 
     # Check required fields
     for field in required_fields:
         if field not in data:
-            raise ValueError(f"Missing required field: {field}")
+            raise RequestValidationError(f"Missing required field: {field}", field=field)
         validated[field] = data[field]
 
     # Check optional fields

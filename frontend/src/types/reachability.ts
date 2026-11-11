@@ -25,10 +25,11 @@ export interface TracerouteRequest {
     srcPorts?: string
     dstPorts?: string
     applications?: string[]
-    icmpTypes?: number[]
-    icmpCodes?: number[]
-    dscps?: number[]
-    ecns?: number[]
+    /** Batfish integer space string ("0,8", "0-63") or list of values */
+    icmpTypes?: string | number[]
+    icmpCodes?: string | number[]
+    dscps?: string | number[]
+    ecns?: string | number[]
     packetLengths?: string
   }
   /** Ingress device/interface where the trace starts (Batfish query param) */
@@ -43,8 +44,10 @@ export interface TracerouteFlow {
   ipProtocol?: string
   srcPort?: number
   dstPort?: number
-  icmpType?: number
-  icmpCode?: number
+  /** ICMP type field Batfish reports in flows; icmpType is null there */
+  icmpVar?: number | null
+  icmpType?: number | null
+  icmpCode?: number | null
   dscp?: number
   ecn?: number
   packetLength?: number

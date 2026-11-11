@@ -300,12 +300,14 @@ function FilterLineReachabilitySection() {
   const [isOpen, setIsOpen] = useState(false)
   const [filters, setFilters] = useState('')
   const [nodes, setNodes] = useState('')
+  const [ignoreComposites, setIgnoreComposites] = useState(false)
   const mutation = useFilterLineReachability()
 
   const handleExecute = () => {
-    const request: { filters?: string; nodes?: string[] } = {}
+    const request: { filters?: string; nodes?: string[]; ignoreComposites?: boolean } = {}
     if (filters.trim()) request.filters = filters.trim()
     if (nodes.trim()) request.nodes = nodes.split(',').map(n => n.trim()).filter(Boolean)
+    if (ignoreComposites) request.ignoreComposites = true
     mutation.mutate(Object.keys(request).length > 0 ? request : undefined)
   }
 
@@ -354,6 +356,15 @@ function FilterLineReachabilitySection() {
               ) : t('analysis.acl.execute')}
             </button>
           </div>
+          <label className="mb-3 flex w-fit items-center gap-2 text-sm text-gray-700">
+            <input
+              type="checkbox"
+              checked={ignoreComposites}
+              onChange={(e) => setIgnoreComposites(e.target.checked)}
+              className="rounded border-gray-300 text-primary-600 focus:ring-primary-600"
+            />
+            {t('analysis.acl.ignoreComposites')}
+          </label>
           {mutation.isError && <StructuredErrorNotice error={getStructuredApiError(mutation.error)} />}
           {mutation.isSuccess && (
             hasData ? (

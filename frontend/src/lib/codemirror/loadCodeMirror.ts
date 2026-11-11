@@ -1,4 +1,5 @@
 import type { Extension } from '@codemirror/state'
+import { detectLineSeparator, type LineSeparator } from './lineSeparator'
 
 export interface CodeMirrorBundle {
   createState: (doc: string, onChange: (value: string) => void) => import('@codemirror/state').EditorState
@@ -14,7 +15,7 @@ export async function loadNetworkConfigCodeMirror(): Promise<CodeMirrorBundle> {
     import('./networkConfigLanguage'),
   ])
 
-  const createExtensions = (onChange: (value: string) => void): Extension[] => [
+  const createExtensions = (onChange: (value: string) => void, lineSeparator: LineSeparator): Extension[] => [
     viewModule.lineNumbers(),
     viewModule.highlightActiveLineGutter(),
     viewModule.highlightSpecialChars(),
@@ -34,7 +35,8 @@ export async function loadNetworkConfigCodeMirror(): Promise<CodeMirrorBundle> {
     viewModule.EditorView.lineWrapping,
     viewModule.EditorView.updateListener.of((update) => {
       if (update.docChanged) {
-        onChange(update.state.doc.toString())
+        const { doc } = update.state
+        onChange(doc.sliceString(0, doc.length, lineSeparator))
       }
     }),
     viewModule.EditorView.theme({
@@ -73,7 +75,7 @@ export async function loadNetworkConfigCodeMirror(): Promise<CodeMirrorBundle> {
     createState: (doc: string, onChange: (value: string) => void) =>
       stateModule.EditorState.create({
         doc,
-        extensions: createExtensions(onChange),
+        extensions: createExtensions(onChange, detectLineSeparator(doc)),
       }),
     EditorView: viewModule.EditorView,
   }

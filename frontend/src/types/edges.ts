@@ -29,8 +29,8 @@ export interface BGPEdge {
   local_ip: string
   remote_asn: string
   local_asn: string
-  import_policy: string[]
-  export_policy: string[]
+  import_policy?: string[]
+  export_policy?: string[]
 }
 
 export interface VXLANEdge {

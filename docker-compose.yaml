@@ -43,6 +43,8 @@ services:
       # Batfish Service
       - BATFISH_HOST=${BATFISH_HOST:-batfish}
       - BATFISH_PORT=${BATFISH_PORT:-9996}
+      # Explicitly pass the per-query timeout into the backend container.
+      - BATFISH_QUERY_TIMEOUT_SECONDS=${BATFISH_QUERY_TIMEOUT_SECONDS:-120}
 
       # CORS origins for API access
       # Include localhost and common LAN access patterns

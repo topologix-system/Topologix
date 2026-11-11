@@ -4,7 +4,8 @@
  */
 import React, { Suspense, lazy, useEffect, useMemo, useRef } from 'react'
 import ReactDOM from 'react-dom/client'
-import { createBrowserRouter, createHashRouter, Navigate, RouterProvider } from 'react-router-dom'
+import { createBrowserRouter, createHashRouter, Navigate, RouterProvider, type RouteObject } from 'react-router-dom'
+import { useTranslation } from 'react-i18next'
 import { QueryClient, QueryClientProvider, useQueryClient } from '@tanstack/react-query'
 import { runtimeConfig } from './config/runtimeConfig'
 import { authAPI } from './services/api'
@@ -176,167 +177,196 @@ function SidebarPopoutRoute() {
   )
 }
 
-const router = RouterFactory([
-  {
-    path: '/login',
-    element: (
-      <Suspense fallback={<RouteLoadingFallback />}>
-        <LoginPage />
-      </Suspense>
-    ),
-  },
-  {
-    path: '/register',
-    element: (
-      <Suspense fallback={<RouteLoadingFallback />}>
-        <RegisterPage />
-      </Suspense>
-    ),
-  },
-  {
-    path: '/password-reset-request',
-    element: (
-      <Suspense fallback={<RouteLoadingFallback />}>
-        <PasswordResetRequestPage />
-      </Suspense>
-    ),
-  },
-  {
-    path: '/password-reset/:token',
-    element: (
-      <Suspense fallback={<RouteLoadingFallback />}>
-        <PasswordResetPage />
-      </Suspense>
-    ),
-  },
-  {
-    path: '/',
-    element: (
-      <Suspense fallback={<RouteLoadingFallback />}>
-        <ProtectedRoute>
-          <Layout />
-        </ProtectedRoute>
-      </Suspense>
-    ),
-    children: [
-      {
-        index: true,
-        element: (
-          <Suspense fallback={<RouteLoadingFallback />}>
-            <TopologyView />
-          </Suspense>
-        ),
-      },
-    ],
-  },
-  {
-    path: '/snapshots',
-    element: (
-      <Suspense fallback={<RouteLoadingFallback />}>
-        <ProtectedRoute>
-          <SnapshotManagement />
-        </ProtectedRoute>
-      </Suspense>
-    ),
-  },
-  {
-    path: '/profile',
-    element: (
-      <Suspense fallback={<RouteLoadingFallback />}>
-        <ProtectedRoute>
-          <ProfilePage />
-        </ProtectedRoute>
-      </Suspense>
-    ),
-  },
-  ...(authEnabled ? [
+/**
+ * Application error screen shown instead of the router's default error page
+ */
+function RouteErrorPage() {
+  const { t } = useTranslation()
+
+  return (
+    <div className="min-h-screen flex items-center justify-center bg-gray-50 px-4">
+      <div className="max-w-md w-full bg-white rounded-lg shadow p-8 text-center" role="alert">
+        <h1 className="text-xl font-semibold text-gray-900">{t('routeError.title')}</h1>
+        <p className="mt-2 text-sm text-gray-700">{t('routeError.message')}</p>
+        <a
+          href={import.meta.env.BASE_URL}
+          className="inline-block mt-6 px-4 py-2 bg-primary-600 text-white rounded-lg hover:bg-primary-700 focus:outline-none focus:ring-2 focus:ring-primary-600 focus:ring-offset-2"
+        >
+          {t('routeError.backHome')}
+        </a>
+      </div>
+    </div>
+  )
+}
+
+/**
+ * Route table; auth-only pages redirect to / when authentication is disabled
+ */
+export function buildRoutes(authEnabled: boolean): RouteObject[] {
+  const authOnly = (element: React.ReactNode) => (authEnabled ? element : <Navigate to="/" replace />)
+
+  return [
     {
-      path: '/admin/users',
-      element: (
-        <Suspense fallback={<RouteLoadingFallback />}>
-          <ProtectedRoute>
-            <UserManagementPage />
-          </ProtectedRoute>
-        </Suspense>
-      ),
+      errorElement: <RouteErrorPage />,
+      children: [
+        {
+          path: '/login',
+          element: authOnly(
+            <Suspense fallback={<RouteLoadingFallback />}>
+              <LoginPage />
+            </Suspense>
+          ),
+        },
+        {
+          path: '/register',
+          element: authOnly(
+            <Suspense fallback={<RouteLoadingFallback />}>
+              <RegisterPage />
+            </Suspense>
+          ),
+        },
+        {
+          path: '/password-reset-request',
+          element: authOnly(
+            <Suspense fallback={<RouteLoadingFallback />}>
+              <PasswordResetRequestPage />
+            </Suspense>
+          ),
+        },
+        {
+          path: '/password-reset/:token',
+          element: authOnly(
+            <Suspense fallback={<RouteLoadingFallback />}>
+              <PasswordResetPage />
+            </Suspense>
+          ),
+        },
+        {
+          path: '/password-reset',
+          element: authOnly(
+            <Suspense fallback={<RouteLoadingFallback />}>
+              <PasswordResetPage />
+            </Suspense>
+          ),
+        },
+        {
+          path: '/',
+          element: (
+            <Suspense fallback={<RouteLoadingFallback />}>
+              <ProtectedRoute>
+                <Layout />
+              </ProtectedRoute>
+            </Suspense>
+          ),
+          children: [
+            {
+              index: true,
+              element: (
+                <Suspense fallback={<RouteLoadingFallback />}>
+                  <TopologyView />
+                </Suspense>
+              ),
+            },
+          ],
+        },
+        {
+          path: '/snapshots',
+          element: (
+            <Suspense fallback={<RouteLoadingFallback />}>
+              <ProtectedRoute>
+                <SnapshotManagement />
+              </ProtectedRoute>
+            </Suspense>
+          ),
+        },
+        {
+          path: '/profile',
+          element: authOnly(
+            <Suspense fallback={<RouteLoadingFallback />}>
+              <ProtectedRoute>
+                <ProfilePage />
+              </ProtectedRoute>
+            </Suspense>
+          ),
+        },
+        {
+          path: '/admin/users',
+          element: authOnly(
+            <Suspense fallback={<RouteLoadingFallback />}>
+              <ProtectedRoute>
+                <UserManagementPage />
+              </ProtectedRoute>
+            </Suspense>
+          ),
+        },
+        {
+          path: '/admin/users/:id/edit',
+          element: authOnly(
+            <Suspense fallback={<RouteLoadingFallback />}>
+              <ProtectedRoute>
+                <UserEditPage />
+              </ProtectedRoute>
+            </Suspense>
+          ),
+        },
+        {
+          path: '/admin/security-logs',
+          element: authOnly(
+            <Suspense fallback={<RouteLoadingFallback />}>
+              <ProtectedRoute>
+                <SecurityLogsPage />
+              </ProtectedRoute>
+            </Suspense>
+          ),
+        },
+        {
+          path: '/admin/snapshot-migrations',
+          element: authOnly(
+            <Suspense fallback={<RouteLoadingFallback />}>
+              <ProtectedRoute>
+                <SnapshotOwnerMigrationPage />
+              </ProtectedRoute>
+            </Suspense>
+          ),
+        },
+        {
+          path: '/sidebar-popout',
+          element: (
+            <Suspense fallback={<RouteLoadingFallback />}>
+              <SidebarPopoutRoute />
+            </Suspense>
+          ),
+        },
+        {
+          path: '/snapshots/:snapshotName/layer1-editor',
+          element: (
+            <Suspense fallback={<RouteLoadingFallback />}>
+              <ProtectedRoute>
+                <Layer1TopologyEditor />
+              </ProtectedRoute>
+            </Suspense>
+          ),
+        },
+        {
+          path: '/snapshots/compare',
+          element: (
+            <Suspense fallback={<RouteLoadingFallback />}>
+              <ProtectedRoute>
+                <SnapshotComparison />
+              </ProtectedRoute>
+            </Suspense>
+          ),
+        },
+        {
+          path: '*',
+          element: <Navigate to="/" replace />,
+        },
+      ],
     },
-    {
-      path: '/admin/users/:id/edit',
-      element: (
-        <Suspense fallback={<RouteLoadingFallback />}>
-          <ProtectedRoute>
-            <UserEditPage />
-          </ProtectedRoute>
-        </Suspense>
-      ),
-    },
-    {
-      path: '/admin/security-logs',
-      element: (
-        <Suspense fallback={<RouteLoadingFallback />}>
-          <ProtectedRoute>
-            <SecurityLogsPage />
-          </ProtectedRoute>
-        </Suspense>
-      ),
-    },
-    {
-      path: '/admin/snapshot-migrations',
-      element: (
-        <Suspense fallback={<RouteLoadingFallback />}>
-          <ProtectedRoute>
-            <SnapshotOwnerMigrationPage />
-          </ProtectedRoute>
-        </Suspense>
-      ),
-    },
-  ] : [
-    {
-      path: '/admin/users',
-      element: <Navigate to="/" replace />,
-    },
-    {
-      path: '/admin/users/:id/edit',
-      element: <Navigate to="/" replace />,
-    },
-    {
-      path: '/admin/security-logs',
-      element: <Navigate to="/" replace />,
-    },
-    {
-      path: '/admin/snapshot-migrations',
-      element: <Navigate to="/" replace />,
-    },
-  ]),
-  {
-    path: '/sidebar-popout',
-    element: (
-      <Suspense fallback={<RouteLoadingFallback />}>
-        <SidebarPopoutRoute />
-      </Suspense>
-    ),
-  },
-  {
-    path: '/snapshots/:snapshotName/layer1-editor',
-    element: (
-      <Suspense fallback={<RouteLoadingFallback />}>
-        <ProtectedRoute>
-          <Layer1TopologyEditor />
-        </ProtectedRoute>
-      </Suspense>
-    ),
-  },
-  {
-    path: '/snapshots/compare',
-    element: (
-      <Suspense fallback={<RouteLoadingFallback />}>
-        <ProtectedRoute>
-          <SnapshotComparison />
-        </ProtectedRoute>
-      </Suspense>
-    ),
-  },
-])
+  ]
+}
+
+const router = RouterFactory(buildRoutes(authEnabled))
 
 ReactDOM.createRoot(document.getElementById('root')!).render(
   // StrictMode intentionally double-mounts components in development

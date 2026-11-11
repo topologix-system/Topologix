@@ -1205,9 +1205,9 @@ class SnapshotService:
         return normalized
 
     def _write_rancid_format_override(self, file_path: Path, format_override: Optional[str]) -> dict[str, Any]:
-        """Atomically add, replace, or remove the first-line Batfish RANCID header."""
+        """Atomically add, replace, or remove the first-line Batfish RANCID header, keeping line endings."""
         try:
-            content = file_path.read_text(encoding='utf-8')
+            content = file_path.read_bytes().decode('utf-8')
         except UnicodeDecodeError as exc:
             raise ValueError("Snapshot file must be UTF-8 text") from exc
 
@@ -1232,6 +1232,7 @@ class SnapshotService:
             with tempfile.NamedTemporaryFile(
                 mode='w',
                 encoding='utf-8',
+                newline='',
                 dir=str(file_path.parent),
                 prefix=f".{file_path.name}.",
                 suffix='.tmp',
@@ -1612,6 +1613,7 @@ class SnapshotService:
             with tempfile.NamedTemporaryFile(
                 mode='w',
                 encoding='utf-8',
+                newline='',
                 dir=str(file_path.parent),
                 prefix=f".{file_path.name}.",
                 suffix='.tmp',
@@ -2407,20 +2409,8 @@ class SnapshotService:
             auth_enabled=auth_enabled,
         )
 
-        # Check if snapshot is already initialized
-        # Only initialize if different snapshot or not initialized
-        if batfish_service.current_snapshot_name != safe_name:
-            logger.info(f"Initializing snapshot '{safe_name}' for Layer1 editor")
-            batfish_service.initialize_network(str(snapshot_path), snapshot_name=safe_name)
-
-            # After initialization, call node_properties first to ensure Batfish parsing is complete
-            # This gives Batfish time to fully analyze the snapshot before querying interfaces
-            _ = batfish_service.get_node_properties()
-        else:
-            logger.debug(f"Using existing Batfish session for snapshot '{safe_name}'")
-
-        # Get interface properties from Batfish
-        interfaces_data = batfish_service.get_interface_properties()
+        # A snapshot other than the active one is loaded and queried by name without activating it
+        interfaces_data = batfish_service.get_snapshot_interface_properties(snapshot_path, safe_name)
 
         # Group interfaces by hostname
         result = {}

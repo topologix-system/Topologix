@@ -18,7 +18,7 @@ import gc
 import logging
 import re
 import sys
-from typing import Any, Callable
+from typing import Any, Callable, NoReturn
 from pathlib import Path
 
 import pandas as pd
@@ -54,8 +54,103 @@ _PYBATFISH_RETRY_TOTAL = 3
 _PYBATFISH_RETRY_BACKOFF_FACTOR = 0.3
 
 
+def _normalize_json_scalar(value: Any) -> Any:
+    """Convert a pandas/NumPy scalar into a JSON-safe Python scalar."""
+    try:
+        if pd.isna(value):
+            return None
+    except (TypeError, ValueError):
+        pass
+
+    item = getattr(value, "item", None)
+    if callable(item):
+        try:
+            return item()
+        except (TypeError, ValueError):
+            pass
+    return value
+
+
+def _join_text_values(values: Any) -> str | None:
+    """Join a Batfish list cell into one comma-separated string."""
+    if not isinstance(values, (list, tuple, set)) or not values:
+        return None
+    return ", ".join(str(value) for value in values)
+
+
+# A Java stack frame target: an optional module or class-loader prefix such as
+# 'java.base/' or 'app//', then the qualified method name, '<init>' or '<clinit>'
+# included, and the opening parenthesis.
+_JAVA_STACK_FRAME_TARGET = r"(?:[\w.$@+-]*/)*[A-Za-z_$][\w.$]*(?:<(?:cl)?init>)?\("
+_JAVA_STACK_FRAME_LINE = re.compile(rf"^\s*at {_JAVA_STACK_FRAME_TARGET}")
+JAVA_STACK_FRAME_IN_TEXT = re.compile(rf"\s+at\s+{_JAVA_STACK_FRAME_TARGET}")
+_JAVA_OMITTED_FRAMES_LINE = re.compile(r"^\s*\.\.\. \d+ (?:more|common frames omitted)")
+_JAVA_EXCEPTION_PREFIX = re.compile(r"^(?:[A-Za-z_$][\w$]*\.)*[A-Za-z_$][\w$]*(?:Exception|Error):\s*")
+_JACKSON_SOURCE_LOCATION = re.compile(r"\s*at \[Source: [^\]]*\]")
+_UUID_TEXT = re.compile(r"\b[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}\b")
+_COORDINATOR_ERROR_REASON_LIMIT = 500
+_COORDINATOR_HTTP_ERROR = re.compile(r"Batfish coordinator returned HTTP (\d{3})(?:: (.*))?", re.DOTALL)
+
+
+def _extract_coordinator_error_reason(body: str | None) -> str | None:
+    """Reduce a Batfish coordinator error body to its innermost exception message without stack frames."""
+    if not body or not body.strip():
+        return None
+
+    blocks: list[list[str]] = []
+    current: list[str] | None = None
+    for line in body.splitlines():
+        stripped = line.strip()
+        if _JAVA_STACK_FRAME_LINE.match(line) or _JAVA_OMITTED_FRAMES_LINE.match(line):
+            current = None
+            continue
+        if stripped.startswith("Caused by: "):
+            current = [stripped[len("Caused by: "):]]
+            blocks.append(current)
+        elif not blocks:
+            current = [stripped]
+            blocks.append(current)
+        elif current is not None:
+            current.append(stripped)
+
+    if not blocks:
+        return None
+
+    reason = _JACKSON_SOURCE_LOCATION.sub("", " ".join(blocks[-1]))
+    reason = _JAVA_EXCEPTION_PREFIX.sub("", reason.strip())
+    reason = re.sub(r"^Invalid question \S+: ", "", reason)
+    reason = _UUID_TEXT.sub("[id]", " ".join(reason.split()))
+    if not reason:
+        return None
+    if len(reason) > _COORDINATOR_ERROR_REASON_LIMIT:
+        reason = reason[:_COORDINATOR_ERROR_REASON_LIMIT] + "..."
+    return reason
+
+
+def _coordinator_http_error_message(response: Any) -> str:
+    """Describe a failed coordinator response by status code and Batfish reason."""
+    message = f"Batfish coordinator returned HTTP {getattr(response, 'status_code', 'error')}"
+    reason = _extract_coordinator_error_reason(getattr(response, "text", None))
+    return f"{message}: {reason}" if reason else message
+
+
+def _check_coordinator_response_status(response: Any) -> None:
+    """Raise HTTPError for a failed coordinator response, carrying the Batfish reason instead of its stack trace."""
+    from requests import HTTPError
+
+    try:
+        response.raise_for_status()
+    except HTTPError as e:
+        raise HTTPError(_coordinator_http_error_message(response), response=response) from e
+
+
 def _configure_pybatfish_retries() -> None:
-    """Cap pybatfish's HTTP retry policy so coordinator errors fail fast."""
+    """Cap pybatfish's HTTP retry policy so coordinator errors fail fast.
+
+    Exhausted status retries return the last coordinator response instead of
+    raising MaxRetryError, so the Batfish error body reaches the HTTPError
+    raised by the response status check.
+    """
     try:
         from requests.adapters import HTTPAdapter
         from urllib3 import Retry
@@ -66,6 +161,8 @@ def _configure_pybatfish_retries() -> None:
             restv2helper._requests_session,
             restv2helper._requests_session_fail_fast,
         )
+        if not callable(getattr(restv2helper, "_check_response_status", None)):
+            raise AttributeError("pybatfish restv2helper._check_response_status is unavailable")
 
         retry = Retry(
             total=_PYBATFISH_RETRY_TOTAL,
@@ -74,7 +171,9 @@ def _configure_pybatfish_retries() -> None:
             backoff_factor=_PYBATFISH_RETRY_BACKOFF_FACTOR,
             allowed_methods=None,
             status_forcelist=[429, 500, 502, 503, 504],
+            raise_on_status=False,
         )
+        restv2helper._check_response_status = _check_coordinator_response_status
         for http_session in http_sessions:
             adapter = HTTPAdapter(max_retries=retry)
             http_session.mount("http://", adapter)
@@ -93,6 +192,9 @@ def _configure_pybatfish_retries() -> None:
 
 
 _configure_pybatfish_retries()
+
+
+BATFISH_NOT_INITIALIZED_MESSAGE = "Batfish session not initialized. Call initialize_network() first."
 
 
 class BatfishQueryError(RuntimeError):
@@ -116,6 +218,14 @@ class BatfishQueryError(RuntimeError):
         self.status_code = status_code
 
 
+class BatfishSnapshotLoadError(RuntimeError):
+    """Batfish work log of a snapshot that Batfish rejected while it was loaded for queries by name."""
+
+    def __init__(self, snapshot_name: str, message: str):
+        super().__init__(message)
+        self.snapshot_name = snapshot_name
+
+
 class BatfishService:
     """Service for interacting with Batfish network analysis"""
 
@@ -136,6 +246,23 @@ class BatfishService:
     _BGP_STANDARD_COMMUNITY_LITERAL = re.compile(r"^(\d+):(\d+)$")
     _BGP_LARGE_COMMUNITY_LITERAL = re.compile(r"^(\d+):(\d+):(\d+)$")
 
+    # HeaderConstraints fields that Batfish parses as IntegerSpace strings such as "0,8" or "0-8",
+    # mapped to the largest value Batfish accepts for the field (the smallest is 0)
+    _HEADER_INTEGER_SPACE_FIELDS = {
+        "srcPorts": 65535,
+        "dstPorts": 65535,
+        "icmpCodes": 255,
+        "icmpTypes": 255,
+        "dscps": 63,
+        "ecns": 3,
+        "packetLengths": 65535,
+        "fragmentOffsets": 8191,
+    }
+    # One IntegerSpace item: a value or a low-high range, optionally prefixed with '!' to exclude it
+    _HEADER_INTEGER_SPACE_ATOM = re.compile(r"(!?)(\d+)(?:\s*-\s*(\d+))?")
+    # Longest IntegerSpace bound converted to int; longer digit strings exceed every field maximum
+    _HEADER_INTEGER_SPACE_MAX_DIGITS = 10
+
     _SECRET_ERROR_KEY_PATTERN = re.compile(
         r"""(["']?[A-Za-z0-9_.-]*(?:password|secret|token|communities|community)[A-Za-z0-9_.-]*["']?)(\s*(?::|=)\s*|\s+)""",
         re.IGNORECASE,
@@ -147,6 +274,7 @@ class BatfishService:
         self.current_snapshot_name: str | None = None
         self.reference_snapshot_name: str | None = None
         self._initialized = False
+        self._query_snapshot_name: str | None = None
         self._batfish_version: str | None = None
 
     @property
@@ -188,8 +316,6 @@ class BatfishService:
             if snapshot_name is None:
                 snapshot_name = snapshot_path.name
 
-            self.current_snapshot_name = snapshot_name
-
             # Initialize network
             self.session.set_network(self.network_name)
             logger.info(f"Network set to: {self.network_name}")
@@ -204,6 +330,7 @@ class BatfishService:
             )
             logger.info(f"Snapshot initialized: {snapshot_name}")
 
+            self.current_snapshot_name = snapshot_name
             self._initialized = True
 
             # Get parse status
@@ -237,8 +364,65 @@ class BatfishService:
             raise
 
     def _ensure_initialized(self):
-        if not self._initialized:
-            raise RuntimeError("Batfish session not initialized. Call initialize_network() first.")
+        if not self._initialized and self._query_snapshot_name is None:
+            raise RuntimeError(BATFISH_NOT_INITIALIZED_MESSAGE)
+
+    def clear_active_snapshot(self) -> None:
+        """Forget the active snapshot so analysis queries report an uninitialized session."""
+        self.current_snapshot_name = None
+        self._initialized = False
+
+    def _load_snapshot(self, snapshot_dir: str | Path, snapshot_name: str) -> None:
+        """Parse a snapshot in Batfish without changing the active snapshot."""
+        snapshot_path = Path(snapshot_dir)
+        if not snapshot_path.exists():
+            raise FileNotFoundError(f"Snapshot directory not found: {snapshot_dir}")
+
+        session = self.session
+        previous_snapshot = session.snapshot
+        session.set_network(self.network_name)
+        self._cache_batfish_version()
+        try:
+            session.init_snapshot(str(snapshot_path), name=snapshot_name, overwrite=True)
+        except Exception as e:
+            if "Work terminated abnormally" in str(e):
+                raise BatfishSnapshotLoadError(snapshot_name, str(e)) from e
+            raise
+        finally:
+            session.snapshot = previous_snapshot
+        logger.info("Snapshot loaded without activation: %s", snapshot_name)
+
+    def _load_snapshot_unless_active(self, snapshot_dir: str | Path, snapshot_name: str) -> None:
+        """Parse a snapshot for queries by name, reusing the active snapshot Batfish already holds."""
+        if self._initialized and self.current_snapshot_name == snapshot_name:
+            logger.debug("Using the active Batfish snapshot '%s' without reloading", snapshot_name)
+            return
+        self._load_snapshot(snapshot_dir, snapshot_name)
+
+    @contextlib.contextmanager
+    def _query_snapshot_scope(self, snapshot_name: str):
+        """Point queries at a loaded snapshot while the active snapshot state stays unchanged."""
+        session = self.session
+        previous_snapshot = session.snapshot
+        previous_query_snapshot = self._query_snapshot_name
+        session.snapshot = snapshot_name
+        self._query_snapshot_name = snapshot_name
+        try:
+            yield
+        finally:
+            session.snapshot = previous_snapshot
+            self._query_snapshot_name = previous_query_snapshot
+
+    def get_snapshot_interface_properties(self, snapshot_dir: str | Path, snapshot_name: str) -> list[dict[str, Any]]:
+        """Get interface properties of a snapshot without changing the active snapshot."""
+        if self._initialized and self.current_snapshot_name == snapshot_name:
+            logger.debug("Using the active Batfish snapshot '%s'", snapshot_name)
+            return self.get_interface_properties(ospf_interfaces=[])
+
+        logger.info("Loading snapshot '%s' for interface lookup without activating it", snapshot_name)
+        self._load_snapshot(snapshot_dir, snapshot_name)
+        with self._query_snapshot_scope(snapshot_name):
+            return self.get_interface_properties(ospf_interfaces=[])
 
     def _cache_batfish_version(self) -> None:
         """Cache the Batfish server version while a session is already in use."""
@@ -485,18 +669,23 @@ class BatfishService:
         if "Work terminated abnormally" not in message:
             return message
 
-        causes = re.findall(r"Caused by: ([^\n]+)", message)
+        # Each cause ends at the next 'Caused by: ' so that causes sharing one
+        # physical line are listed separately.
+        causes = re.findall(r"Caused by: ((?:(?!Caused by: )[^\n])+)", message)
         if not causes:
             return message
 
         root_cause = causes[-1].strip()
         # Some Batfish answers embed the Java stack trace as JSON-encoded
         # strings on one physical line, so also cut at the first stack frame
-        # ('at package.Class.method(File.java:NN)') and drop the JSON quoting
-        # left at the boundary.
-        root_cause = re.split(r"\s+at\s+[A-Za-z_$][\w.$]*\(", root_cause)[0]
+        # ('at package.Class.method(File.java:NN)', or with a module prefix such
+        # as 'at java.base/java.lang.Thread.run(Thread.java:NN)') and drop the
+        # JSON quoting left at the boundary.
+        root_cause = JAVA_STACK_FRAME_IN_TEXT.split(root_cause)[0]
         root_cause = root_cause.rstrip().rstrip('",').rstrip()
-        root_cause = re.sub(r"^[A-Za-z0-9_.$]+(?:Exception|Error):\s*", "", root_cause)
+        # Wrapped exceptions repeat the class name of the inner exception
+        # ('java.lang.IllegalStateException: java.lang.IllegalStateException: ...').
+        root_cause = re.sub(r"^(?:[A-Za-z0-9_.$]+(?:Exception|Error):\s*)+", "", root_cause)
         if not root_cause:
             return message
         if len(root_cause) > 500:
@@ -527,8 +716,21 @@ class BatfishService:
         has_constraint_params = bool(query_params) and any(
             query_params.get(key) for key in ("inputConstraints", "outputConstraints")
         )
+        coordinator_match = _COORDINATOR_HTTP_ERROR.search(message)
+        coordinator_status = int(coordinator_match.group(1)) if coordinator_match else None
+        coordinator_reason = (
+            (coordinator_match.group(2) or "").strip() or None if coordinator_match else None
+        )
 
-        if any(token in normalized for token in ("timed out", "timeout")):
+        if coordinator_status is not None and coordinator_status >= 500:
+            error_type = "batfish_coordinator_error"
+            status_code = 502
+            hints = [
+                "Batfish rejected the request with a server error; details.reason carries the Batfish message.",
+                "Verify the query parameters, especially route constraint syntax, before retrying.",
+                "Check Batfish service health if this persists for valid inputs.",
+            ]
+        elif any(token in normalized for token in ("timed out", "timeout")):
             error_type = "query_timeout"
             status_code = 504
             hints = [
@@ -586,6 +788,10 @@ class BatfishService:
         details: dict[str, Any] = {"query": query_name}
         if query_params:
             details["parameters"] = self._sanitize_error_detail(self._safe_serialize(query_params))
+        if coordinator_status is not None:
+            details["batfish_status_code"] = coordinator_status
+            if coordinator_reason:
+                details["reason"] = coordinator_reason
 
         return BatfishQueryError(
             query_name=query_name,
@@ -876,6 +1082,154 @@ class BatfishService:
                 "large community parts must be within 0-4294967295",
             )
 
+    def _normalize_header_constraints(self, query_name: str, headers: Any) -> Any:
+        """Validate HeaderConstraints integer fields and convert them into the comma-separated strings Batfish parses.
+
+        Each field takes a string such as "0,8" or "0-8", a non-negative
+        integer, or a list of them. Every item must be a value or a low-high
+        range (optionally prefixed with '!') within the field's Batfish range.
+        Blank items are dropped, and a field left without items is removed.
+        A field whose exclusions leave no value is rejected; as in Batfish,
+        a field with exclusions only excludes them from the field's range.
+        """
+        if not isinstance(headers, dict):
+            return headers
+
+        normalized = dict(headers)
+        for field, maximum in self._HEADER_INTEGER_SPACE_FIELDS.items():
+            value = normalized.get(field)
+            if value is None:
+                continue
+            if isinstance(value, str) or self._is_non_negative_int(value):
+                items = [value]
+            elif isinstance(value, (list, tuple)):
+                items = list(value)
+            else:
+                self._raise_invalid_header_constraint(query_name, field, value)
+
+            atoms: list[str] = []
+            included: list[tuple[int, int]] = []
+            excluded: list[tuple[int, int]] = []
+            for item in items:
+                if self._is_non_negative_int(item):
+                    raw_atoms = [str(item)]
+                elif isinstance(item, str):
+                    raw_atoms = item.split(",")
+                else:
+                    self._raise_invalid_header_constraint(query_name, field, value)
+                for raw_atom in raw_atoms:
+                    atom = raw_atom.strip()
+                    if atom:
+                        text, is_exclusion, low, high = self._validated_integer_space_atom(
+                            query_name, field, value, atom, maximum
+                        )
+                        atoms.append(text)
+                        (excluded if is_exclusion else included).append((low, high))
+            if not atoms:
+                del normalized[field]
+                continue
+            if self._integer_ranges_cover(excluded, included or [(0, maximum)]):
+                self._raise_invalid_header_constraint(
+                    query_name, field, value,
+                    f"no value within the allowed range 0-{maximum} remains after the exclusions",
+                )
+            normalized[field] = ",".join(atoms)
+        return normalized
+
+    @staticmethod
+    def _integer_ranges_cover(covering: list[tuple[int, int]], ranges: list[tuple[int, int]]) -> bool:
+        """Return True when the inclusive integer ranges in covering contain every value of ranges."""
+        merged: list[list[int]] = []
+        for low, high in sorted(covering):
+            if merged and low <= merged[-1][1] + 1:
+                merged[-1][1] = max(merged[-1][1], high)
+            else:
+                merged.append([low, high])
+        return all(
+            any(merged_low <= low and high <= merged_high for merged_low, merged_high in merged)
+            for low, high in ranges
+        )
+
+    def _validated_integer_space_atom(
+        self,
+        query_name: str,
+        field: str,
+        value: Any,
+        atom: str,
+        maximum: int,
+    ) -> tuple[str, bool, int, int]:
+        """Return one IntegerSpace item in canonical form with its exclusion flag and bounds.
+
+        Raises BatfishQueryError when Batfish would reject the item.
+        """
+        match = self._HEADER_INTEGER_SPACE_ATOM.fullmatch(atom)
+        shown = atom if len(atom) <= 40 else atom[:40] + "..."
+        if match is None:
+            self._raise_invalid_header_constraint(
+                query_name, field, value,
+                f"\"{shown}\" is not a value or range such as \"8\" or \"0-8\"",
+            )
+        exclusion, low_text, high_text = match.groups()
+        # Leading zeros are dropped so only significant digits count toward the digit limit
+        low_text = low_text.lstrip("0") or "0"
+        if high_text is not None:
+            high_text = high_text.lstrip("0") or "0"
+        if any(
+            len(text) > self._HEADER_INTEGER_SPACE_MAX_DIGITS
+            for text in (low_text, high_text)
+            if text is not None
+        ):
+            self._raise_invalid_header_constraint(
+                query_name, field, value,
+                f"\"{shown}\" is outside the allowed range 0-{maximum}",
+            )
+        low = int(low_text)
+        high = int(high_text) if high_text is not None else low
+        if high > maximum:
+            self._raise_invalid_header_constraint(
+                query_name, field, value,
+                f"\"{shown}\" is outside the allowed range 0-{maximum}",
+            )
+        if low > high:
+            self._raise_invalid_header_constraint(
+                query_name, field, value,
+                f"range \"{shown}\" starts above its end",
+            )
+        text = f"{exclusion}{low}" if high_text is None else f"{exclusion}{low}-{high}"
+        return text, bool(exclusion), low, high
+
+    @staticmethod
+    def _is_non_negative_int(value: Any) -> bool:
+        return isinstance(value, int) and not isinstance(value, bool) and value >= 0
+
+    def _raise_invalid_header_constraint(
+        self,
+        query_name: str,
+        field: str,
+        value: Any,
+        reason: str | None = None,
+    ) -> NoReturn:
+        parameter_key = f"headers.{field}"
+        maximum = self._HEADER_INTEGER_SPACE_FIELDS[field]
+        raise BatfishQueryError(
+            query_name=query_name,
+            message=f"Invalid {parameter_key}: " + (
+                reason
+                or "expected a string such as \"0,8\" or \"0-8\", a non-negative integer, or a list of them"
+            ),
+            error_type="header_constraint_invalid",
+            details={
+                "query": query_name,
+                "parameters": self._sanitize_error_detail({parameter_key: self._safe_serialize(value)}),
+                "allowed_range": f"0-{maximum}",
+            },
+            hints=[
+                "Send integer header fields as comma-separated values and ranges, for example \"0,8\" or \"1024-65535\".",
+                f"Values of {parameter_key} must be within 0-{maximum}.",
+            ],
+            status_code=400,
+        )
+
     def _unavailable_capability(
         self,
         capability: str,
@@ -930,13 +1284,24 @@ class BatfishService:
         return nodes
 
     # ========== Query 2: Interface Properties ==========
-    def get_interface_properties(self) -> list[dict[str, Any]]:
-        """Get interface properties for all interfaces"""
+    def get_interface_properties(
+        self, ospf_interfaces: list[dict[str, Any]] | None = None
+    ) -> list[dict[str, Any]]:
+        """Get interface properties for all interfaces
+
+        Args:
+            ospf_interfaces: Already fetched ospfInterfaceConfiguration rows (OSPFInterfaceConfig.to_dict());
+                the OSPF settings are queried from Batfish when omitted
+        """
         self._ensure_initialized()
 
         df = self._execute_query(self.session.q.interfaceProperties(), "interfaceProperties")
         if df is None:
             return []
+
+        if ospf_interfaces is None:
+            ospf_interfaces = [i.to_dict() for i in self.get_ospf_interface_configuration()]
+        ospf_by_interface = {ospf.get("interface"): ospf for ospf in ospf_interfaces}
 
         interfaces = []
         for _, row in df.iterrows():
@@ -955,6 +1320,7 @@ class BatfishService:
             else:
                 interface_name = interface_str
 
+            ospf = ospf_by_interface.get(interface_str, {})
             interface_data = {
                 "hostname": hostname,
                 "interface": interface_name,
@@ -977,29 +1343,36 @@ class BatfishService:
                 "interface_type": row.get("Interface_Type", ""),
                 "mtu": row.get("MTU", 1500),
                 "native_vlan": row.get("Native_VLAN"),
-                "ospf_area_name": row.get("OSPF_Area_Name"),
-                "ospf_cost": row.get("OSPF_Cost"),
-                "ospf_enabled": row.get("OSPF_Enabled", False),
-                "ospf_network_type": row.get("OSPF_Network_Type"),
-                "ospf_passive": row.get("OSPF_Passive", False),
+                "ospf_area_name": _normalize_json_scalar(ospf.get("ospf_area_name")),
+                "ospf_cost": _normalize_json_scalar(ospf.get("ospf_cost")),
+                "ospf_enabled": bool(_normalize_json_scalar(ospf.get("ospf_enabled"))),
+                "ospf_network_type": _normalize_json_scalar(ospf.get("ospf_network_type")),
+                "ospf_passive": bool(_normalize_json_scalar(ospf.get("ospf_passive"))),
                 "outgoing_filter_name": row.get("Outgoing_Filter_Name"),
                 "primary_address": self._convert_ip_network_to_string(row.get("Primary_Address")),
                 "primary_network": self._convert_ip_network_to_string(row.get("Primary_Network")),
                 "proxy_arp": row.get("Proxy_ARP", False),
-                "rip_enabled": row.get("RIP_Enabled", False),
-                "rip_passive": row.get("RIP_Passive", False),
+                "rip_enabled": bool(_normalize_json_scalar(row.get("Rip_Enabled"))),
+                "rip_passive": bool(_normalize_json_scalar(row.get("Rip_Passive"))),
                 "speed": row.get("Speed"),
                 "switchport": row.get("Switchport", False),
                 "switchport_mode": row.get("Switchport_Mode", ""),
                 "switchport_trunk_encapsulation": row.get("Switchport_Trunk_Encapsulation", ""),
-                "vlan": row.get("VLAN"),
+                "vlan": self._interface_vlan(row),
                 "vrf": row.get("VRF", "default"),
-                "zone": row.get("Zone"),
+                "zone": _normalize_json_scalar(row.get("Zone_Name")),
             }
             interfaces.append(interface_data)
 
         del df  # Free DataFrame memory
         return interfaces
+
+    @staticmethod
+    def _interface_vlan(row: Any) -> Any:
+        """Return the access VLAN of an access-mode switchport, else the encapsulation VLAN of a subinterface, else None."""
+        if str(row.get("Switchport_Mode") or "").upper() == "ACCESS":
+            return _normalize_json_scalar(row.get("Access_VLAN"))
+        return _normalize_json_scalar(row.get("Encapsulation_VLAN"))
 
     # ========== Query 3: Routes ==========
     def get_routes(self) -> list[dict[str, Any]]:
@@ -1547,6 +1920,7 @@ class BatfishService:
             headers: Optional flow headers specification
         """
         self._ensure_initialized()
+        headers = self._normalize_header_constraints("reachability", headers)
 
         query_params: dict[str, Any] = {}
         if headers is not None:
@@ -1668,29 +2042,49 @@ class BatfishService:
         return aaa_configs
 
     # ========== Query 22b: SNMP Community Clients ==========
-    def get_snmp_community_clients(self) -> list[dict[str, Any]]:
-        """Get SNMP community configuration for security validation."""
+    @staticmethod
+    def _mask_snmp_community(community: str) -> str:
+        """Mask an SNMP community string, keeping only its first character."""
+        return f"{community[0]}***" if len(community) > 1 else "***"
+
+    def get_snmp_community_clients(
+        self, named_structures: list[dict[str, Any]] | None = None
+    ) -> list[dict[str, Any]]:
+        """Get SNMP communities (masked) and the access list that limits their clients.
+
+        Args:
+            named_structures: Already fetched namedStructures rows (NamedStructure.to_dict());
+                the VRF structures are queried from Batfish when omitted
+        """
         self._ensure_initialized()
 
-        try:
-            df = self._execute_query(self.session.q.snmpCommunityClients(), "snmpCommunityClients")
+        if named_structures is None:
+            df = self._execute_query(self.session.q.namedStructures(structureTypes="VRF"), "namedStructures")
             if df is None:
                 return []
+            vrf_definitions = [(row.get("Node", ""), row.get("Structure_Definition")) for _, row in df.iterrows()]
+            del df  # Free DataFrame memory
+        else:
+            vrf_definitions = [
+                (structure.get("node", ""), structure.get("structure_definition"))
+                for structure in named_structures
+                if structure.get("structure_type") == "VRF"
+            ]
 
-            snmp_configs = []
-            for _, row in df.iterrows():
+        snmp_configs = []
+        for node, definition in vrf_definitions:
+            snmp_server = definition.get("snmpServer") if isinstance(definition, dict) else None
+            communities = snmp_server.get("communities") if isinstance(snmp_server, dict) else None
+            for community_name, community in (communities.items() if isinstance(communities, dict) else ()):
+                access_list = community.get("accessList") if isinstance(community, dict) else None
                 snmp_data = {
-                    "node": row.get("Node", ""),
-                    "community": row.get("Community", ""),
-                    "client_ips": row.get("Client_IPs", []),
+                    "node": node,
+                    "community": self._mask_snmp_community(str(community_name)),
+                    "client_ips": [access_list] if isinstance(access_list, str) and access_list else [],
                 }
                 snmp_configs.append(snmp_data)
 
-            del df  # Free DataFrame memory
-            return snmp_configs
-        except AttributeError:
-            logger.warning("snmpCommunityClients() method not available in this pybatfish version")
-            return []
+        return snmp_configs
 
     # ========== Query 23-27: BGP Analysis ==========
     def get_bgp_edges(self, raise_on_error: bool = True) -> list[dict[str, Any]]:
@@ -1713,11 +2107,9 @@ class BatfishService:
                 "remote_node": row.get("Remote_Node", ""),
                 "remote_interface": str(row.get("Remote_Interface")) if row.get("Remote_Interface") else None,
                 "remote_ip": row.get("Remote_IP", ""),
-                "local_ip": row.get("Local_IP", ""),
-                "remote_asn": row.get("Remote_AS", ""),
-                "local_asn": row.get("Local_AS", ""),
-                "import_policy": row.get("Import_Policy", []),
-                "export_policy": row.get("Export_Policy", []),
+                "local_ip": _normalize_json_scalar(row.get("IP")),
+                "remote_asn": _normalize_json_scalar(row.get("Remote_AS_Number")),
+                "local_asn": _normalize_json_scalar(row.get("AS_Number")),
             }
             edges.append(edge_data)
 
@@ -1873,6 +2265,7 @@ class BatfishService:
 
         rib_entries = []
         for _, row in df.iterrows():
+            originator_id = _normalize_json_scalar(row.get("Originator_Id"))
             rib_data = {
                 "node": row.get("Node", ""),
                 "vrf": row.get("VRF", "default"),
@@ -1880,11 +2273,11 @@ class BatfishService:
                 "next_hop_ip": row.get("Next_Hop_IP", ""),
                 "protocol": row.get("Protocol", ""),
                 "as_path": row.get("AS_Path", []),
-                "local_preference": row.get("Local_Preference"),
-                "med": row.get("MED"),
+                "local_preference": _normalize_json_scalar(row.get("Local_Pref")),
+                "med": _normalize_json_scalar(row.get("Metric")),
                 "origin_protocol": row.get("Origin_Protocol", ""),
                 "origin_type": row.get("Origin_Type", ""),
-                "originator_id": row.get("Originator_ID", ""),
+                "originator_id": "" if originator_id is None else originator_id,
                 "received_from_ip": row.get("Received_From_IP", ""),
                 "tag": row.get("Tag"),
                 "weight": row.get("Weight"),
@@ -1900,6 +2293,7 @@ class BatfishService:
     def test_filters(self, headers=None, nodes=None, filters=None, startLocation=None) -> list[dict[str, Any]]:
         """Test flows against ACLs/firewall rules"""
         self._ensure_initialized()
+        headers = self._normalize_header_constraints("testFilters", headers)
 
         query_params: dict[str, Any] = {"headers": headers}
         if nodes is not None:
@@ -2013,6 +2407,7 @@ class BatfishService:
     def search_filters(self, headers=None, action=None, filters=None, nodes=None) -> list[dict[str, Any]]:
         """Search for flows matching conditions (permit/deny)"""
         self._ensure_initialized()
+        headers = self._normalize_header_constraints("searchFilters", headers)
 
         query = self.session.q.searchFilters(headers=headers, action=action, filters=filters, nodes=nodes)
         df = self._execute_query(query, "searchFilters")
@@ -2023,7 +2418,7 @@ class BatfishService:
         for _, row in df.iterrows():
             result_data = {
                 "node": row.get("Node", ""),
-                "filter": row.get("Filter", ""),
+                "filter": row.get("Filter_Name", ""),
                 "flow": self._safe_serialize(row.get("Flow")),
                 "action": row.get("Action", ""),
                 "line_content": row.get("Line_Content", ""),
@@ -2037,6 +2432,7 @@ class BatfishService:
     def find_matching_filter_lines(self, headers=None, filters=None, nodes=None) -> list[dict[str, Any]]:
         """Find ACL lines matching specific flows"""
         self._ensure_initialized()
+        headers = self._normalize_header_constraints("findMatchingFilterLines", headers)
 
         query = self.session.q.findMatchingFilterLines(headers=headers, filters=filters, nodes=nodes)
         df = self._execute_query(query, "findMatchingFilterLines")
@@ -2050,7 +2446,7 @@ class BatfishService:
                 "filter": row.get("Filter", ""),
                 "flow": self._safe_serialize(row.get("Flow")),
                 "action": row.get("Action", ""),
-                "line_content": row.get("Line_Content", ""),
+                "line_content": row.get("Line", ""),
                 "line_index": row.get("Line_Index")
             }
             results.append(result_data)
@@ -2070,12 +2466,16 @@ class BatfishService:
         Virtual traceroute through network
 
         Args:
-            headers: Flow headers specification (srcIps, dstIps, ipProtocols, ports, etc.)
+            headers: Flow headers specification (srcIps, dstIps, ipProtocols, ports, etc.).
+                Integer fields (srcPorts, dstPorts, icmpTypes, icmpCodes, dscps, ecns,
+                packetLengths, fragmentOffsets) accept a string such as "0,8" or "0-8",
+                an integer, or a list of them.
             startLocation: Starting location for the trace
             ignoreFilters: Whether to ignore ACLs/filters
             maxTraces: Maximum number of traces to return
         """
         self._ensure_initialized()
+        headers = self._normalize_header_constraints("traceroute", headers)
 
         # Build query parameters — startLocation is mandatory for Batfish
         query_params: dict[str, Any] = {
@@ -2114,12 +2514,16 @@ class BatfishService:
         Bidirectional traceroute validation
 
         Args:
-            headers: Flow headers specification (srcIps, dstIps, ipProtocols, ports, etc.)
+            headers: Flow headers specification (srcIps, dstIps, ipProtocols, ports, etc.).
+                Integer fields (srcPorts, dstPorts, icmpTypes, icmpCodes, dscps, ecns,
+                packetLengths, fragmentOffsets) accept a string such as "0,8" or "0-8",
+                an integer, or a list of them.
             startLocation: Starting location for the trace
             ignoreFilters: Whether to ignore ACLs/filters
             maxTraces: Maximum number of traces to return
         """
         self._ensure_initialized()
+        headers = self._normalize_header_constraints("bidirectionalTraceroute", headers)
 
         # Build query parameters — startLocation is mandatory for Batfish
         query_params: dict[str, Any] = {
@@ -2182,10 +2586,10 @@ class BatfishService:
 
         results = []
         for _, row in df.iterrows():
-            source_lines = self._safe_serialize(row.get("Source_Lines", []))
+            source_lines = self._safe_serialize(row.get("Lines", []))
             result_data = {
-                "structure_type": row.get("Structure_Type", ""),
-                "structure_name": row.get("Structure_Name", ""),
+                "structure_type": row.get("Struct_Type", ""),
+                "structure_name": row.get("Ref_Name", ""),
                 "context": row.get("Context", ""),
                 "source_lines": source_lines
             }
@@ -2215,7 +2619,7 @@ class BatfishService:
         for _, row in df.iterrows():
             result_data = {
                 "node": row.get("Node", ""),
-                "filter": row.get("Filter", "")
+                "filter": row.get("Filter_Name", "")
             }
             results.append(result_data)
 
@@ -2286,10 +2690,11 @@ class BatfishService:
         results = []
         for _, row in df.iterrows():
             interface_raw = row.get("Interface", "")
+            group_id = _normalize_json_scalar(row.get("Group_Id"))
             result_data = {
                 "interface": str(interface_raw) if interface_raw else "",
-                "vrrp_group": row.get("VRRP_Group"),
-                "virtual_address": self._convert_ip_network_to_string(row.get("Virtual_Address")),
+                "vrrp_group": None if group_id is None else int(group_id),
+                "virtual_address": _join_text_values(row.get("Virtual_Addresses")),
                 "priority": row.get("Priority"),
                 "preempt": row.get("Preempt", False),
                 "source_address": self._convert_ip_network_to_string(row.get("Source_Address"))
@@ -2310,11 +2715,12 @@ class BatfishService:
         results = []
         for _, row in df.iterrows():
             interface_raw = row.get("Interface", "")
+            group_id = _normalize_json_scalar(row.get("Group_Id"))
             result_data = {
                 "interface": str(interface_raw) if interface_raw else "",
-                "hsrp_group": row.get("HSRP_Group"),
-                "group_number": row.get("Group_Number"),
-                "virtual_address": self._convert_ip_network_to_string(row.get("Virtual_Address")),
+                "hsrp_group": None if group_id is None else int(group_id),
+                "group_number": None if group_id is None else int(group_id),
+                "virtual_address": _join_text_values(row.get("Virtual_Addresses")),
                 "priority": row.get("Priority"),
                 "preempt": row.get("Preempt", False)
             }
@@ -2335,7 +2741,7 @@ class BatfishService:
         for _, row in df.iterrows():
             result_data = {
                 "node": row.get("Node", ""),
-                "id": row.get("ID", ""),
+                "id": row.get("MLAG_ID", ""),
                 "local_interface": str(row.get("Local_Interface")) if row.get("Local_Interface") else None,
                 "peer_address": row.get("Peer_Address", ""),
                 "peer_interface": str(row.get("Peer_Interface")) if row.get("Peer_Interface") else None
@@ -2381,12 +2787,12 @@ class BatfishService:
             for _, row in ospf_df.iterrows():
                 status = row.get("Session_Status", "")
                 if status == "DUPLICATE_ROUTER_ID":
-                    # Parse node from interface (format: "node:interface")
+                    # Parse node from interface (format: "node[interface]")
                     interface = str(row.get("Interface", ""))
-                    node = interface.split(":")[0] if ":" in interface else interface
+                    node = interface.split("[")[0] if "[" in interface else interface
 
                     remote_interface = str(row.get("Remote_Interface", ""))
-                    remote_node = remote_interface.split(":")[0] if ":" in remote_interface else ""
+                    remote_node = remote_interface.split("[")[0] if "[" in remote_interface else ""
 
                     vrf = row.get("VRF", "default")
                     area = str(row.get("Area", ""))
@@ -2472,10 +2878,11 @@ class BatfishService:
 
         results = []
         for _, row in df.iterrows():
+            flow = row.get("Flow")
             result_data = {
-                "node": row.get("Node", ""),
-                "vrf": row.get("VRF", "default"),
-                "loop": self._safe_serialize(row.get("Loop", []))
+                "node": getattr(flow, "ingressNode", None) or "",
+                "vrf": getattr(flow, "ingressVrf", None) or "default",
+                "loop": self._safe_serialize(row.get("Traces", []))
             }
             results.append(result_data)
 
@@ -2492,13 +2899,14 @@ class BatfishService:
 
         results = []
         for _, row in df.iterrows():
+            flow = row.get("Flow")
             result_data = {
-                "node": row.get("Node", ""),
-                "vrf": row.get("VRF", "default"),
-                "interface": str(row.get("Interface")) if row.get("Interface") else None,
-                "ip": row.get("IP", ""),
-                "dip": row.get("DIP", ""),
-                "is_multipath_consistent": row.get("Is_Multipath_Consistent", True)
+                "node": getattr(flow, "ingressNode", None) or "",
+                "vrf": getattr(flow, "ingressVrf", None) or "default",
+                "interface": getattr(flow, "ingressInterface", None) or None,
+                "ip": getattr(flow, "srcIp", None) or "",
+                "dip": getattr(flow, "dstIp", None) or "",
+                "is_multipath_consistent": False
             }
             results.append(result_data)
 
@@ -2515,11 +2923,12 @@ class BatfishService:
 
         results = []
         for _, row in df.iterrows():
+            flow = row.get("Flow")
             result_data = {
-                "node": row.get("Node", ""),
-                "vrf": row.get("VRF", "default"),
-                "loopback_ip": row.get("Loopback_IP", ""),
-                "is_loopback_multipath_consistent": row.get("Is_Loopback_Multipath_Consistent", True)
+                "node": getattr(flow, "ingressNode", None) or "",
+                "vrf": getattr(flow, "ingressVrf", None) or "default",
+                "loopback_ip": getattr(flow, "dstIp", None) or "",
+                "is_loopback_multipath_consistent": False
             }
             results.append(result_data)
 
@@ -2600,9 +3009,9 @@ class BatfishService:
                 "node": row.get("Node", ""),
                 "vrf": row.get("VRF", "default"),
                 "route_distinguisher": row.get("Route_Distinguisher", ""),
-                "prefix": row.get("Prefix", ""),
+                "prefix": row.get("Network", ""),
                 "next_hop": self._convert_ip_network_to_string(row.get("Next_Hop")),
-                "originator_ip": row.get("Originator_IP", ""),
+                "originator_ip": row.get("Originator_Id", ""),
                 "route_type": row.get("Route_Type", ""),
                 "vni": row.get("VNI")
             }
@@ -2644,12 +3053,13 @@ class BatfishService:
 
         results = []
         for _, row in df.iterrows():
+            udp_port = _normalize_json_scalar(row.get("VXLAN_Port"))
             result_data = {
                 "node": row.get("Node", ""),
                 "vni": row.get("VNI"),
                 "vlan": row.get("VLAN"),
                 "vrf": row.get("VRF", ""),
-                "udp_port": row.get("UDP_Port"),
+                "udp_port": None if udp_port is None else int(udp_port),
                 "vtep_flood_list": row.get("VTEP_Flood_List", []),
                 "multicast_group": row.get("Multicast_Group", "")
             }
@@ -2785,8 +3195,8 @@ class BatfishService:
                 "node": row.get("Node", ""),
                 "vpn": row.get("VPN", ""),
                 "remote_node": row.get("Remote_Node", ""),
-                "remote_ip": row.get("Remote_IP", ""),
-                "local_ip": row.get("Local_IP", ""),
+                "remote_ip": row.get("Remote_Node_IP", ""),
+                "local_ip": row.get("Node_IP", ""),
                 "status": row.get("Status", ""),
                 "tunnel_interfaces": row.get("Tunnel_Interfaces", [])
             }
@@ -2977,16 +3387,17 @@ class BatfishService:
 
         results = []
         for _, row in df.iterrows():
-            next_hop_interface_raw = row.get("Next_Hop_Interface")
+            num_routes = _normalize_json_scalar(row.get("Num_Routes"))
             result_data = {
                 "node": row.get("Node", ""),
                 "vrf": row.get("VRF", "default"),
-                "ip": row.get("IP", ""),
+                "ip": row.get("Ip", ""),
                 "network": row.get("Network", ""),
-                "next_hop": row.get("Next_Hop", ""),
-                "next_hop_interface": str(next_hop_interface_raw) if next_hop_interface_raw else None,
-                "protocol": row.get("Protocol", ""),
-                "num_routes": row.get("Num_Routes")
+                # Deprecated compatibility fields: lpmRoutes has no such columns.
+                "next_hop": "",
+                "next_hop_interface": None,
+                "protocol": "",
+                "num_routes": None if num_routes is None else int(num_routes)
             }
             results.append(result_data)
 
@@ -3034,6 +3445,8 @@ class BatfishService:
         maxTraces=None,
         invertSearch=None,
         ignoreFilters=None,
+        reference_snapshot_path: str | Path | None = None,
+        snapshot_path: str | Path | None = None,
     ) -> list[dict[str, Any]]:
         """
         Compare reachability between snapshots
@@ -3042,11 +3455,21 @@ class BatfishService:
             reference_snapshot: Base/reference snapshot name
             snapshot: Comparison snapshot name
             headers: Optional flow headers
+            reference_snapshot_path: Directory of the reference snapshot; when given, the
+                reference snapshot is loaded into Batfish (unless it is the active snapshot)
+                before the query, and the active snapshot stays unchanged
+            snapshot_path: Directory of the comparison snapshot; when given together with
+                snapshot, the comparison snapshot is loaded the same way
+
+        Raises:
+            BatfishQueryError: The headers are invalid or Batfish could not answer the query
+            BatfishSnapshotLoadError: Batfish rejected the reference or comparison snapshot while loading it
         """
         self._ensure_initialized()
 
         if not reference_snapshot:
             raise RuntimeError("reference_snapshot is required for differential reachability")
+        headers = self._normalize_header_constraints("differentialReachability", headers)
 
         query_params: dict[str, Any] = {}
         if headers is not None:
@@ -3061,6 +3484,13 @@ class BatfishService:
             query_params["invertSearch"] = invertSearch
         if ignoreFilters is not None:
             query_params["ignoreFilters"] = ignoreFilters
+
+        if reference_snapshot_path is not None:
+            self._load_snapshot_unless_active(reference_snapshot_path, reference_snapshot)
+        if snapshot and snapshot_path is not None and (
+            snapshot != reference_snapshot or reference_snapshot_path is None
+        ):
+            self._load_snapshot_unless_active(snapshot_path, snapshot)
 
         query = self.session.q.differentialReachability(**query_params)
 
@@ -3078,8 +3508,9 @@ class BatfishService:
 
             df = result
         except Exception as e:
-            logger.warning(f"differentialReachability query failed: {e}")
-            raise RuntimeError(f"differentialReachability query failed: {e}") from e
+            query_error = self._build_query_error("differentialReachability", e, query_params=query_params)
+            logger.warning("differentialReachability query failed: %s", query_error.message)
+            raise query_error from e
 
         results = []
         for _, row in df.iterrows():
@@ -3103,6 +3534,7 @@ class BatfishService:
     def get_bidirectional_reachability(self, headers=None, pathConstraints=None, returnFlowType=None) -> list[dict[str, Any]]:
         """Bidirectional reachability"""
         self._ensure_initialized()
+        headers = self._normalize_header_constraints("bidirectionalReachability", headers)
 
         query_params: dict[str, Any] = {}
         if headers is not None:
@@ -3120,7 +3552,7 @@ class BatfishService:
         results = []
         for _, row in df.iterrows():
             result_data = {
-                "flow": self._safe_serialize(row.get("Flow")),
+                "flow": self._safe_serialize(row.get("Forward_Flow")),
                 "forward_traces": self._safe_serialize(row.get("Forward_Traces", [])),
                 "reverse_flow": self._safe_serialize(row.get("Reverse_Flow")),
                 "reverse_traces": self._safe_serialize(row.get("Reverse_Traces", []))
@@ -3173,7 +3605,7 @@ class BatfishService:
         results = []
         for _, row in df.iterrows():
             result_data = {
-                "ip": row.get("IP", "")
+                "ip": row.get("IP_Space", "")
             }
             results.append(result_data)
 
@@ -3205,11 +3637,16 @@ class BatfishService:
 
         results = []
         for _, row in df.iterrows():
+            endpoint = row.get("VIP_Endpoint")
+            address_port = endpoint.split(" ", 1)[0] if isinstance(endpoint, str) else ""
+            address, _, port = address_port.rpartition(":")
+            if not port.isdigit():
+                address, port = address_port, ""
             result_data = {
                 "node": row.get("Node", ""),
                 "vip_name": row.get("VIP_Name", ""),
-                "vip_address": self._convert_ip_network_to_string(row.get("VIP_Address")),
-                "destination_port": row.get("Destination_Port"),
+                "vip_address": address or None,
+                "destination_port": int(port) if port else None,
                 "pool": row.get("Pool", ""),
                 "source_address_translation": row.get("Source_Address_Translation", "")
             }
@@ -3501,39 +3938,41 @@ class BatfishService:
         Compare two snapshots comprehensively
 
         Compares nodes, edges, routes, and reachability between snapshots.
-        Sets base as reference and activates comparison snapshot.
+        Both snapshots are queried by name; a side that is not the active
+        snapshot is loaded into Batfish first, and the active snapshot is
+        neither reloaded nor changed.
 
         Args:
             base_snapshot: Reference snapshot name
             comparison_snapshot: Snapshot to compare against base
 
         Returns:
-            Comprehensive comparison results with nodes, edges, routes, and reachability diffs
+            Comprehensive comparison results with nodes, edges, routes, and reachability diffs.
+            reachability_error is None, or {message, reason} when differential reachability
+            could not be computed (reachability is then []).
         """
         try:
             logger.info(f"Comparing snapshots: {base_snapshot} vs {comparison_snapshot}")
 
-            # Initialize base snapshot and get initial data
-            logger.debug(f"Initializing base snapshot: {base_snapshot}")
+            logger.debug(f"Loading base snapshot: {base_snapshot}")
             snapshot_path = Path(base_snapshot_path) if base_snapshot_path is not None else Path(config.SNAPSHOTS_DIR) / base_snapshot
-            self.initialize_network(str(snapshot_path), snapshot_name=base_snapshot)
+            self._load_snapshot_unless_active(snapshot_path, base_snapshot)
+            with self._query_snapshot_scope(base_snapshot):
+                base_nodes = {node["node"]: node for node in self.get_node_properties()}
+                base_edges = {self._edge_key(edge): edge for edge in self.get_layer3_edges()}
+                base_routes = self.get_routes()
 
-            base_nodes = {node["node"]: node for node in self.get_node_properties()}
-            base_edges = {self._edge_key(edge): edge for edge in self.get_layer3_edges()}
-            base_routes = self.get_routes()
-
-            # Initialize comparison snapshot
-            logger.debug(f"Initializing comparison snapshot: {comparison_snapshot}")
+            logger.debug(f"Loading comparison snapshot: {comparison_snapshot}")
             snapshot_path = (
                 Path(comparison_snapshot_path)
                 if comparison_snapshot_path is not None
                 else Path(config.SNAPSHOTS_DIR) / comparison_snapshot
             )
-            self.initialize_network(str(snapshot_path), snapshot_name=comparison_snapshot)
-
-            comparison_nodes = {node["node"]: node for node in self.get_node_properties()}
-            comparison_edges = {self._edge_key(edge): edge for edge in self.get_layer3_edges()}
-            comparison_routes = self.get_routes()
+            self._load_snapshot_unless_active(snapshot_path, comparison_snapshot)
+            with self._query_snapshot_scope(comparison_snapshot):
+                comparison_nodes = {node["node"]: node for node in self.get_node_properties()}
+                comparison_edges = {self._edge_key(edge): edge for edge in self.get_layer3_edges()}
+                comparison_routes = self.get_routes()
 
             # Compare nodes
             nodes_diff = self._compare_nodes_diff(base_nodes, comparison_nodes)
@@ -3544,11 +3983,7 @@ class BatfishService:
             # Compare routes
             routes_diff = self._compare_routes_diff(base_routes, comparison_routes)
 
-            # Get differential reachability
-            reachability_diff = self.get_differential_reachability(
-                reference_snapshot=base_snapshot,
-                snapshot=comparison_snapshot
-            )
+            reachability_diff, reachability_error = self._compare_reachability(base_snapshot, comparison_snapshot)
 
             result = {
                 "base_snapshot": base_snapshot,
@@ -3556,7 +3991,8 @@ class BatfishService:
                 "nodes": nodes_diff,
                 "edges": edges_diff,
                 "routes": routes_diff,
-                "reachability": reachability_diff
+                "reachability": reachability_diff,
+                "reachability_error": reachability_error,
             }
 
             logger.info(f"Snapshot comparison completed successfully")
@@ -3565,6 +4001,33 @@ class BatfishService:
         except Exception as e:
             logger.error(f"Error comparing snapshots: {e}", exc_info=True)
             raise
+
+    def _compare_reachability(
+        self,
+        base_snapshot: str,
+        comparison_snapshot: str,
+    ) -> tuple[list[dict[str, Any]], dict[str, str] | None]:
+        """Run differential reachability for a comparison, reporting its failure instead of raising."""
+        try:
+            with self._query_snapshot_scope(comparison_snapshot):
+                return self.get_differential_reachability(
+                    reference_snapshot=base_snapshot,
+                    snapshot=comparison_snapshot,
+                ), None
+        except Exception as e:
+            cause = e.__cause__ if isinstance(e.__cause__, Exception) else e
+            reason = self._build_query_error("differentialReachability", cause).message
+            reason = reason.removeprefix("Batfish work failed: ")
+            logger.warning(
+                "Differential reachability unavailable for %s vs %s: %s",
+                base_snapshot,
+                comparison_snapshot,
+                reason,
+            )
+            return [], {
+                "message": "Differential reachability could not be computed for these snapshots",
+                "reason": reason,
+            }
 
     def _edge_key(self, edge: dict[str, Any]) -> str:
         """Generate unique key for edge comparison"""
@@ -3656,42 +4119,62 @@ class BatfishService:
         base_routes: list[dict],
         comparison_routes: list[dict]
     ) -> dict[str, Any]:
-        """Compare routing tables between snapshots"""
-        # Create route keys for comparison
+        """Compare routing tables between snapshots.
+
+        Routes are grouped by node, VRF and network so ECMP rows of one prefix
+        are compared as a set of next hops instead of row by row.
+        """
         def route_key(route: dict) -> str:
             return f"{route.get('node', '')}-{route.get('vrf', '')}-{route.get('network', '')}"
 
-        base_route_map = {route_key(r): r for r in base_routes}
-        comparison_route_map = {route_key(r): r for r in comparison_routes}
+        def group_routes(routes: list[dict]) -> dict[str, list[dict]]:
+            grouped: dict[str, list[dict]] = {}
+            for route in routes:
+                grouped.setdefault(route_key(route), []).append(route)
+            return grouped
+
+        def sorted_values(routes: list[dict], field: str) -> list[str]:
+            return sorted({str(route.get(field) or "") for route in routes})
+
+        base_route_map = group_routes(base_routes)
+        comparison_route_map = group_routes(comparison_routes)
 
         added = [
-            comparison_route_map[key]
-            for key in comparison_route_map
+            route
+            for key, routes in comparison_route_map.items()
             if key not in base_route_map
+            for route in routes
         ]
         removed = [
-            base_route_map[key]
-            for key in base_route_map
+            route
+            for key, routes in base_route_map.items()
             if key not in comparison_route_map
+            for route in routes
         ]
 
-        # Detect modified routes (same network but different next hop)
+        # Detect modified routes (same network but different next hop set or protocol)
         modified = []
-        for key in base_route_map:
-            if key in comparison_route_map:
-                base_route = base_route_map[key]
-                comp_route = comparison_route_map[key]
-                if (base_route.get('next_hop') != comp_route.get('next_hop') or
-                    base_route.get('protocol') != comp_route.get('protocol')):
-                    modified.append({
-                        "network": comp_route.get('network'),
-                        "node": comp_route.get('node'),
-                        "vrf": comp_route.get('vrf'),
-                        "base_next_hop": base_route.get('next_hop'),
-                        "comparison_next_hop": comp_route.get('next_hop'),
-                        "base_protocol": base_route.get('protocol'),
-                        "comparison_protocol": comp_route.get('protocol')
-                    })
+        for key, base_group in base_route_map.items():
+            comparison_group = comparison_route_map.get(key)
+            if comparison_group is None:
+                continue
+            base_next_hops = sorted_values(base_group, 'next_hop')
+            comparison_next_hops = sorted_values(comparison_group, 'next_hop')
+            base_protocols = sorted_values(base_group, 'protocol')
+            comparison_protocols = sorted_values(comparison_group, 'protocol')
+            if base_next_hops != comparison_next_hops or base_protocols != comparison_protocols:
+                comp_route = comparison_group[0]
+                modified.append({
+                    "network": comp_route.get('network'),
+                    "node": comp_route.get('node'),
+                    "vrf": comp_route.get('vrf'),
+                    "base_next_hop": ", ".join(base_next_hops),
+                    "comparison_next_hop": ", ".join(comparison_next_hops),
+                    "base_next_hops": base_next_hops,
+                    "comparison_next_hops": comparison_next_hops,
+                    "base_protocol": ", ".join(base_protocols),
+                    "comparison_protocol": ", ".join(comparison_protocols),
+                })
 
         return {
             "added": added,
@@ -3727,8 +4210,10 @@ class BatfishService:
             # Network topology and properties
             logger.debug("Fetching node_properties...")
             data["node_properties"] = self.get_node_properties()
+            logger.debug("Fetching ospf_interface_configuration...")
+            data["ospf_interface_configuration"] = [i.to_dict() for i in self.get_ospf_interface_configuration()]
             logger.debug("Fetching interface_properties...")
-            data["interface_properties"] = self.get_interface_properties()
+            data["interface_properties"] = self.get_interface_properties(data["ospf_interface_configuration"])
             logger.debug("Fetching routes...")
             data["routes"] = self.get_routes()
 
@@ -3737,8 +4222,6 @@ class BatfishService:
             data["ospf_process_configuration"] = [p.to_dict() for p in self.get_ospf_process_configuration()]
             logger.debug("Fetching ospf_area_configuration...")
             data["ospf_area_configuration"] = [a.to_dict() for a in self.get_ospf_area_configuration()]
-            logger.debug("Fetching ospf_interface_configuration...")
-            data["ospf_interface_configuration"] = [i.to_dict() for i in self.get_ospf_interface_configuration()]
             logger.debug("Fetching ospf_session_compatibility...")
             data["ospf_session_compatibility"] = [s.to_dict() for s in self.get_ospf_session_compatibility()]
 
@@ -3788,7 +4271,7 @@ class BatfishService:
             logger.debug("Fetching aaa_authentication_login...")
             data["aaa_authentication_login"] = self.get_aaa_authentication_login()
             logger.debug("Fetching snmp_community_clients...")
-            data["snmp_community_clients"] = self.get_snmp_community_clients()
+            data["snmp_community_clients"] = self.get_snmp_community_clients(data["named_structures"])
 
             # BGP Protocol Analysis
             logger.debug("Fetching bgp_edges...")

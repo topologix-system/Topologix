@@ -9,6 +9,7 @@ from services.snapshot_service import ConfigContentConflictError, MAX_FILE_SIZE
 
 
 VALID_CONFIG = "hostname router1\ninterface Ethernet0\n ip address 192.0.2.1 255.255.255.0\n"
+CRLF_CONFIG = b"hostname router1\r\ninterface Ethernet0\r\n ip address 192.0.2.1 255.255.255.0\r\n"
 
 
 class SnapshotConfigContentTest(unittest.TestCase):
@@ -253,6 +254,64 @@ class SnapshotConfigContentTest(unittest.TestCase):
         ):
             self.assertFalse(app_module.request_uses_batfish())
 
+
+    def _create_snapshot_with_bytes(self, content: bytes) -> Path:
+        file_path = self._create_snapshot_with_file(name="crlf_snapshot")
+        file_path.write_bytes(content)
+        return file_path
+
+    def _set_format(self, configuration_format_override: str) -> dict:
+        return self.service.update_snapshot_file_format(
+            "crlf_snapshot",
+            "router.cfg",
+            configuration_format_override,
+            requester_user_id=7,
+            auth_enabled=True,
+        )
+
+    def test_format_override_keeps_crlf_and_auto_restores_the_original_bytes(self):
+        file_path = self._create_snapshot_with_bytes(CRLF_CONFIG)
+
+        self._set_format("ios")
+        self.assertEqual(file_path.read_bytes(), b"!RANCID-CONTENT-TYPE: ios\r\n" + CRLF_CONFIG)
+        self._set_format("arista")
+        self.assertEqual(file_path.read_bytes(), b"!RANCID-CONTENT-TYPE: arista\r\n" + CRLF_CONFIG)
+        response = self._set_format("auto")
+
+        self.assertEqual(file_path.read_bytes(), CRLF_CONFIG)
+        self.assertIsNone(response["configuration_format_override"])
+
+    def test_format_override_keeps_lf_files_byte_identical_after_auto(self):
+        original = VALID_CONFIG.encode("utf-8")
+        file_path = self._create_snapshot_with_bytes(original)
+
+        self._set_format("ios")
+        self.assertEqual(file_path.read_bytes(), b"!RANCID-CONTENT-TYPE: ios\n" + original)
+        self._set_format("auto")
+
+        self.assertEqual(file_path.read_bytes(), original)
+
+    def test_content_save_keeps_crlf_line_endings(self):
+        file_path = self._create_snapshot_with_bytes(CRLF_CONFIG)
+        opened = self.service.get_config_file_content(
+            "crlf_snapshot",
+            "router.cfg",
+            requester_user_id=7,
+            auth_enabled=True,
+        )
+        self.assertEqual(opened["content"], CRLF_CONFIG.decode("utf-8"))
+        updated_content = opened["content"] + "router ospf 1\r\n"
+
+        self.service.update_config_file_content(
+            "crlf_snapshot",
+            "router.cfg",
+            updated_content,
+            opened["sha256"],
+            requester_user_id=7,
+            auth_enabled=True,
+        )
+
+        self.assertEqual(file_path.read_bytes(), updated_content.encode("utf-8"))
 
 if __name__ == "__main__":
     unittest.main()

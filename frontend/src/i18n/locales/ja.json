@@ -3,6 +3,11 @@
     "title": "Topologix",
     "subtitle": "Network Topology Visualization"
   },
+  "routeError": {
+    "title": "このページを表示できませんでした",
+    "message": "ページの読み込み中に予期しないエラーが発生しました。",
+    "backHome": "Topologix に戻る"
+  },
   "header": {
     "snapshot": "スナップショット",
     "selectSnapshot": "スナップショットを選択...",
@@ -445,7 +450,9 @@
         "compatible": "互換",
         "checkConfig": "設定確認"
       }
-    }
+    },
+    "regionLabel": "ノード詳細",
+    "tabListLabel": "ノード情報タブ"
   },
   "nodeSelector": {
     "label": "ノード選択",
@@ -466,7 +473,11 @@
       "connection": "接続",
       "layer3Info": "レイヤー3情報",
       "ospfInfo": "OSPF情報",
-      "bgpInfo": "BGP情報"
+      "bgpInfo": "BGP情報",
+      "eigrpInfo": "EIGRP情報",
+      "isisInfo": "IS-IS情報",
+      "vxlanInfo": "VXLAN情報",
+      "ipsecInfo": "IPsec情報"
     },
     "fields": {
       "sourceNode": "送信元ノード",
@@ -488,8 +499,15 @@
       "localIp": "ローカルIP",
       "remoteIp": "リモートIP",
       "importPolicy": "インポートポリシー",
-      "exportPolicy": "エクスポートポリシー"
-    }
+      "exportPolicy": "エクスポートポリシー",
+      "level": "レベル",
+      "vni": "VNI",
+      "vtepAddress": "VTEPアドレス",
+      "remoteVtepAddress": "リモートVTEPアドレス",
+      "multicastGroup": "マルチキャストグループ",
+      "tunnelInterfaces": "トンネルインターフェース"
+    },
+    "regionLabel": "エッジ詳細"
   },
   "validation": {
     "title": "検証",
@@ -690,7 +708,8 @@
         "testFiltersResults": "フィルタテストの結果",
         "matchingLinesResults": "マッチングフィルタ行の結果",
         "searchFiltersResults": "フィルタ検索の結果"
-      }
+      },
+      "ignoreComposites": "Compositeを無視"
     },
     "advanced": {
       "searchRoutePoliciesDesc": "デバイス全体でアクション別にルートポリシーを検索",
@@ -748,15 +767,20 @@
   "comparison": {
     "title": "スナップショット比較",
     "description": "2つのスナップショット間のネットワーク設定を比較",
+    "backToTopologyAria": "トポロジービューに戻る",
     "selectSnapshots": "比較するスナップショットを選択",
     "baseSnapshot": "ベーススナップショット（変更前）",
     "comparisonSnapshot": "比較スナップショット（変更後）",
     "selectBase": "-- ベーススナップショットを選択 --",
     "selectComparison": "-- 比較スナップショットを選択 --",
+    "selectBaseAria": "ベーススナップショットを選択",
+    "selectComparisonAria": "比較スナップショットを選択",
     "compareButton": "スナップショットを比較",
+    "compareAria": "選択したスナップショットを比較",
     "comparing": "比較中...",
     "noResults": "比較結果がありません",
     "selectToCompare": "2つのスナップショットを選択し、比較をクリックして差分を表示",
+    "tabsAria": "比較タブ",
     "tabs": {
       "nodes": "ノード",
       "topology": "トポロジ",
@@ -771,7 +795,8 @@
       "changesDetected": "変更検出",
       "added": "追加",
       "removed": "削除",
-      "modified": "変更"
+      "modified": "変更",
+      "notComputed": "計算できませんでした"
     },
     "nodes": {
       "title": "ノード変更",
@@ -791,6 +816,8 @@
       "removedRoutes": "削除されたルート（{{count}}）",
       "modifiedRoutes": "変更されたルート（{{count}}）",
       "noChanges": "ルーティングテーブルの変更はありません",
+      "nextHopAbbr": "NH",
+      "protocolAbbr": "プロトコル",
       "fields": {
         "node": "ノード",
         "vrf": "VRF",
@@ -803,12 +830,15 @@
     "reachability": {
       "title": "到達性変更",
       "changeType": "変更タイプ",
-      "noChanges": "到達性の変更はありません"
+      "noChanges": "到達性の変更はありません",
+      "unavailable": "これらのスナップショットでは差分到達性を計算できませんでした。ノード、トポロジ、ルートの変更は引き続き表示されます。",
+      "reason": "理由: {{reason}}"
     },
     "errors": {
       "selectBoth": "ベースと比較の両方のスナップショットを選択してください",
       "selectDifferent": "異なるスナップショットを選択してください",
-      "comparisonFailed": "比較失敗: {{message}}"
+      "comparisonFailed": "比較失敗: {{message}}",
+      "unknown": "不明なエラー"
     }
   },
   "topologyViewer": {
@@ -866,7 +896,8 @@
     },
     "partialData": {
       "title": "トポロジーデータの一部のみ表示中",
-      "description": "BGPまたはルートポリシークエリが {{count}} 件失敗しました。一部のトポロジーレイヤーは不完全な可能性があります。"
+      "description": "BGPまたはルートポリシークエリが {{count}} 件失敗しました。一部のトポロジーレイヤーは不完全な可能性があります。",
+      "dismiss": "警告を閉じる"
     },
     "retry": "ネットワークデータの再読み込み",
     "exportFailed": "エクスポート失敗",
@@ -914,6 +945,7 @@
     "interfaces": "インターフェース",
     "routes": "ルート",
     "backToDashboard": "ダッシュボードに戻る",
+    "back": "戻る",
     "accessDenied": "アクセス拒否",
     "adminRequired": "このページにアクセスするには管理者権限が必要です。",
     "updateFailed": "更新に失敗しました",
@@ -1023,7 +1055,11 @@
     "newUser": "新規ユーザー",
     "editUser": "ユーザー編集",
     "deleteUser": "ユーザー削除",
+    "editUserAria": "ユーザー {{name}} を編集",
+    "deleteUserAria": "ユーザー {{name}} を削除",
     "confirmDelete": "このユーザーを削除してもよろしいですか？",
+    "confirmDeleteAria": "削除を確定",
+    "cancelDeleteAria": "削除をキャンセル",
     "userDeleted": "ユーザーが正常に削除されました",
     "deleteFailed": "ユーザーの削除に失敗しました",
     "cannotDeleteSelf": "自分のアカウントは削除できません",
@@ -1031,7 +1067,18 @@
     "failedToLoadUser": "ユーザーの読み込みに失敗しました",
     "registeredCount": "{{count}} ユーザー登録済み",
     "usernameImmutable": "ユーザー名は変更できません",
-    "superuser": "スーパーユーザー"
+    "superuser": "スーパーユーザー",
+    "table": {
+      "id": "ID",
+      "username": "ユーザー名",
+      "email": "メールアドレス",
+      "roles": "ロール",
+      "status": "ステータス",
+      "actions": "操作"
+    },
+    "active": "有効",
+    "inactive": "無効",
+    "youMarker": "（あなた）"
   },
   "snapshotMigration": {
     "title": "スナップショット所有者移行",
@@ -1348,7 +1395,10 @@
       "invalidFilename": "英数字で始まり、.cfg、.conf、.txt、.log のいずれかで終わる、英数字・ドット・アンダースコア・ハイフンのみのファイル名を入力してください。",
       "emptyContent": "ファイル作成前に設定テキストを貼り付けてください。",
       "overwriteRequired": "「{{name}}」は既に存在します。続行するには上書きを確認してください。",
-      "overwriteConfirm": "既存ファイル「{{name}}」を上書きする"
+      "overwriteConfirm": "既存ファイル「{{name}}」を上書きする",
+      "discardTitle": "貼り付けた設定を破棄しますか？",
+      "discardMessage": "このダイアログの設定テキストは保存されていません。ダイアログを閉じると破棄されます。",
+      "discardConfirm": "破棄"
     },
     "deleteFile": "ファイルを削除",
     "deleteFileAria": "{{name}} を削除",
@@ -1489,7 +1539,9 @@
           "description": "snapshot root に保存する外部BGP経路注入データです。"
         }
       }
-    }
+    },
+    "createFailed": "スナップショットの作成に失敗しました",
+    "folderUpdateFailed": "スナップショットのフォルダーの更新に失敗しました"
   },
   "layer1Editor": {
     "title": "レイヤー1トポロジーエディタ",
@@ -1538,7 +1590,10 @@
       "noSnapshot": "スナップショットが選択されていません",
       "selfConnection": "デバイスを自分自身に接続することはできません",
       "saveFailed": "トポロジーの保存に失敗しました",
-      "unknown": "不明なエラーが発生しました"
+      "unknown": "不明なエラーが発生しました",
+      "loadFailed": "レイヤー1トポロジーの読み込みに失敗しました",
+      "accessDenied": "アクセスが拒否されました: スナップショット「{{name}}」を開く権限がありません。",
+      "notFound": "スナップショット「{{name}}」が見つかりません。"
     }
   },
   "batfishTools": {
@@ -1633,7 +1688,7 @@
       "searchPolicies": "検索対象ポリシー",
       "inputConstraintsJson": "Input constraints JSON",
       "outputConstraintsJson": "Output constraints JSON",
-      "pathOption": "Path option",
+      "pathOption": "パスオプション",
       "testDirection": "テスト方向",
       "testNodes": "テスト対象ノード",
       "testPolicies": "テスト対象ポリシー",
@@ -1681,7 +1736,8 @@
       "permit": "permit（許可）",
       "deny": "deny（拒否）",
       "in": "IN（入力）",
-      "out": "OUT（出力）"
+      "out": "OUT（出力）",
+      "pathOptionNone": "指定なし"
     },
     "results": {
       "resolveNodes": "ノード解決",

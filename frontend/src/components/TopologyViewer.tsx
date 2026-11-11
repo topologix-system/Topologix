@@ -69,6 +69,9 @@ export const TopologyViewer = memo(function TopologyViewer() {
   const topologyQueryErrors = aggregateQueryErrors.filter((queryError) =>
     queryError.data_key === 'search_route_policies' || queryError.data_key.startsWith('bgp_')
   )
+  const [dismissedPartialDataSignature, setDismissedPartialDataSignature] = useState<string | null>(null)
+  const partialDataSignature = `${currentSnapshotName ?? ''}|${topologyQueryErrors.map((queryError) => queryError.data_key).join(',')}`
+  const showPartialDataWarning = topologyQueryErrors.length > 0 && dismissedPartialDataSignature !== partialDataSignature
 
   // Lazy-loaded Cytoscape instance (initialized only when needed)
   const cy = useCytoscapeLazy()
@@ -660,18 +663,6 @@ export const TopologyViewer = memo(function TopologyViewer() {
         </div>
       )}
 
-      {topologyQueryErrors.length > 0 && (
-        <div className="absolute top-4 right-4 z-20 max-w-sm rounded-lg border border-yellow-200 bg-yellow-50 px-4 py-3 text-sm text-yellow-900 shadow-lg" role="status">
-          <div className="flex items-start gap-2">
-            <AlertTriangle className="mt-0.5 h-4 w-4 flex-shrink-0" aria-hidden="true" />
-            <div>
-              <p className="font-medium">{t('topologyViewer.partialData.title')}</p>
-              <p className="mt-1 text-xs">{t('topologyViewer.partialData.description', { count: topologyQueryErrors.length })}</p>
-            </div>
-          </div>
-        </div>
-      )}
-
       <nav className="absolute top-4 left-4 bg-white rounded-lg shadow-lg p-2 flex flex-col gap-2" aria-label="Topology controls">
         <button
           onClick={() => cy.zoomIn()}
@@ -809,115 +800,138 @@ export const TopologyViewer = memo(function TopologyViewer() {
         </div>
       </div>
 
-      <div className="absolute top-4 right-4 bg-white rounded-lg shadow-lg p-3 min-w-[200px]">
-        <button
-          className="flex items-center justify-between w-full gap-2 px-1 hover:bg-gray-50 rounded transition-colors"
-          onClick={() => setLayersDropdownOpen(!layersDropdownOpen)}
-          aria-expanded={layersDropdownOpen}
-          aria-haspopup="true"
-        >
-          <div className="flex items-center gap-2">
-            <Layers className="w-4 h-4 text-gray-600" aria-hidden="true" />
-            <span className="text-sm font-medium text-gray-700">{t('topologyViewer.layers.title')}</span>
-          </div>
-          {layersDropdownOpen ? (
-            <ChevronUp className="w-4 h-4 text-gray-600" aria-hidden="true" />
-          ) : (
-            <ChevronDown className="w-4 h-4 text-gray-600" aria-hidden="true" />
+      <div className="absolute top-4 right-4 z-20 flex flex-col items-end gap-2">
+        <div className="bg-white rounded-lg shadow-lg p-3 min-w-[200px]">
+          <button
+            className="flex items-center justify-between w-full gap-2 px-1 hover:bg-gray-50 rounded transition-colors"
+            onClick={() => setLayersDropdownOpen(!layersDropdownOpen)}
+            aria-expanded={layersDropdownOpen}
+            aria-haspopup="true"
+          >
+            <div className="flex items-center gap-2">
+              <Layers className="w-4 h-4 text-gray-600" aria-hidden="true" />
+              <span className="text-sm font-medium text-gray-700">{t('topologyViewer.layers.title')}</span>
+            </div>
+            {layersDropdownOpen ? (
+              <ChevronUp className="w-4 h-4 text-gray-600" aria-hidden="true" />
+            ) : (
+              <ChevronDown className="w-4 h-4 text-gray-600" aria-hidden="true" />
+            )}
+          </button>
+
+          {layersDropdownOpen && (
+            <div className="mt-3 space-y-2 border-t pt-3" role="group" aria-label={t('topologyViewer.layers.title')}>
+              <label className="flex items-center gap-2 cursor-pointer hover:bg-gray-50 px-2 py-1 rounded">
+                <input
+                  type="checkbox"
+                  checked={visibleLayers.has('physical')}
+                  onChange={() => toggleVisibleLayer('physical')}
+                  className="w-4 h-4 text-primary-600 focus:ring-2 focus:ring-primary-600 focus:ring-offset-1 rounded"
+                />
+                <span className="text-sm text-gray-700">{t('topologyViewer.layers.physical')}</span>
+              </label>
+
+              <label className="flex items-center gap-2 cursor-pointer hover:bg-gray-50 px-2 py-1 rounded">
+                <input
+                  type="checkbox"
+                  checked={visibleLayers.has('layer1')}
+                  onChange={() => toggleVisibleLayer('layer1')}
+                  className="w-4 h-4 text-primary-600 focus:ring-2 focus:ring-primary-600 focus:ring-offset-1 rounded"
+                />
+                <span className="text-sm text-gray-700">{t('topologyViewer.layers.layer1')}</span>
+              </label>
+
+              <label className="flex items-center gap-2 cursor-pointer hover:bg-gray-50 px-2 py-1 rounded">
+                <input
+                  type="checkbox"
+                  checked={visibleLayers.has('layer3')}
+                  onChange={() => toggleVisibleLayer('layer3')}
+                  className="w-4 h-4 text-primary-600 focus:ring-2 focus:ring-primary-600 focus:ring-offset-1 rounded"
+                />
+                <span className="text-sm text-gray-700">{t('topologyViewer.layers.layer3')}</span>
+              </label>
+
+              <label className="flex items-center gap-2 cursor-pointer hover:bg-gray-50 px-2 py-1 rounded">
+                <input
+                  type="checkbox"
+                  checked={visibleLayers.has('ospf')}
+                  onChange={() => toggleVisibleLayer('ospf')}
+                  className="w-4 h-4 text-primary-600 focus:ring-2 focus:ring-primary-600 focus:ring-offset-1 rounded"
+                />
+                <span className="text-sm text-gray-700">{t('topologyViewer.layers.ospf')}</span>
+              </label>
+
+              <label className="flex items-center gap-2 cursor-pointer hover:bg-gray-50 px-2 py-1 rounded">
+                <input
+                  type="checkbox"
+                  checked={visibleLayers.has('bgp')}
+                  onChange={() => toggleVisibleLayer('bgp')}
+                  className="w-4 h-4 text-primary-600 focus:ring-2 focus:ring-primary-600 focus:ring-offset-1 rounded"
+                />
+                <span className="text-sm text-gray-700">{t('topologyViewer.layers.bgp')}</span>
+              </label>
+
+              <label className="flex items-center gap-2 cursor-pointer hover:bg-gray-50 px-2 py-1 rounded">
+                <input
+                  type="checkbox"
+                  checked={visibleLayers.has('vxlan')}
+                  onChange={() => toggleVisibleLayer('vxlan')}
+                  className="w-4 h-4 text-primary-600 focus:ring-2 focus:ring-primary-600 focus:ring-offset-1 rounded"
+                />
+                <span className="text-sm text-gray-700">{t('topologyViewer.layers.vxlan')}</span>
+              </label>
+
+              <label className="flex items-center gap-2 cursor-pointer hover:bg-gray-50 px-2 py-1 rounded">
+                <input
+                  type="checkbox"
+                  checked={visibleLayers.has('eigrp')}
+                  onChange={() => toggleVisibleLayer('eigrp')}
+                  className="w-4 h-4 text-primary-600 focus:ring-2 focus:ring-primary-600 focus:ring-offset-1 rounded"
+                />
+                <span className="text-sm text-gray-700">{t('topologyViewer.layers.eigrp')}</span>
+              </label>
+
+              <label className="flex items-center gap-2 cursor-pointer hover:bg-gray-50 px-2 py-1 rounded">
+                <input
+                  type="checkbox"
+                  checked={visibleLayers.has('isis')}
+                  onChange={() => toggleVisibleLayer('isis')}
+                  className="w-4 h-4 text-primary-600 focus:ring-2 focus:ring-primary-600 focus:ring-offset-1 rounded"
+                />
+                <span className="text-sm text-gray-700">{t('topologyViewer.layers.isis')}</span>
+              </label>
+
+              <label className="flex items-center gap-2 cursor-pointer hover:bg-gray-50 px-2 py-1 rounded">
+                <input
+                  type="checkbox"
+                  checked={visibleLayers.has('ipsec')}
+                  onChange={() => toggleVisibleLayer('ipsec')}
+                  className="w-4 h-4 text-primary-600 focus:ring-2 focus:ring-primary-600 focus:ring-offset-1 rounded"
+                />
+                <span className="text-sm text-gray-700">{t('topologyViewer.layers.ipsec')}</span>
+              </label>
+            </div>
           )}
-        </button>
+        </div>
 
-        {layersDropdownOpen && (
-          <div className="mt-3 space-y-2 border-t pt-3" role="group" aria-label={t('topologyViewer.layers.title')}>
-            <label className="flex items-center gap-2 cursor-pointer hover:bg-gray-50 px-2 py-1 rounded">
-              <input
-                type="checkbox"
-                checked={visibleLayers.has('physical')}
-                onChange={() => toggleVisibleLayer('physical')}
-                className="w-4 h-4 text-primary-600 focus:ring-2 focus:ring-primary-600 focus:ring-offset-1 rounded"
-              />
-              <span className="text-sm text-gray-700">{t('topologyViewer.layers.physical')}</span>
-            </label>
-
-            <label className="flex items-center gap-2 cursor-pointer hover:bg-gray-50 px-2 py-1 rounded">
-              <input
-                type="checkbox"
-                checked={visibleLayers.has('layer1')}
-                onChange={() => toggleVisibleLayer('layer1')}
-                className="w-4 h-4 text-primary-600 focus:ring-2 focus:ring-primary-600 focus:ring-offset-1 rounded"
-              />
-              <span className="text-sm text-gray-700">{t('topologyViewer.layers.layer1')}</span>
-            </label>
-
-            <label className="flex items-center gap-2 cursor-pointer hover:bg-gray-50 px-2 py-1 rounded">
-              <input
-                type="checkbox"
-                checked={visibleLayers.has('layer3')}
-                onChange={() => toggleVisibleLayer('layer3')}
-                className="w-4 h-4 text-primary-600 focus:ring-2 focus:ring-primary-600 focus:ring-offset-1 rounded"
-              />
-              <span className="text-sm text-gray-700">{t('topologyViewer.layers.layer3')}</span>
-            </label>
-
-            <label className="flex items-center gap-2 cursor-pointer hover:bg-gray-50 px-2 py-1 rounded">
-              <input
-                type="checkbox"
-                checked={visibleLayers.has('ospf')}
-                onChange={() => toggleVisibleLayer('ospf')}
-                className="w-4 h-4 text-primary-600 focus:ring-2 focus:ring-primary-600 focus:ring-offset-1 rounded"
-              />
-              <span className="text-sm text-gray-700">{t('topologyViewer.layers.ospf')}</span>
-            </label>
-
-            <label className="flex items-center gap-2 cursor-pointer hover:bg-gray-50 px-2 py-1 rounded">
-              <input
-                type="checkbox"
-                checked={visibleLayers.has('bgp')}
-                onChange={() => toggleVisibleLayer('bgp')}
-                className="w-4 h-4 text-primary-600 focus:ring-2 focus:ring-primary-600 focus:ring-offset-1 rounded"
-              />
-              <span className="text-sm text-gray-700">{t('topologyViewer.layers.bgp')}</span>
-            </label>
-
-            <label className="flex items-center gap-2 cursor-pointer hover:bg-gray-50 px-2 py-1 rounded">
-              <input
-                type="checkbox"
-                checked={visibleLayers.has('vxlan')}
-                onChange={() => toggleVisibleLayer('vxlan')}
-                className="w-4 h-4 text-primary-600 focus:ring-2 focus:ring-primary-600 focus:ring-offset-1 rounded"
-              />
-              <span className="text-sm text-gray-700">{t('topologyViewer.layers.vxlan')}</span>
-            </label>
-
-            <label className="flex items-center gap-2 cursor-pointer hover:bg-gray-50 px-2 py-1 rounded">
-              <input
-                type="checkbox"
-                checked={visibleLayers.has('eigrp')}
-                onChange={() => toggleVisibleLayer('eigrp')}
-                className="w-4 h-4 text-primary-600 focus:ring-2 focus:ring-primary-600 focus:ring-offset-1 rounded"
-              />
-              <span className="text-sm text-gray-700">{t('topologyViewer.layers.eigrp')}</span>
-            </label>
-
-            <label className="flex items-center gap-2 cursor-pointer hover:bg-gray-50 px-2 py-1 rounded">
-              <input
-                type="checkbox"
-                checked={visibleLayers.has('isis')}
-                onChange={() => toggleVisibleLayer('isis')}
-                className="w-4 h-4 text-primary-600 focus:ring-2 focus:ring-primary-600 focus:ring-offset-1 rounded"
-              />
-              <span className="text-sm text-gray-700">{t('topologyViewer.layers.isis')}</span>
-            </label>
-
-            <label className="flex items-center gap-2 cursor-pointer hover:bg-gray-50 px-2 py-1 rounded">
-              <input
-                type="checkbox"
-                checked={visibleLayers.has('ipsec')}
-                onChange={() => toggleVisibleLayer('ipsec')}
-                className="w-4 h-4 text-primary-600 focus:ring-2 focus:ring-primary-600 focus:ring-offset-1 rounded"
-              />
-              <span className="text-sm text-gray-700">{t('topologyViewer.layers.ipsec')}</span>
-            </label>
+        {showPartialDataWarning && (
+          <div className="max-w-sm rounded-lg border border-yellow-200 bg-yellow-50 px-4 py-3 text-sm text-yellow-900 shadow-lg" role="status">
+            <div className="flex items-start gap-2">
+              <AlertTriangle className="mt-0.5 h-4 w-4 flex-shrink-0" aria-hidden="true" />
+              <div className="flex-1">
+                <p className="font-medium">{t('topologyViewer.partialData.title')}</p>
+                <p className="mt-1 text-xs">{t('topologyViewer.partialData.description', { count: topologyQueryErrors.length })}</p>
+              </div>
+              <button
+                type="button"
+                onClick={() => setDismissedPartialDataSignature(partialDataSignature)}
+                className="-mr-1 -mt-1 rounded p-1 text-yellow-800 hover:bg-yellow-100 focus:outline-none focus:ring-2 focus:ring-primary-600"
+                aria-label={t('topologyViewer.partialData.dismiss')}
+                title={t('topologyViewer.partialData.dismiss')}
+              >
+                <X className="h-4 w-4" aria-hidden="true" />
+              </button>
+            </div>
           </div>
         )}
       </div>

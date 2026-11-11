@@ -328,6 +328,8 @@ http {
 
     # Increase buffer sizes
     client_body_buffer_size 128k;
-    client_max_body_size 10m;
+    # Match backend MAX_CONTENT_LENGTH (12 MiB request body, multipart overhead included);
+    # the 10 MiB single-file limit is enforced by the backend
+    client_max_body_size 12m;
 }
 ```

@@ -4,6 +4,7 @@ import { useTranslation } from 'react-i18next'
 import { useUIStore, type SidebarTab } from '../store'
 import { SidebarResizeHandle } from './SidebarResizeHandle'
 import { logger } from '../utils/logger'
+import { useRovingTabIndex } from '../hooks/useRovingTabIndex'
 
 // Lazy-loaded panels to improve initial page load performance
 const OverviewPanel = lazy(() => import('./panels/OverviewPanel'))
@@ -12,6 +13,8 @@ const EdgeDetailsPanel = lazy(() => import('./panels/EdgeDetailsPanel'))
 const ValidationPanel = lazy(() => import('./panels/ValidationPanel'))
 const NetworkAnalysisPanel = lazy(() => import('./panels/NetworkAnalysisPanel'))
 const TraceroutePanel = lazy(() => import('./panels/TraceroutePanel'))
+
+const SUPPORTED_SIDEBAR_TABS: readonly SidebarTab[] = ['overview', 'node-details', 'edge-details', 'analysis', 'traceroute', 'validation']
 
 /**
  * Resizable sidebar with tabbed panels
@@ -24,8 +27,12 @@ export function Sidebar() {
   const sidebarWidth = useUIStore((state) => state.sidebarWidth)
   const selectedNodeId = useUIStore((state) => state.selectedNodeId)
   const selectedEdgeId = useUIStore((state) => state.selectedEdgeId)
-  const supportedTabs: SidebarTab[] = ['overview', 'node-details', 'edge-details', 'analysis', 'traceroute', 'validation']
-  const activeTab = supportedTabs.includes(sidebarTab) ? sidebarTab : 'overview'
+  const activeTab = SUPPORTED_SIDEBAR_TABS.includes(sidebarTab) ? sidebarTab : 'overview'
+  const { getItemProps: getTabProps } = useRovingTabIndex({
+    items: SUPPORTED_SIDEBAR_TABS,
+    activeItem: activeTab,
+    onSelect: setSidebarTab,
+  })
 
   /**
    * Opens sidebar in a centered popout window
@@ -100,7 +107,7 @@ export function Sidebar() {
             aria-selected={activeTab === tab.id}
             aria-controls={`tabpanel-${tab.id}`}
             id={`tab-${tab.id}`}
-            tabIndex={activeTab === tab.id ? 0 : -1}
+            {...getTabProps(tab.id)}
             className={`flex items-center gap-2 px-4 py-3 text-sm font-medium transition-colors whitespace-nowrap focus:outline-none focus:ring-2 focus:ring-primary-600 focus:ring-inset ${
               activeTab === tab.id
                 ? 'text-primary-600 border-b-2 border-primary-600 bg-primary-50'

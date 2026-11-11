@@ -82,6 +82,12 @@ import type {
 
 const API_BASE_URL = runtimeConfig.apiBaseUrl || 'http://localhost:5000'
 
+// Auth session requests whose 401 must not start a token refresh or another logout
+const AUTH_SESSION_PATHS = ['/auth/logout', '/auth/refresh']
+
+const isAuthSessionRequest = (url: string | undefined): boolean =>
+  !!url && AUTH_SESSION_PATHS.some((path) => url.split('?')[0].endsWith(path))
+
 interface AuthState {
   csrfToken: string | null
   tokenExpiresAt: number | null
@@ -166,7 +172,7 @@ apiClient.interceptors.response.use(
   async (error: AxiosError) => {
     const originalRequest = error.config as AxiosRequestConfig & { _retry?: boolean }
 
-    if (error.response?.status === 401 && !originalRequest._retry) {
+    if (error.response?.status === 401 && !originalRequest._retry && !isAuthSessionRequest(originalRequest.url)) {
       originalRequest._retry = true
 
       try {

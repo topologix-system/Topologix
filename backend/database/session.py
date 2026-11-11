@@ -141,9 +141,129 @@ class DatabaseManager:
         Should only be called when AUTH_ENABLED=true.
         In production, use Alembic migrations instead.
         """
-        from database.models import Base
+        from database.models import Base, User
         Base.metadata.create_all(self.engine)
+        if self.database_url.startswith('sqlite'):
+            self._rebuild_sqlite_table_with_autoincrement(User.__table__)
+        self._add_missing_nullable_columns(User.__table__)
         logger.info("Database tables created")
+
+    def _add_missing_nullable_columns(self, table) -> None:
+        """Add the model's nullable columns that an existing table lacks
+
+        create_all() never alters existing tables. A nullable column without a default is
+        added with ALTER TABLE ADD COLUMN, which SQLite applies without rebuilding the
+        table; existing rows read NULL. Columns that are NOT NULL or have a default are
+        left alone. On MySQL, an existing nullable column whose model type declares
+        fractional-second precision but whose stored DATETIME has none is changed to the
+        model type with ALTER TABLE MODIFY.
+
+        Args:
+            table: SQLAlchemy Table to bring up to date
+        """
+        from sqlalchemy import inspect
+
+        dialect = self.engine.dialect
+        existing_columns = {column['name']: column for column in inspect(self.engine).get_columns(table.name)}
+        missing_columns = [
+            column for column in table.columns
+            if column.name not in existing_columns and column.nullable
+            and column.default is None and column.server_default is None
+        ]
+        whole_second_columns = [
+            column for column in table.columns
+            if dialect.name == 'mysql' and column.name in existing_columns and column.nullable
+            and getattr(column.type.dialect_impl(dialect), 'fsp', None)
+            and not getattr(existing_columns[column.name]['type'], 'fsp', None)
+        ]
+        if not missing_columns and not whole_second_columns:
+            return
+
+        preparer = dialect.identifier_preparer
+        with self.engine.begin() as connection:
+            for column in missing_columns:
+                connection.exec_driver_sql(
+                    f"ALTER TABLE {preparer.format_table(table)} ADD COLUMN "
+                    f"{preparer.format_column(column)} {column.type.compile(dialect=dialect)}"
+                )
+                logger.info(f"Added column {table.name}.{column.name}")
+            for column in whole_second_columns:
+                column_type = column.type.compile(dialect=dialect)
+                connection.exec_driver_sql(
+                    f"ALTER TABLE {preparer.format_table(table)} MODIFY "
+                    f"{preparer.format_column(column)} {column_type} NULL"
+                )
+                logger.info(f"Changed column {table.name}.{column.name} to {column_type}")
+
+    def _rebuild_sqlite_table_with_autoincrement(self, table) -> None:
+        """Rebuild an existing SQLite table that was created without AUTOINCREMENT
+
+        create_all() never alters existing tables, so a table created before its model
+        declared sqlite_autoincrement keeps reusing the highest deleted id. This follows
+        the SQLite table rebuild procedure (create, copy, drop, rename, recreate indexes)
+        in one transaction with foreign key enforcement off, so rows keep their ids and
+        ON DELETE CASCADE does not remove rows that reference the table.
+        No-op when the table is missing or already uses AUTOINCREMENT.
+
+        Args:
+            table: SQLAlchemy Table whose model declares sqlite_autoincrement=True
+        """
+        from sqlalchemy.schema import CreateIndex, CreateTable
+
+        def needs_rebuild(connection) -> bool:
+            row = connection.execute(
+                "SELECT sql FROM sqlite_master WHERE type='table' AND name=?", (table.name,)
+            ).fetchone()
+            return row is not None and 'AUTOINCREMENT' not in row[0].upper()
+
+        rebuild_name = f"{table.name}__autoincrement_rebuild"
+        pooled_connection = self.engine.raw_connection()
+        try:
+            connection = pooled_connection.driver_connection
+            if not needs_rebuild(connection):
+                return
+
+            previous_isolation_level = connection.isolation_level
+            connection.isolation_level = None
+            connection.execute("PRAGMA foreign_keys=OFF")
+            try:
+                connection.execute("BEGIN IMMEDIATE")
+                try:
+                    if needs_rebuild(connection):
+                        existing_columns = {
+                            row[1] for row in connection.execute(f'PRAGMA table_info("{table.name}")')
+                        }
+                        columns = ", ".join(
+                            f'"{column.name}"' for column in table.columns if column.name in existing_columns
+                        )
+                        violations_before = len(connection.execute("PRAGMA foreign_key_check").fetchall())
+
+                        create_sql = str(CreateTable(table).compile(dialect=self.engine.dialect))
+                        connection.execute(create_sql.replace(
+                            f"CREATE TABLE {table.name} (", f'CREATE TABLE "{rebuild_name}" (', 1
+                        ))
+                        connection.execute(
+                            f'INSERT INTO "{rebuild_name}" ({columns}) SELECT {columns} FROM "{table.name}"'
+                        )
+                        connection.execute(f'DROP TABLE "{table.name}"')
+                        connection.execute(f'ALTER TABLE "{rebuild_name}" RENAME TO "{table.name}"')
+                        for index in table.indexes:
+                            connection.execute(str(CreateIndex(index).compile(dialect=self.engine.dialect)))
+
+                        if len(connection.execute("PRAGMA foreign_key_check").fetchall()) > violations_before:
+                            raise RuntimeError(
+                                f"Rebuilding table {table.name} with AUTOINCREMENT would break foreign keys"
+                            )
+                        logger.info(f"Rebuilt SQLite table {table.name} with AUTOINCREMENT")
+                    connection.execute("COMMIT")
+                except Exception:
+                    connection.execute("ROLLBACK")
+                    raise
+            finally:
+                connection.execute("PRAGMA foreign_keys=ON")
+                connection.isolation_level = previous_isolation_level
+        finally:
+            pooled_connection.close()
 
     def drop_all(self):
         """Drop all tables (use with caution!)

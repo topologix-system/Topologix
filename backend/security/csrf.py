@@ -187,8 +187,8 @@ class CSRFProtect:
                 return token
 
         # Check JSON data
-        if request.is_json and request.json:
-            token = request.json.get(self.token_form_field)
+        if request.is_json and isinstance(request.get_json(silent=True), dict):
+            token = request.get_json(silent=True).get(self.token_form_field)
             if token:
                 return token
 

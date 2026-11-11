@@ -21,7 +21,39 @@ env:
   REGISTRY: ghcr.io
 
 jobs:
+  verify:
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: read
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+
+      - name: Set up Node.js 20
+        uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6.5.0
+        with:
+          node-version: '20.11'
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: Install frontend dependencies
+        run: npm ci --ignore-scripts --no-audit --no-fund
+        working-directory: ./frontend
+
+      - name: Lint frontend
+        run: npm run lint
+        working-directory: ./frontend
+
+      - name: Type-check and build frontend
+        run: npm run build:check
+        working-directory: ./frontend
+
+      - name: Run frontend unit tests
+        run: npm test
+        working-directory: ./frontend
+
   build-and-push:
+    needs: verify
     runs-on: ubuntu-24.04
     permissions:
       actions: read          # Required for SARIF upload in private repos
@@ -72,50 +104,110 @@ jobs:
             type=sha,prefix=sha-,format=short
             type=raw,value=latest,enable={{is_default_branch}}
 
-      - name: Build and push Docker image
-        id: build-push
+      - name: Build Docker image for pull request
+        if: github.event_name == 'pull_request'
         uses: docker/build-push-action@bcafcacb16a39f128d818304e6c9c0c18556b85f # v7.1.0
         with:
           context: ./frontend
           file: ./frontend/Dockerfile
           platforms: linux/amd64,linux/arm64
-          push: ${{ github.event_name != 'pull_request' }}
-          tags: ${{ steps.meta.outputs.tags }}
+          push: false
           labels: ${{ steps.meta.outputs.labels }}
           cache-from: type=gha
           cache-to: type=gha,mode=max
           sbom: true
           provenance: mode=max
 
-      - name: Run Trivy vulnerability scanner
-        uses: aquasecurity/trivy-action@57a97c7e7821a5776cebc9bb87c984fa69cba8f1 # v0.35.0
+      - name: Build and push Docker image by digest
+        id: build-push
+        if: github.event_name != 'pull_request'
+        uses: docker/build-push-action@bcafcacb16a39f128d818304e6c9c0c18556b85f # v7.1.0
         with:
-          scan-type: 'fs'
-          scan-ref: './frontend'
+          context: ./frontend
+          file: ./frontend/Dockerfile
+          platforms: linux/amd64,linux/arm64
+          push: true
+          tags:
+          labels: ${{ steps.meta.outputs.labels }}
+          outputs: type=image,name=${{ env.REGISTRY }}/${{ steps.repo_lowercase.outputs.value }},push-by-digest=true,name-canonical=true
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+          sbom: true
+          provenance: mode=max
+
+      # The image scan is a hard gate: exit-code 1 for fixed HIGH/CRITICAL findings.
+      # If current base images contain such CVEs, the first push fails and publishes no tags.
+      # Remediate via a C04 base-image bump or a reviewed, expiring .trivyignore;
+      # do not restore continue-on-error. Trivy selects manifests via TRIVY_PLATFORM.
+      - name: Scan linux/amd64 image with Trivy
+        if: github.event_name != 'pull_request'
+        uses: aquasecurity/trivy-action@57a97c7e7821a5776cebc9bb87c984fa69cba8f1 # v0.35.0
+        env:
+          TRIVY_PLATFORM: linux/amd64
+        with:
+          scan-type: 'image'
+          image-ref: '${{ env.REGISTRY }}/${{ steps.repo_lowercase.outputs.value }}@${{ steps.build-push.outputs.digest }}'
           format: 'sarif'
-          output: 'trivy-frontend-results.sarif'
+          output: 'trivy-frontend-amd64-results.sarif'
           severity: 'CRITICAL,HIGH'
           limit-severities-for-sarif: 'true'
-          exit-code: '0'
+          exit-code: '1'
           ignore-unfixed: 'true'
-        continue-on-error: true
-        if: github.event_name != 'pull_request'
+
+      - name: Scan linux/arm64 image with Trivy
+        if: always() && github.event_name != 'pull_request' && steps.build-push.outcome == 'success'
+        uses: aquasecurity/trivy-action@57a97c7e7821a5776cebc9bb87c984fa69cba8f1 # v0.35.0
+        env:
+          TRIVY_PLATFORM: linux/arm64
+        with:
+          scan-type: 'image'
+          image-ref: '${{ env.REGISTRY }}/${{ steps.repo_lowercase.outputs.value }}@${{ steps.build-push.outputs.digest }}'
+          format: 'sarif'
+          output: 'trivy-frontend-arm64-results.sarif'
+          severity: 'CRITICAL,HIGH'
+          limit-severities-for-sarif: 'true'
+          exit-code: '1'
+          ignore-unfixed: 'true'
 
       - name: Upload Trivy SARIF as workflow artifact
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: trivy-frontend-sarif
-          path: trivy-frontend-results.sarif
+          path: trivy-frontend-*-results.sarif
+          if-no-files-found: warn
           retention-days: 30
-        if: always() && github.event_name != 'pull_request'
+        if: always() && github.event_name != 'pull_request' && steps.build-push.outcome == 'success'
 
-      - name: Upload Trivy results to GitHub Security
+      - name: Upload amd64 Trivy results to GitHub Security
         uses: github/codeql-action/upload-sarif@c10b8064de6f491fea524254123dbe5e09572f13 # v4.35.1
         with:
-          sarif_file: 'trivy-frontend-results.sarif'
-          category: 'frontend-image'
+          sarif_file: 'trivy-frontend-amd64-results.sarif'
+          category: 'frontend-image-linux-amd64'
         continue-on-error: true
-        if: github.event_name != 'pull_request'
+        if: always() && github.event_name != 'pull_request' && hashFiles('trivy-frontend-amd64-results.sarif') != ''
+
+      - name: Upload arm64 Trivy results to GitHub Security
+        uses: github/codeql-action/upload-sarif@c10b8064de6f491fea524254123dbe5e09572f13 # v4.35.1
+        with:
+          sarif_file: 'trivy-frontend-arm64-results.sarif'
+          category: 'frontend-image-linux-arm64'
+        continue-on-error: true
+        if: always() && github.event_name != 'pull_request' && hashFiles('trivy-frontend-arm64-results.sarif') != ''
+
+      - name: Publish tags for scanned digest
+        if: github.event_name != 'pull_request' && success()
+        env:
+          IMAGE_DIGEST: ${{ steps.build-push.outputs.digest }}
+          IMAGE_NAME: ${{ env.REGISTRY }}/${{ steps.repo_lowercase.outputs.value }}
+          IMAGE_TAGS: ${{ steps.meta.outputs.tags }}
+        run: |
+          tag_args=()
+          while IFS= read -r tag; do
+            if [ -n "$tag" ]; then
+              tag_args+=("-t" "$tag")
+            fi
+          done <<< "$IMAGE_TAGS"
+          docker buildx imagetools create "${tag_args[@]}" "${IMAGE_NAME}@${IMAGE_DIGEST}"
 
       - name: Generate SBOM summary
         run: |

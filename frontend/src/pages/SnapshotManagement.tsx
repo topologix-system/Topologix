@@ -163,6 +163,7 @@ export function SnapshotManagement() {
   const [pasteContent, setPasteContent] = useState('')
   const [pasteError, setPasteError] = useState('')
   const [pasteOverwriteConfirmed, setPasteOverwriteConfirmed] = useState(false)
+  const [pasteDiscardConfirmOpen, setPasteDiscardConfirmOpen] = useState(false)
   const fileChangeInProgressRef = useRef<string | null>(null)
   const [collapsedFolderKeys, setCollapsedFolderKeys] = useState<Set<string>>(() => new Set())
 
@@ -380,7 +381,7 @@ export function SnapshotManagement() {
       {
         onSuccess: (snapshot) => {
           if (!snapshot) {
-            setValidationError('Failed to create snapshot')
+            setValidationError(t('snapshots.createFailed'))
             return
           }
 
@@ -392,11 +393,11 @@ export function SnapshotManagement() {
           setFolderDraft(snapshot.folder_name || '')
         },
         onError: (error: unknown) => {
-          setValidationError(extractErrorMessage(error, 'Failed to create snapshot'))
+          setValidationError(extractErrorMessage(error, t('snapshots.createFailed')))
         },
       }
     )
-  }, [newSnapshotName, newSnapshotFolder, createMutation])
+  }, [newSnapshotName, newSnapshotFolder, createMutation, t])
 
   /**
    * Persist folder classification for the selected snapshot
@@ -414,7 +415,7 @@ export function SnapshotManagement() {
       {
         onSuccess: (snapshot) => {
           if (!snapshot) {
-            setFolderValidationError('Failed to update snapshot folder')
+            setFolderValidationError(t('snapshots.folderUpdateFailed'))
             return
           }
 
@@ -422,11 +423,11 @@ export function SnapshotManagement() {
           setFolderValidationError('')
         },
         onError: (error: unknown) => {
-          setFolderValidationError(extractErrorMessage(error, 'Failed to update snapshot folder'))
+          setFolderValidationError(extractErrorMessage(error, t('snapshots.folderUpdateFailed')))
         },
       }
     )
-  }, [folderDraft, selectedSnapshot, updateMutation])
+  }, [folderDraft, selectedSnapshot, t, updateMutation])
 
   /**
    * Handle snapshot deletion with confirmation dialog
@@ -860,11 +861,78 @@ export function SnapshotManagement() {
 
   const closePasteCreateDialog = useCallback(() => {
     setPasteCreateOpen(false)
+    setPasteDiscardConfirmOpen(false)
     setPasteFilename(DEFAULT_PASTE_CONFIG_FILENAME)
     setPasteContent('')
     setPasteError('')
     setPasteOverwriteConfirmed(false)
   }, [])
+
+  /**
+   * Escape / backdrop dismissal of the paste-create dialog
+   * Ignored while its upload is pending (so the result stays visible); asks before discarding pasted text
+   */
+  const dismissPasteCreateDialog = useCallback(() => {
+    if (uploadMutation.isPending) return
+    if (pasteContent) {
+      setPasteDiscardConfirmOpen(true)
+      return
+    }
+    closePasteCreateDialog()
+  }, [closePasteCreateDialog, pasteContent, uploadMutation.isPending])
+
+  const cancelPasteDiscard = useCallback(() => {
+    setPasteDiscardConfirmOpen(false)
+  }, [])
+
+  /**
+   * Opens the create dialog without an error left over from an earlier request
+   */
+  const openCreateDialog = useCallback(() => {
+    setValidationError('')
+    setShowCreateDialog(true)
+  }, [])
+
+  const closeCreateDialog = useCallback(() => {
+    setShowCreateDialog(false)
+    setValidationError('')
+    setNewSnapshotName('')
+    setNewSnapshotFolder('')
+  }, [])
+
+  /**
+   * Escape / backdrop dismissal of the create dialog
+   * Ignored while the create request is pending (so its result stays visible)
+   */
+  const dismissCreateDialog = useCallback(() => {
+    if (createMutation.isPending) return
+    closeCreateDialog()
+  }, [closeCreateDialog, createMutation.isPending])
+
+  /**
+   * Escape dismisses the open create dialog / paste-create dialog unless an inner control
+   * (e.g. an open combobox) or the discard confirmation handled it
+   * An Escape that ends an IME composition (isComposing / keyCode 229) belongs to the IME and is ignored
+   * The paste-create Escape is marked handled (preventDefault): the discard confirmation it opens is a
+   * Headless UI Dialog that mounts and adds its window keydown listener during this same dispatch, and
+   * that listener skips defaultPrevented events, so this Escape does not also close the confirmation
+   */
+  useEffect(() => {
+    if (!showCreateDialog && !pasteCreateOpen) return
+
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.isComposing || event.keyCode === 229) return
+      if (event.key !== 'Escape' || event.defaultPrevented) return
+      if (showCreateDialog) dismissCreateDialog()
+      if (pasteCreateOpen && !pasteDiscardConfirmOpen) {
+        event.preventDefault()
+        dismissPasteCreateDialog()
+      }
+    }
+
+    document.addEventListener('keydown', handleKeyDown)
+    return () => document.removeEventListener('keydown', handleKeyDown)
+  }, [dismissCreateDialog, dismissPasteCreateDialog, pasteCreateOpen, pasteDiscardConfirmOpen, showCreateDialog])
 
   const handlePasteCreateSubmit = useCallback(() => {
     if (!selectedSnapshot) return
@@ -1114,7 +1182,7 @@ export function SnapshotManagement() {
               {t('snapshots.compareSnapshots')}
             </Link>
             <button
-              onClick={() => setShowCreateDialog(true)}
+              onClick={openCreateDialog}
               className="flex items-center gap-2 px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors font-medium shadow-sm hover:shadow-md focus:outline-none focus:ring-2 focus:ring-primary-600 focus:ring-offset-2"
               aria-label={t('snapshots.newSnapshot')}
             >
@@ -1660,12 +1728,7 @@ export function SnapshotManagement() {
           role="dialog"
           aria-modal="true"
           aria-labelledby="create-dialog-title"
-          onClick={() => {
-            setShowCreateDialog(false)
-            setValidationError('')
-            setNewSnapshotName('')
-            setNewSnapshotFolder('')
-          }}
+          onClick={dismissCreateDialog}
         >
           <div
             className="bg-white rounded-lg shadow-xl p-6 w-full max-w-md"
@@ -1676,12 +1739,7 @@ export function SnapshotManagement() {
                 {t('snapshots.createDialog.title')}
               </h3>
               <button
-                onClick={() => {
-                  setShowCreateDialog(false)
-                  setValidationError('')
-                  setNewSnapshotName('')
-                  setNewSnapshotFolder('')
-                }}
+                onClick={closeCreateDialog}
                 className="p-1 hover:bg-gray-100 rounded focus:outline-none focus:ring-2 focus:ring-primary-600"
                 aria-label={t('common.closeDialog')}
               >
@@ -1740,12 +1798,7 @@ export function SnapshotManagement() {
 
               <div className="flex gap-3 justify-end">
                 <button
-                  onClick={() => {
-                    setShowCreateDialog(false)
-                    setValidationError('')
-                    setNewSnapshotName('')
-                    setNewSnapshotFolder('')
-                  }}
+                  onClick={closeCreateDialog}
                   className="px-4 py-2 text-gray-800 hover:bg-gray-100 rounded-lg transition-colors font-medium focus:outline-none focus:ring-2 focus:ring-primary-600 focus:ring-offset-1"
                 >
                   {t('common.cancel')}
@@ -1771,7 +1824,7 @@ export function SnapshotManagement() {
           role="dialog"
           aria-modal="true"
           aria-labelledby="paste-create-dialog-title"
-          onClick={closePasteCreateDialog}
+          onClick={dismissPasteCreateDialog}
         >
           <div
             className="max-h-[90vh] w-full max-w-3xl overflow-y-auto rounded-lg bg-white p-6 shadow-xl"
@@ -1875,6 +1928,17 @@ export function SnapshotManagement() {
           </div>
         </div>
       )}
+
+      <ConfirmDialog
+        isOpen={pasteDiscardConfirmOpen}
+        title={t('snapshots.pasteCreate.discardTitle')}
+        message={t('snapshots.pasteCreate.discardMessage')}
+        confirmText={t('snapshots.pasteCreate.discardConfirm')}
+        cancelText={t('common.cancel')}
+        onConfirm={closePasteCreateDialog}
+        onCancel={cancelPasteDiscard}
+        variant="warning"
+      />
 
       {/* Delete confirmation dialog */}
       <ConfirmDialog

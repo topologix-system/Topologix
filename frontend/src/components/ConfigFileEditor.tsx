@@ -1,10 +1,11 @@
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { Loader2, Save, X } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
 import {
   loadNetworkConfigCodeMirror,
   type CodeMirrorBundle,
 } from '../lib/codemirror/loadCodeMirror'
+import { applyLineSeparator, detectLineSeparator } from '../lib/codemirror/lineSeparator'
 
 export interface ConfigFileEditorProps {
   filename: string
@@ -33,6 +34,12 @@ export function ConfigFileEditor({
   const containerRef = useRef<HTMLDivElement | null>(null)
   const viewRef = useRef<import('@codemirror/view').EditorView | null>(null)
   const latestDraftRef = useRef(draft)
+  const [lineSeparator] = useState(() => detectLineSeparator(draft))
+  // The textarea reports LF line breaks, so it is given the LF form of the draft
+  const fallbackValue = useMemo(
+    () => (lineSeparator === '\r\n' ? draft.replace(/\r\n/g, '\n') : draft),
+    [draft, lineSeparator]
+  )
 
   useEffect(() => {
     latestDraftRef.current = draft
@@ -95,8 +102,8 @@ export function ConfigFileEditor({
     if (editorMode === 'fallback') {
       return (
         <textarea
-          value={draft}
-          onChange={(event) => onDraftChange(event.target.value)}
+          value={fallbackValue}
+          onChange={(event) => onDraftChange(applyLineSeparator(event.target.value, lineSeparator))}
           spellCheck={false}
           className="h-96 w-full resize-y rounded-lg border border-gray-300 bg-white p-3 font-mono text-sm leading-6 text-gray-900 shadow-sm focus:border-primary-600 focus:outline-none focus:ring-2 focus:ring-primary-600"
           aria-label={t('snapshots.configEditor.textareaAria', { name: filename })}

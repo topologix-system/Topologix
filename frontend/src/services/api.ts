@@ -21,6 +21,7 @@ import type {
   NodeProperties,
   InterfaceProperties,
   Route,
+  LpmRoute,
   OSPFProcessConfig,
   OSPFAreaConfig,
   OSPFInterfaceConfig,
@@ -98,6 +99,12 @@ import type {
 
 const API_BASE_URL = runtimeConfig.apiBaseUrl || ''
 const AUTH_ENABLED = runtimeConfig.authEnabled
+
+// Auth session requests whose 401 must not start a token refresh or another logout
+const AUTH_SESSION_PATHS = ['/auth/logout', '/auth/refresh']
+
+const isAuthSessionRequest = (url: string | undefined): boolean =>
+  !!url && AUTH_SESSION_PATHS.some((path) => url.split('?')[0].endsWith(path))
 
 interface AuthState {
   csrfToken: string | null
@@ -203,7 +210,7 @@ apiClient.interceptors.response.use(
     if (AUTH_ENABLED) {
       const originalRequest = error.config as AxiosRequestConfig & { _retry?: boolean }
 
-      if (error.response?.status === 401 && !originalRequest._retry) {
+      if (error.response?.status === 401 && !originalRequest._retry && !isAuthSessionRequest(originalRequest.url)) {
         originalRequest._retry = true
 
         try {
@@ -1132,7 +1139,7 @@ export const topologyAPI = {
   },
 
   async getLpmRoutes(request: { ip: string; nodes?: string | string[]; vrfs?: string | string[] }) {
-    const response = await apiClient.post<APIResponse<any[]>>('/topology/lpm-routes', request)
+    const response = await apiClient.post<APIResponse<LpmRoute[]>>('/topology/lpm-routes', request)
     return response.data.data
   },
 

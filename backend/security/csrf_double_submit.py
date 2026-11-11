@@ -167,8 +167,8 @@ class DoubleSubmitCSRFProtect:
             return token
 
         # Check JSON body
-        if request.is_json and request.json:
-            token = request.json.get('csrf_token')
+        if request.is_json and isinstance(request.get_json(silent=True), dict):
+            token = request.get_json(silent=True).get('csrf_token')
             if token:
                 return token
 

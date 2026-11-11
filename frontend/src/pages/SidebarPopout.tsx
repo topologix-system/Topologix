@@ -13,6 +13,7 @@ import { useTranslation } from 'react-i18next'
 import { useUIStore, type SidebarTab } from '../store'
 import { NodeSelector } from '../components/NodeSelector'
 import { logger } from '../utils/logger'
+import { useRovingTabIndex } from '../hooks/useRovingTabIndex'
 
 // Lazy load panels to reduce initial bundle size and API requests
 const OverviewPanel = lazy(() => import('../components/panels/OverviewPanel'))
@@ -47,7 +48,9 @@ export function SidebarPopout() {
   const setSelectedNode = useUIStore((state) => state.setSelectedNode)
   const setSelectedEdge = useUIStore((state) => state.setSelectedEdge)
   const clearSelection = useUIStore((state) => state.clearSelection)
-  const [localTab, setLocalTab] = useState<SidebarTab>(() => getInitialSidebarTab(sidebarTab))
+  const [initialTab] = useState<SidebarTab>(() => getInitialSidebarTab(sidebarTab))
+  const [urlStateApplied, setUrlStateApplied] = useState(false)
+  const currentTab = urlStateApplied ? sidebarTab : initialTab
 
   /**
    * Tab configuration array for popout window
@@ -62,7 +65,14 @@ export function SidebarPopout() {
     { id: 'traceroute', label: t('sidebar.tabs.traceroute'), icon: <Network className="w-4 h-4" /> },
     { id: 'validation', label: t('sidebar.tabs.validation'), icon: <AlertCircle className="w-4 h-4" /> },
   ], [t])
-  const activeTab = tabs.some((tab) => tab.id === localTab) ? localTab : 'overview'
+  const activeTab = tabs.some((tab) => tab.id === currentTab) ? currentTab : 'overview'
+  const tabIds = useMemo(() => tabs.map((tab) => tab.id), [tabs])
+
+  const { getItemProps: getTabProps } = useRovingTabIndex({
+    items: tabIds,
+    activeItem: activeTab,
+    onSelect: setSidebarTab,
+  })
 
   useEffect(() => {
     const params = new URLSearchParams(window.location.search)
@@ -79,13 +89,9 @@ export function SidebarPopout() {
     }
 
     if (isSupportedSidebarTab(requestedTab)) {
-      setLocalTab(requestedTab)
       setSidebarTab(requestedTab)
-    } else if (requestedNode) {
-      setLocalTab('node-details')
-    } else if (requestedEdge) {
-      setLocalTab('edge-details')
     }
+    setUrlStateApplied(true)
   }, [clearSelection, setSelectedEdge, setSelectedNode, setSidebarTab])
 
   // Update window title based on active tab
@@ -117,15 +123,12 @@ export function SidebarPopout() {
         {tabs.map((tab) => (
           <button
             key={tab.id}
-            onClick={() => {
-              setLocalTab(tab.id)
-              setSidebarTab(tab.id)
-            }}
+            onClick={() => setSidebarTab(tab.id)}
             role="tab"
             aria-selected={activeTab === tab.id}
             aria-controls={`tabpanel-${tab.id}`}
             id={`tab-${tab.id}`}
-            tabIndex={activeTab === tab.id ? 0 : -1}
+            {...getTabProps(tab.id)}
             className={`flex items-center gap-2 px-4 py-3 text-sm font-medium transition-colors whitespace-nowrap focus:outline-none focus:ring-2 focus:ring-primary-600 focus:ring-inset ${
               activeTab === tab.id
                 ? 'text-primary-600 border-b-2 border-primary-600 bg-primary-50'

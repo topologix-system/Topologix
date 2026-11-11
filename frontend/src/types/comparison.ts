@@ -21,6 +21,15 @@ export interface ComparisonResult {
   edges: EdgesDiff
   routes: RoutesDiff
   reachability: ReachabilityDiff[]
+  reachability_error?: ReachabilityError | null
+}
+
+/**
+ * Reason differential reachability could not run; node, edge and route diffs are still returned
+ */
+export interface ReachabilityError {
+  message: string
+  reason?: string | null
 }
 
 /**
@@ -86,6 +95,8 @@ export interface ModifiedRoute {
   vrf: string
   base_next_hop?: string
   comparison_next_hop?: string
+  base_next_hops?: string[]
+  comparison_next_hops?: string[]
   base_protocol?: string
   comparison_protocol?: string
 }
