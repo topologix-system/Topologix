@@ -1,5 +1,5 @@
-# Fixed Python 3.11.11 for build reproducibility
-FROM python:3.11.11-slim
+# Fixed Python 3.11.18 (Debian bookworm) for build reproducibility
+FROM python:3.11.18-slim-bookworm
 
 WORKDIR /app
 
@@ -13,6 +13,9 @@ RUN apt-get update && \
 
 # Install Python dependencies (leverage layer caching)
 COPY requirements.txt .
+# Upgrade packaging tools bundled with the base image
+# pip is capped below 26.2: 26.2+ embeds an SBOM declaring vendored setuptools 70.3.0, which Trivy reports as CVE-2025-47273 (lift once pip vendors setuptools >= 78.1.1)
+RUN pip install --no-cache-dir --upgrade "pip<26.2" "setuptools>=84" "wheel>=0.48"
 RUN pip install --no-cache-dir -r requirements.txt
 
 # Copy application code

@@ -1,9 +1,8 @@
 # check=skip=SecretsUsedInArgOrEnv
 # Multi-stage build for production-ready frontend
 # Stage 1: Build the application
-# Fixed Node.js 20.11 and Alpine 3.19 to ensure build reproducibility
-# and QEMU ARM64 compatibility (resolves illegal instruction error)
-FROM node:20.11-alpine3.19 AS builder
+# Fixed Node.js 20.20.2 and Alpine 3.23 to ensure build reproducibility
+FROM node:20.20.2-alpine3.23 AS builder
 
 WORKDIR /app
 
@@ -34,8 +33,10 @@ ENV VITE_TIMEZONE=${VITE_TIMEZONE}
 RUN npm run build
 
 # Stage 2: Serve with nginx
-# Fixed nginx 1.25 for stability and security
-FROM nginx:1.25-alpine
+# Fixed nginx 1.30.6 for stability and security
+FROM nginx:1.30.6-alpine
+# Pull the Alpine security fix for libxslt not yet in the nginx image
+RUN apk upgrade --no-cache libxslt
 
 # Copy built static files from builder stage
 COPY --from=builder /app/dist /usr/share/nginx/html

@@ -175,6 +175,8 @@ backend/alembic/*
 frontend/src/__tests__/*
 # Required by frontend/vitest.config.ts.
 !frontend/src/__tests__/setup.ts
+# Imported by UserTable.test.tsx and SnapshotComparison.test.tsx.
+!frontend/src/__tests__/translateEn.ts
 
 # ===== Docker =====
 # 不完全なDocker Compose設定（batfishサービス欠如）
