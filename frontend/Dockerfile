@@ -25,7 +25,7 @@ ENV VITE_TIMEZONE=${VITE_TIMEZONE}
 RUN npm run build
 
 # Stage 2: Serve with nginx
-FROM nginx:1.30.6-alpine
+FROM nginx:1.30.7-alpine
 # Pull the Alpine security fix for libxslt not yet in the nginx image
 RUN apk upgrade --no-cache libxslt
 
