@@ -1,19 +1,20 @@
-"""
-Application configuration with security enhancements
-- Environment-based configuration (development, production, testing)
-- Authentication settings (optional, disabled by default for OSS)
-- Security settings: JWT, CSRF, sessions, rate limiting, CORS
-- Password policy and account lockout configuration
-- File upload validation and size limits
-- Batfish service connection settings
-- Database and Redis configuration for production
-- Audit logging and error handling configuration
-"""
+"""Application configuration with security enhancements"""
+import hashlib
 import logging
+import math
 import os
 import secrets
+import tempfile
 from pathlib import Path
-from typing import Tuple
+from typing import Mapping, Tuple
+
+DEFAULT_DATA_DIR = '/app/data'
+# Bump when a fix changes the body a cached endpoint returns, so results stored under an unchanged APP_BUILD_ID
+# are recomputed.
+RESULT_CACHE_SCHEMA_VERSION = 1
+BUILD_ID_SOURCE_FILES = ('app.py', 'config.py', 'requirements.txt')
+BUILD_ID_SOURCE_DIRS = ('services', 'security', 'database', 'utils', 'models')
+RESULT_IDENTITY_HEADERS = ('X-Topologix-Snapshot-Id', 'X-Topologix-Content-Hash', 'X-Topologix-Cache')
 
 
 def _load_secret(name: str) -> Tuple[str, bool]:
@@ -24,26 +25,88 @@ def _load_secret(name: str) -> Tuple[str, bool]:
     return secrets.token_urlsafe(32), True
 
 
+def _env_text(name: str) -> str:
+    """Return an environment value with empty and whitespace-only values treated as unset."""
+    return (os.getenv(name) or '').strip()
+
+
+def _env_finite_float(name: str, default: str) -> float:
+    """Return an environment value as a finite float; unparsable and non-finite text raise ValueError."""
+    value = float(_env_text(name) or default)
+    if not math.isfinite(value):
+        raise ValueError(f"{name} must be a finite number")
+    return value
+
+
+def resolve_data_dir(env: Mapping[str, str], default_candidate: str) -> Tuple[str, bool]:
+    """Return the persistent data directory and whether it fell back to the system temp directory."""
+    explicit = (env.get('DATA_DIR') or '').strip()
+    if explicit:
+        return explicit, False
+    if os.path.isdir(default_candidate):
+        return default_candidate, False
+    return os.path.join(tempfile.gettempdir(), 'topologix-data'), True
+
+
+def resolve_database_url(
+    env: Mapping[str, str],
+    base_dir: str | Path,
+    data_dir: str | Path,
+    data_dir_explicit: bool,
+) -> str:
+    """Return DATABASE_URL, or the default SQLite URL that moves into an explicit DATA_DIR without a legacy file."""
+    explicit = (env.get('DATABASE_URL') or '').strip()
+    if explicit:
+        return explicit
+
+    legacy_database = Path(base_dir) / 'topologix.db'
+    if data_dir_explicit:
+        if legacy_database.exists():
+            logging.getLogger(__name__).warning(
+                "DATA_DIR is set but the legacy database %s exists; it stays the default database. "
+                "Set DATABASE_URL to choose another database.",
+                legacy_database,
+            )
+            return f'sqlite:///{legacy_database}'
+        return f'sqlite:///{Path(data_dir) / "topologix.db"}'
+    return f'sqlite:///{base_dir}/topologix.db'
+
+
+def derive_backend_build_id(base_dir: str | Path) -> str:
+    """Return sha256 over the backend source set and requirements.txt; mounted data directories are never read."""
+    base = Path(base_dir)
+    sources = [base / name for name in BUILD_ID_SOURCE_FILES]
+    for directory in BUILD_ID_SOURCE_DIRS:
+        root = base / directory
+        if root.is_dir():
+            sources.extend(path for path in root.rglob('*.py') if '__pycache__' not in path.parts)
+    digest = hashlib.sha256()
+    for path in sorted(sources, key=lambda item: item.relative_to(base).as_posix()):
+        try:
+            content = path.read_bytes()
+        except OSError:
+            continue
+        digest.update(path.relative_to(base).as_posix().encode('utf-8') + b'\0')
+        digest.update(hashlib.sha256(content).digest())
+    return digest.hexdigest()
+
+
 class Config:
     """Application configuration with security enhancements"""
 
-    # Environment
     ENV: str = os.getenv('FLASK_ENV', 'development')
     DEBUG: bool = os.getenv('FLASK_DEBUG', 'False') == 'True' and ENV != 'production'
     TESTING: bool = os.getenv('FLASK_TESTING', 'False') == 'True'
 
-    # Flask
     HOST: str = os.getenv('HOST', '0.0.0.0')
     PORT: int = int(os.getenv('PORT', '5000'))
 
-    # Authentication - Optional (disabled by default for OSS distribution)
     AUTH_ENABLED: bool = os.getenv('AUTH_ENABLED', 'false').lower() == 'true'
     AUTH_DEFAULT_ADMIN_USER: str = os.getenv('AUTH_DEFAULT_ADMIN_USER', 'admin')
-    AUTH_DEFAULT_ADMIN_PASS: str = os.getenv('AUTH_DEFAULT_ADMIN_PASS', '')  # Empty requires initial setup
-    AUTH_FORCE_PASSWORD_CHANGE: bool = True  # Force password change on first login
-    ALLOW_REGISTRATION: bool = os.getenv('ALLOW_REGISTRATION', 'true').lower() == 'true'  # Allow self-registration
+    AUTH_DEFAULT_ADMIN_PASS: str = os.getenv('AUTH_DEFAULT_ADMIN_PASS', '')
+    AUTH_FORCE_PASSWORD_CHANGE: bool = True
+    ALLOW_REGISTRATION: bool = os.getenv('ALLOW_REGISTRATION', 'true').lower() == 'true'
 
-    # Security - Secret Keys
     _SECRET_KEY_VALUE, _SECRET_KEY_AUTO = _load_secret('SECRET_KEY')
     SECRET_KEY: str = _SECRET_KEY_VALUE
     SECRET_KEY_AUTO_GENERATED: bool = _SECRET_KEY_AUTO
@@ -56,26 +119,21 @@ class Config:
     CSRF_SECRET_KEY: str = _CSRF_SECRET_VALUE
     CSRF_SECRET_KEY_AUTO_GENERATED: bool = _CSRF_SECRET_AUTO
 
-    # Security - CSRF Mode Configuration
-    # 'session': Session-based synchronized token pattern (current implementation)
-    # 'double-submit': Stateless cookie-based double-submit pattern (long-term solution)
+    # 'session': session-based synchronized token pattern; 'double-submit': stateless double-submit cookie pattern
     CSRF_MODE: str = os.getenv('CSRF_MODE', 'session')
 
-    # Security - Session Configuration
     SESSION_COOKIE_SECURE: bool = ENV == 'production'
     SESSION_COOKIE_HTTPONLY: bool = True
     SESSION_COOKIE_SAMESITE: str = 'Lax'
     PERMANENT_SESSION_LIFETIME: int = 3600  # 1 hour
 
-    # Security - JWT Configuration
     JWT_ACCESS_TOKEN_EXPIRES: int = int(os.getenv(
         'JWT_ACCESS_TOKEN_EXPIRES',
-        '3600'  # 1 hour in seconds (OWASP ASVS 3.5.2 L2 compliant - max 12 hours)
+        '3600'  # 1 hour in seconds
     ))
     JWT_REFRESH_TOKEN_EXPIRES: int = 604800  # 7 days in seconds
     JWT_ALGORITHM: str = 'HS256'
 
-    # Security - Password Policy
     MIN_PASSWORD_LENGTH: int = 12
     REQUIRE_UPPERCASE: bool = True
     REQUIRE_LOWERCASE: bool = True
@@ -84,29 +142,17 @@ class Config:
     PASSWORD_HISTORY_COUNT: int = 5
     PASSWORD_MAX_AGE_DAYS: int = 90
 
-    # Security - Login Rate Limiting (OSS defaults - secure but not too restrictive)
     LOGIN_MAX_ATTEMPTS_PER_IP: int = int(os.getenv('LOGIN_MAX_ATTEMPTS_PER_IP', '10'))
     LOGIN_RATE_WINDOW_MINUTES: int = int(os.getenv('LOGIN_RATE_WINDOW_MINUTES', '15'))
     LOGIN_LOCKOUT_DURATION_MINUTES: int = int(os.getenv('LOGIN_LOCKOUT_DURATION_MINUTES', '30'))
-    # Note: LOGIN_IP_BLOCK_DURATION_MINUTES is not used because IP-based rate limiting
-    # is intentionally disabled to prevent false positives in NAT/NAPT environments.
-    # See backend/security/auth.py line 433-436 for details.
     LOGIN_IP_BLOCK_DURATION_MINUTES: int = int(os.getenv('LOGIN_IP_BLOCK_DURATION_MINUTES', '30'))
 
-    # Security - Account Lockout
     ACCOUNT_LOCKOUT_THRESHOLD: int = int(os.getenv('ACCOUNT_LOCKOUT_THRESHOLD', '5'))
-    # Note: Lockout duration is configured via LOGIN_LOCKOUT_DURATION_MINUTES (in minutes)
 
-    # Security - Reverse Proxy Configuration
-    # Set to True when behind reverse proxy (Caddy/nginx) for proper IP address extraction
     BEHIND_REVERSE_PROXY: bool = os.getenv('BEHIND_REVERSE_PROXY', 'false').lower() == 'true'
     # Number of trusted proxies in chain
-    # - 1 for single nginx (typical Docker setup)
-    # - 2 for Caddy/nginx -> nginx -> Flask
-    # - N for N-layer proxy chain
     TRUSTED_PROXY_COUNT: int = int(os.getenv('TRUSTED_PROXY_COUNT', '1'))
 
-    # Email Configuration
     # EMAIL_PROVIDER options: 'console' (print to console), 'smtp' (send via SMTP), 'disabled' (no email)
     EMAIL_PROVIDER: str = os.getenv('EMAIL_PROVIDER', 'console')
     EMAIL_FROM: str = os.getenv('EMAIL_FROM', 'noreply@topologix.local')
@@ -119,24 +165,18 @@ class Config:
     SMTP_PASSWORD: str = os.getenv('SMTP_PASSWORD', '')
     SMTP_USE_TLS: bool = os.getenv('SMTP_USE_TLS', 'true').lower() == 'true'
 
-    # Password Reset Configuration
     PASSWORD_RESET_TOKEN_EXPIRY: int = int(os.getenv('PASSWORD_RESET_TOKEN_EXPIRY', '3600'))  # 1 hour in seconds
     PASSWORD_RESET_URL_BASE: str = os.getenv('PASSWORD_RESET_URL_BASE', 'http://localhost:3000')  # Frontend base URL
 
-    # Security - File Upload
-    # Allow headroom for multipart boundaries and content-PUT JSON escaping;
-    # per-file content validation stays at 10MB.
     MAX_CONTENT_LENGTH: int = int(os.getenv('MAX_CONTENT_LENGTH', str(12 * 1024 * 1024)))
     ALLOWED_EXTENSIONS: set = {'.cfg', '.conf', '.txt', '.log'}
     UPLOAD_FOLDER: str = os.getenv('UPLOAD_FOLDER', './uploads')
 
-    # Security - Rate Limiting
     RATELIMIT_ENABLED: bool = True
     RATELIMIT_DEFAULT_PER_MINUTE: int = 60
     RATELIMIT_DEFAULT_PER_HOUR: int = 600
     RATELIMIT_STORAGE_URL: str = os.getenv('REDIS_URL', 'memory://')
 
-    # Security - CORS
     CORS_ENABLED: bool = True
     CORS_ORIGINS: list[str] = os.getenv(
         'CORS_ORIGINS',
@@ -152,33 +192,50 @@ class Config:
     CORS_EXPOSE_HEADERS: list[str] = [
         'X-RateLimit-Limit',
         'X-RateLimit-Remaining',
-        'X-RateLimit-Reset'
+        'X-RateLimit-Reset',
+        *RESULT_IDENTITY_HEADERS,
     ]
     CORS_SUPPORTS_CREDENTIALS: bool = True
     CORS_MAX_AGE: int = 3600
 
-    # Batfish
     BATFISH_HOST: str = os.getenv('BATFISH_HOST', 'localhost')
     BATFISH_PORT: int = int(os.getenv('BATFISH_PORT', '9996'))
     BATFISH_NETWORK: str = 'topologix_network'
     BATFISH_SNAPSHOT: str = 'current'
     BATFISH_TIMEOUT: int = 30  # seconds
-    # Upper bound for one Batfish query so a stuck query cannot hold the
-    # process-wide Batfish request lock indefinitely. Applied only under
-    # gevent workers; snapshot initialization is intentionally not bounded.
+    # Upper bound for one Batfish query, applied only under gevent workers.
     BATFISH_QUERY_TIMEOUT_SECONDS: int = max(
         10, int(os.getenv('BATFISH_QUERY_TIMEOUT_SECONDS', '120'))
     )
 
-    # Paths - with security validation
     BASE_DIR: Path = Path(__file__).parent.resolve()
     SNAPSHOTS_DIR: str = os.getenv(
         'SNAPSHOTS_DIR',
         str(BASE_DIR / 'snapshots')
     )
     ALLOWED_SNAPSHOT_PATH: Path = Path(SNAPSHOTS_DIR).resolve()
+    DATA_DIR, DATA_DIR_FELL_BACK = resolve_data_dir(os.environ, DEFAULT_DATA_DIR)
+    DATA_DIR_EXPLICIT: bool = bool(_env_text('DATA_DIR'))
+    RESULT_CACHE_DIR: str = _env_text('RESULT_CACHE_DIR') or os.path.join(DATA_DIR, 'result_cache')
+    SNAPSHOT_HISTORY_DIR: str = _env_text('SNAPSHOT_HISTORY_DIR') or os.path.join(DATA_DIR, 'snapshot_history')
 
-    # Logging
+    DEPLOYMENT_ID: str = _env_text('DEPLOYMENT_ID')
+    RESULT_CACHE_ENABLED: bool = (
+        (_env_text('RESULT_CACHE_ENABLED') or 'true').lower() == 'true' and not DATA_DIR_FELL_BACK
+    )
+    HISTORY_GC_GRACE_SECONDS: int = max(0, int(_env_text('HISTORY_GC_GRACE_SECONDS') or '600'))
+    HISTORY_ACCEPT_STORE_LOSS: str = _env_text('HISTORY_ACCEPT_STORE_LOSS')
+    EXTERNAL_CHANGE_SETTLE_SECONDS: float = max(0.0, _env_finite_float('EXTERNAL_CHANGE_SETTLE_SECONDS', '10'))
+    RESULT_CACHE_MAX_BYTES: int = max(0, int(_env_text('RESULT_CACHE_MAX_BYTES') or str(512 * 1024 * 1024)))
+    RESULT_CACHE_MAX_ENTRIES: int = max(0, int(_env_text('RESULT_CACHE_MAX_ENTRIES') or '4000'))
+    RESULT_CACHE_PROTECT_SECONDS: int = max(0, int(_env_text('RESULT_CACHE_PROTECT_SECONDS') or '900'))
+    RESULT_CACHE_SCHEMA_VERSION: int = RESULT_CACHE_SCHEMA_VERSION
+    BATFISH_VERSION_PROBE_TTL_SECONDS: int = max(0, int(_env_text('BATFISH_VERSION_PROBE_TTL_SECONDS') or '300'))
+    BATFISH_VERSION_GRACE_SECONDS: int = max(0, int(_env_text('BATFISH_VERSION_GRACE_SECONDS') or '3600'))
+    SNAPSHOT_DIFF_MAX_BYTES: int = max(0, int(_env_text('SNAPSHOT_DIFF_MAX_BYTES') or str(512 * 1024)))
+    SNAPSHOT_DIFF_MAX_LINES: int = max(0, int(_env_text('SNAPSHOT_DIFF_MAX_LINES') or '2000'))
+    BACKEND_BUILD_ID: str = _env_text('APP_BUILD_ID') or derive_backend_build_id(BASE_DIR)
+
     LOG_DIR: Path = Path(os.getenv('LOG_DIR', './logs'))
     LOG_LEVEL: str = os.getenv('LOG_LEVEL', 'INFO' if ENV == 'production' else 'DEBUG')
     LOG_FORMAT: str = '%(asctime)s - %(name)s - %(levelname)s - %(message)s'
@@ -186,7 +243,6 @@ class Config:
     LOG_MAX_BYTES: int = 10 * 1024 * 1024  # 10MB
     LOG_BACKUP_COUNT: int = 5
 
-    # Security - Audit Logging
     AUDIT_LOG_ENABLED: bool = True
     AUDIT_LOG_FILE: str = os.getenv('AUDIT_LOG_FILE', str(LOG_DIR / 'topologix_audit.log'))
     AUDIT_LOG_EVENTS: list[str] = [
@@ -197,42 +253,28 @@ class Config:
         'permission_denied', 'rate_limit_exceeded'
     ]
 
-    # Security - Input Validation
     MAX_INPUT_LENGTH: int = 1000
     MAX_JSON_SIZE: int = 1024 * 1024  # 1MB
     ALLOWED_NODE_NAME_PATTERN: str = r'^[a-zA-Z0-9_\-\.]{1,64}$'
     ALLOWED_SNAPSHOT_NAME_PATTERN: str = r'^[a-zA-Z0-9_\-]{1,50}$'
 
-    # Security - Error Handling
     PROPAGATE_EXCEPTIONS: bool = ENV != 'production'
     PRESERVE_CONTEXT_ON_EXCEPTION: bool = False
     TRAP_HTTP_EXCEPTIONS: bool = True
     ERROR_404_HELP: bool = False
 
-    # Database (if using in future)
-    SQLALCHEMY_DATABASE_URI: str = os.getenv(
-        'DATABASE_URL',
-        f'sqlite:///{BASE_DIR}/topologix.db'
-    )
+    # Database (snapshot version history in both auth modes, authentication data under AUTH_ENABLED=true)
+    SQLALCHEMY_DATABASE_URI: str = resolve_database_url(os.environ, BASE_DIR, DATA_DIR, DATA_DIR_EXPLICIT)
     SQLALCHEMY_ECHO: bool = os.getenv('SQLALCHEMY_ECHO', 'false').lower() == 'true'
     SQLALCHEMY_TRACK_MODIFICATIONS: bool = False
 
-    # Redis (for caching and session storage in production)
     REDIS_URL: str = os.getenv('REDIS_URL', 'redis://localhost:6379/0')
     CACHE_TYPE: str = 'redis' if ENV == 'production' else 'simple'
     CACHE_DEFAULT_TIMEOUT: int = 300  # 5 minutes
 
     @classmethod
     def validate_config(cls) -> bool:
-        """Validate configuration settings
-
-        Returns:
-            True if configuration is valid
-
-        Raises:
-            ValueError: If configuration is invalid
-        """
-        # Ensure critical security keys are set in production
+        """Validate configuration settings"""
         if cls.ENV == 'production':
             if cls.SECRET_KEY_AUTO_GENERATED:
                 raise ValueError("SECRET_KEY must be provided when ENV=production")
@@ -245,12 +287,10 @@ class Config:
             if cls.DEBUG:
                 raise ValueError("DEBUG must be False in production")
 
-        # Validate paths
         snapshots_path = Path(cls.SNAPSHOTS_DIR)
         if not snapshots_path.exists():
             snapshots_path.mkdir(parents=True, exist_ok=True)
 
-        # Ensure snapshot directory is within allowed path
         if not str(snapshots_path.resolve()).startswith(str(cls.ALLOWED_SNAPSHOT_PATH)):
             raise ValueError("SNAPSHOTS_DIR is outside allowed path")
 
@@ -258,11 +298,7 @@ class Config:
 
     @classmethod
     def get_safe_config(cls) -> dict:
-        """Get configuration safe for client exposure
-
-        Returns:
-            Dictionary of safe configuration values
-        """
+        """Get configuration safe for client exposure"""
         return {
             'env': cls.ENV,
             'cors_enabled': cls.CORS_ENABLED,
@@ -272,18 +308,22 @@ class Config:
         }
 
 
-# Create configuration instance
 config = Config()
 
-# Warn when secrets are auto-generated (development convenience only)
 if config.SECRET_KEY_AUTO_GENERATED:
     logging.warning("SECRET_KEY not provided; generated random value for this process (do not rely on this in production).")
 if config.JWT_SECRET_KEY_AUTO_GENERATED:
     logging.warning("JWT_SECRET_KEY not provided; generated random value for this process (do not rely on this in production).")
 if config.CSRF_SECRET_KEY_AUTO_GENERATED:
     logging.warning("CSRF_SECRET_KEY not provided; generated random value for this process (do not rely on this in production).")
+if config.DATA_DIR_FELL_BACK:
+    logging.warning(
+        "DATA_DIR is not set and %s does not exist; using temporary directory %s. Snapshot versioning and the "
+        "result cache are disabled; persistent deployments must set DATA_DIR.",
+        DEFAULT_DATA_DIR,
+        config.DATA_DIR,
+    )
 
-# Validate configuration on import
 try:
     config.validate_config()
 except ValueError as e:

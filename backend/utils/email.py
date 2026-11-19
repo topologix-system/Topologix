@@ -1,14 +1,4 @@
-"""
-Email service with multiple provider support
-- EmailProvider: Abstract base class for email providers
-- ConsoleEmailProvider: Prints emails to console (development)
-- SMTPEmailProvider: Sends emails via SMTP server (production)
-- DisabledEmailProvider: Silent mode (no email sending)
-- get_email_provider(): Factory function based on config
-- send_password_reset_email(): Pre-built password reset email template
-- Support for plain text and HTML emails
-- Configurable from EMAIL_PROVIDER environment variable
-"""
+"""Email service with multiple provider support"""
 from abc import ABC, abstractmethod
 from typing import Optional
 import smtplib
@@ -32,17 +22,7 @@ class EmailProvider(ABC):
         body_text: str,
         body_html: Optional[str] = None
     ) -> bool:
-        """Send an email
-
-        Args:
-            to_email: Recipient email address
-            subject: Email subject
-            body_text: Plain text email body
-            body_html: Optional HTML email body
-
-        Returns:
-            True if email was sent successfully
-        """
+        """Send an email"""
         pass
 
 
@@ -56,17 +36,7 @@ class ConsoleEmailProvider(EmailProvider):
         body_text: str,
         body_html: Optional[str] = None
     ) -> bool:
-        """Print email to console
-
-        Args:
-            to_email: Recipient email address
-            subject: Email subject
-            body_text: Plain text email body
-            body_html: Optional HTML email body
-
-        Returns:
-            Always returns True
-        """
+        """Print email to console"""
         logger.info("=" * 80)
         logger.info("CONSOLE EMAIL PROVIDER - Email Details:")
         logger.info(f"To: {to_email}")
@@ -93,34 +63,20 @@ class SMTPEmailProvider(EmailProvider):
         body_text: str,
         body_html: Optional[str] = None
     ) -> bool:
-        """Send email via SMTP
-
-        Args:
-            to_email: Recipient email address
-            subject: Email subject
-            body_text: Plain text email body
-            body_html: Optional HTML email body
-
-        Returns:
-            True if email was sent successfully
-        """
+        """Send email via SMTP"""
         try:
-            # Create message
             msg = MIMEMultipart('alternative')
             msg['Subject'] = subject
             msg['From'] = f"{config.EMAIL_FROM_NAME} <{config.EMAIL_FROM}>"
             msg['To'] = to_email
 
-            # Attach plain text body
             part_text = MIMEText(body_text, 'plain')
             msg.attach(part_text)
 
-            # Attach HTML body if provided
             if body_html:
                 part_html = MIMEText(body_html, 'html')
                 msg.attach(part_html)
 
-            # Connect to SMTP server
             server = smtplib.SMTP(config.SMTP_HOST, config.SMTP_PORT)
             try:
                 if config.SMTP_USE_TLS:
@@ -153,27 +109,13 @@ class DisabledEmailProvider(EmailProvider):
         body_text: str,
         body_html: Optional[str] = None
     ) -> bool:
-        """Do nothing (emails disabled)
-
-        Args:
-            to_email: Recipient email address
-            subject: Email subject
-            body_text: Plain text email body
-            body_html: Optional HTML email body
-
-        Returns:
-            Always returns True
-        """
+        """Do nothing (emails disabled)"""
         logger.debug(f"Email sending is disabled. Would have sent email to {to_email} with subject: {subject}")
         return True
 
 
 def get_email_provider() -> EmailProvider:
-    """Get the configured email provider
-
-    Returns:
-        EmailProvider instance based on configuration
-    """
+    """Get the configured email provider"""
     provider = config.EMAIL_PROVIDER.lower()
 
     if provider == 'console':
@@ -192,23 +134,11 @@ def send_password_reset_email(
     username: str,
     reset_token: str
 ) -> bool:
-    """Send password reset email to user
-
-    Args:
-        to_email: User's email address
-        username: User's username
-        reset_token: Password reset token
-
-    Returns:
-        True if email was sent successfully
-    """
-    # Construct reset URL
+    """Send password reset email to user"""
     reset_url = f"{config.PASSWORD_RESET_URL_BASE}/password-reset/{reset_token}"
 
-    # Email subject
     subject = "Password Reset Request - Topologix"
 
-    # Plain text body
     body_text = f"""Hello {username},
 
 You have requested to reset your password for your Topologix account.
@@ -224,7 +154,6 @@ Best regards,
 The Topologix Team
 """
 
-    # HTML body
     body_html = f"""
 <html>
 <head>
@@ -276,6 +205,5 @@ The Topologix Team
 </html>
 """
 
-    # Get email provider and send
     provider = get_email_provider()
     return provider.send_email(to_email, subject, body_text, body_html)

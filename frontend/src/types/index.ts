@@ -1,7 +1,5 @@
 /**
  * TypeScript type definitions central export file
- * Provides barrel exports for all network analysis, validation, and API types
- * Organized by domain: enums, network, protocols (OSPF, BGP), validation, structures, edges, etc.
  */
 export * from './enums'
 export * from './network'

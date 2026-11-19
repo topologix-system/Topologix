@@ -1,9 +1,5 @@
 /**
  * Active snapshot state management with Zustand
- * - Persists currently active snapshot name to localStorage
- * - Used to track which Batfish snapshot is currently loaded
- * - Synchronized with backend snapshot activation via snapshotAPI
- * - Simple string persistence with Zustand persist middleware
  */
 import { create } from 'zustand'
 import { persist } from 'zustand/middleware'
@@ -23,7 +19,6 @@ interface SnapshotState {
 /**
  * Zustand snapshot store with localStorage persistence
  * Maintains active snapshot name across browser sessions
- * Used by Header dropdown and SnapshotManagement page
  */
 export const useSnapshotStore = create<SnapshotState>()(
   persist(

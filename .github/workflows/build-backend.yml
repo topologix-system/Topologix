@@ -43,6 +43,11 @@ jobs:
       - name: Run backend unit tests
         run: python -m unittest discover -s tests -v
         working-directory: ./backend
+        env:
+          DATA_DIR: /tmp/topologix-test-data
+          DATABASE_URL: sqlite:////tmp/topologix-test-data/test.db
+          SNAPSHOTS_DIR: /tmp/topologix-test-data/snapshots
+          RESULT_CACHE_ENABLED: 'false'
 
   build-and-push:
     needs: verify

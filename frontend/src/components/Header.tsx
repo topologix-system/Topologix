@@ -4,7 +4,7 @@ import { Network, Menu, X, RefreshCw, LogOut, User, Users, ChevronDown, FolderOp
 import { APP_VERSION, IS_PRODUCTION } from '../constants'
 import { useTranslation } from 'react-i18next'
 import { useUIStore, useSnapshotStore, useAuthStore } from '../store'
-import { useAuthModeStatus, useSnapshots, useActivateSnapshot } from '../hooks'
+import { useAuthModeStatus, useSnapshots, useActivateSnapshot, useSnapshotVersionState } from '../hooks'
 import { LanguageSwitcher } from './LanguageSwitcher'
 import { authAPI } from '../services/api'
 import { logger } from '../utils/logger'
@@ -27,7 +27,6 @@ export function Header() {
   const user = useAuthStore((state) => state.user)
   const logout = useAuthStore((state) => state.logout)
 
-  // Fetch health status and snapshots using React Query (NO useEffect!)
   const {
     data: health,
     isLoading,
@@ -37,6 +36,16 @@ export function Header() {
   } = useAuthModeStatus()
   const activateMutation = useActivateSnapshot()
   const { data: snapshots } = useSnapshots()
+  const versionState = useSnapshotVersionState(currentSnapshotName)
+  const versionSuffix = (() => {
+    const state = versionState.isSuccess ? versionState.data : undefined
+    if (!state || state.content_hash === null) return ''
+    if (!state.head) return state.uncommitted ? t('header.version.uncommittedOnlySuffix') : ''
+    return t('header.version.suffix', {
+      seq: state.head.seq,
+      mark: state.uncommitted ? t('header.version.uncommittedMark') : '',
+    })
+  })()
   const snapshotActivationPending = isSnapshotActivationInProgress || activateMutation.isPending
   const connectionStatusText = isLoading
     ? t('header.connecting')
@@ -59,10 +68,8 @@ export function Header() {
   const dropdownRef = useRef<HTMLDivElement>(null)
   const menuRef = useRef<HTMLDivElement>(null)
   const buttonRef = useRef<HTMLButtonElement>(null)
-  // Check if current user has admin role for conditional menu rendering
   const isAdmin = authAPI.hasRole('admin')
 
-  // Build menu items array for keyboard navigation
   const menuItems = [
     { type: 'link', path: '/profile', label: t('header.myProfile') },
     ...(isAdmin ? [
@@ -73,7 +80,6 @@ export function Header() {
     { type: 'button', action: 'logout', label: t('auth.logout') },
   ]
 
-  // Click-outside handler - must be defined before useEffect that uses it
   const handleClickOutside = useCallback((e: MouseEvent) => {
     if (dropdownRef.current && !dropdownRef.current.contains(e.target as Node)) {
       setDropdownOpen(false)
@@ -88,7 +94,6 @@ export function Header() {
   useEffect(() => {
     if (dropdownOpen) {
       setFocusedIndex(0)
-      // Focus first menu item when dropdown opens
       const timer = setTimeout(() => {
         const items = menuRef.current?.querySelectorAll('[role="menuitem"]')
         if (items && items.length > 0) {
@@ -101,7 +106,7 @@ export function Header() {
     }
   }, [dropdownOpen])
 
-  // Click-outside detection for dropdown menu - properly managed in useEffect
+  // Click-outside detection for dropdown menu
   useEffect(() => {
     if (!dropdownOpen || typeof document === 'undefined') return
 
@@ -115,7 +120,6 @@ export function Header() {
     }
   }, [dropdownOpen, handleDocumentClick])
 
-  // Keyboard navigation handler
   const handleDropdownKeyDown = useCallback((e: KeyboardEvent) => {
     const items = menuRef.current?.querySelectorAll('[role="menuitem"]')
     if (!items || items.length === 0) return
@@ -143,7 +147,6 @@ export function Header() {
         buttonRef.current?.focus()
         break
       case 'Tab':
-        // Allow tab to close dropdown and move focus
         setDropdownOpen(false)
         break
       case 'Home':
@@ -159,7 +162,6 @@ export function Header() {
     }
   }, [])
 
-  // Handle button keyboard events
   const handleButtonKeyDown = useCallback((e: KeyboardEvent) => {
     switch (e.key) {
       case 'ArrowDown':
@@ -205,7 +207,6 @@ export function Header() {
 
   /**
    * Reload the currently active snapshot
-   * Useful for refreshing network data after configuration changes
    */
   const handleSnapshotReload = useCallback(() => {
     if (!currentSnapshotName) return
@@ -273,7 +274,7 @@ export function Header() {
               <option value="">{t('header.selectSnapshot')}</option>
               {snapshots?.map((snapshot) => (
                 <option key={snapshot.name} value={snapshot.name}>
-                  {snapshot.folder_name ? `${snapshot.folder_name} / ` : ''}{snapshot.name} ({t('header.filesCount', { count: snapshot.file_count })})
+                  {snapshot.folder_name ? `${snapshot.folder_name} / ` : ''}{snapshot.name} ({t('header.filesCount', { count: snapshot.file_count })}){snapshot.name === currentSnapshotName ? versionSuffix : ''}
                 </option>
               ))}
             </select>

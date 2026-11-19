@@ -1,11 +1,5 @@
 /**
  * Network path analysis tool with traceroute simulation
- * - Supports unidirectional and bidirectional traceroute modes
- * - Detailed packet specification: src/dst IP, ports, protocols, DSCP, ECN, fragment offset
- * - Advanced options: maxTraces, ignoreFilters for analysis control
- * - Results visualization: hop-by-hop trace with flow dispositions (accepted/denied/loop/etc)
- * - Collapsible trace sections with success/fail indicators per flow
- * - Largest panel component (675 lines) with extensive form handling
  */
 import { useState } from 'react'
 import { useTranslation } from 'react-i18next'
@@ -34,6 +28,7 @@ import { ProtocolSelector } from '../ProtocolSelector'
 import { useSnapshotStore } from '../../store'
 import { extractAxiosErrorMessage } from '../../types/errors'
 import { useRovingTabIndex } from '../../hooks/useRovingTabIndex'
+import { describeStepDetail, type StepDetailValue } from '../../lib/traceStepDetail'
 
 const TRACE_MODES = ['unidirectional', 'bidirectional'] as const
 type TraceMode = typeof TRACE_MODES[number]
@@ -64,8 +59,6 @@ export function splitCommaList(value: string): string[] {
 
 /**
  * Build the traceroute request from the form state and the raw comma-separated header inputs
- * - applications: list of names
- * - icmpTypes / icmpCodes / dscps / ecns: Batfish integer space strings such as "0,8" or "0-63"
  */
 export function buildTracerouteRequest(formData: TracerouteRequest, listText: HeaderListText): TracerouteRequest {
   const headers: NonNullable<TracerouteRequest['headers']> = { ...formData.headers }
@@ -204,7 +197,6 @@ function TraceroutePanelContent() {
         </p>
       </div>
 
-      {/* Configuration Form */}
       <form onSubmit={handleSubmit} className="bg-white rounded-lg shadow-sm border border-gray-200 p-6">
         <h3 className="text-lg font-semibold text-gray-900 mb-4">{t('traceroute.sections.configuration')}</h3>
 
@@ -658,8 +650,6 @@ function FlowDisplay({ flow }: { flow: TracerouteFlow | string | null }) {
 
 /**
  * Collapsible trace display component
- * Shows disposition status with color-coded badge and hop details
- * Handles both structured Trace objects and string traces
  */
 function TraceDisplay({ trace, index, idPrefix }: { trace: Trace | string; index: number; idPrefix: string }) {
   const { t } = useTranslation()
@@ -717,8 +707,6 @@ function TraceDisplay({ trace, index, idPrefix }: { trace: Trace | string; index
 
 /**
  * Individual hop display component with expandable step details
- * Shows node name and processing steps for each network hop
- * Handles both structured TraceHop objects and string hops
  */
 function HopDisplay({ hop, index, idPrefix }: { hop: TraceHop | string; index: number; idPrefix: string }) {
   const { t } = useTranslation()
@@ -757,11 +745,9 @@ function HopDisplay({ hop, index, idPrefix }: { hop: TraceHop | string; index: n
             <div key={stepIdx} className="py-1 text-xs">
               <div className="flex items-start gap-2">
                 <span className="text-gray-400 font-mono">{stepIdx + 1}.</span>
-                <div className="flex-1">
+                <div className="flex-1 min-w-0">
                   <div className="text-gray-900 font-medium">{step.action}</div>
-                  {step.detail && (
-                    <div className="text-gray-600 mt-0.5 break-all">{formatStepDetail(step.detail)}</div>
-                  )}
+                  <StepDetail detail={step.detail} />
                 </div>
               </div>
             </div>
@@ -772,20 +758,56 @@ function HopDisplay({ hop, index, idPrefix }: { hop: TraceHop | string; index: n
   )
 }
 
-function formatStepDetail(detail: unknown): string {
-  if (typeof detail === 'string') return detail
-  if (detail == null) return ''
-  try {
-    return Object.entries(detail as Record<string, unknown>)
-      .filter(([, v]) => v != null)
-      .map(([k, v]) => {
-        const value = typeof v === 'object' ? JSON.stringify(v) : String(v)
-        return `${k}: ${value}`
-      })
-      .join(', ')
-  } catch {
-    return JSON.stringify(detail)
+/**
+ * Step detail as one `key: value` line per field, nested fields indented below their key
+ */
+function StepDetail({ detail }: { detail: unknown }) {
+  const value = describeStepDetail(detail)
+  if (!value) return null
+
+  return (
+    <div className="mt-0.5 font-mono text-gray-600">
+      <StepDetailContent value={value} />
+    </div>
+  )
+}
+
+function StepDetailContent({ value }: { value: StepDetailValue }) {
+  if (value.kind === 'text') {
+    return <p className="whitespace-pre-wrap break-words">{value.text}</p>
   }
+
+  if (value.kind === 'list') {
+    return (
+      <ol className="list-decimal space-y-1 pl-5 marker:text-gray-400">
+        {value.items.map((item, index) => (
+          <li key={index}>
+            <StepDetailContent value={item} />
+          </li>
+        ))}
+      </ol>
+    )
+  }
+
+  return (
+    <dl className="space-y-0.5">
+      {value.entries.map((entry) =>
+        entry.value.kind === 'text' ? (
+          <div key={entry.key} className="flex gap-1">
+            <dt className="shrink-0 text-gray-500">{entry.key}:</dt>
+            <dd className="min-w-0 whitespace-pre-wrap break-words text-gray-800">{entry.value.text}</dd>
+          </div>
+        ) : (
+          <div key={entry.key}>
+            <dt className="text-gray-500">{entry.key}:</dt>
+            <dd className="ml-1 border-l border-gray-200 pl-2">
+              <StepDetailContent value={entry.value} />
+            </dd>
+          </div>
+        )
+      )}
+    </dl>
+  )
 }
 
 /**

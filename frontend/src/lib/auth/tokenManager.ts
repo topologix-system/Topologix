@@ -1,7 +1,5 @@
 /**
  * JWT Token Management Utilities
- * Handles token expiration checking without external dependencies
- * Provides token decoding, validation, and expiration time calculations
  */
 
 import { logger } from '../../utils/logger'
@@ -15,9 +13,6 @@ interface DecodedToken {
 
 /**
  * Decode JWT token without external library
- * Parses base64-encoded JWT payload to extract claims
- * @param token - JWT token string
- * @returns Decoded token payload or null if invalid
  */
 export function decodeJWT(token: string): DecodedToken | null {
   try {
@@ -41,9 +36,6 @@ export function decodeJWT(token: string): DecodedToken | null {
 
 /**
  * Check if JWT token is expired
- * Includes 5-second buffer to handle clock skew between client and server (RFC 7519 recommendation)
- * @param token - JWT token string
- * @returns true if token is expired or invalid, false otherwise
  */
 export function isTokenExpired(token: string | null): boolean {
   if (!token) return true
@@ -54,15 +46,11 @@ export function isTokenExpired(token: string | null): boolean {
   // Token expiration is in seconds, Date.now() is in milliseconds
   const currentTime = Date.now() / 1000
 
-  // Add 5 second buffer to handle clock skew (RFC 7519 recommendation)
   return decoded.exp < currentTime + 5
 }
 
 /**
  * Get remaining time until token expires (in milliseconds)
- * Useful for implementing token refresh before expiration
- * @param token - JWT token string
- * @returns Milliseconds until expiration, or 0 if expired/invalid
  */
 export function getTokenExpirationTime(token: string | null): number {
   if (!token) return 0
@@ -78,8 +66,6 @@ export function getTokenExpirationTime(token: string | null): number {
 
 /**
  * Get token expiration date as Date object
- * @param token - JWT token string
- * @returns Date object representing expiration time, or null if invalid
  */
 export function getTokenExpirationDate(token: string | null): Date | null {
   if (!token) return null

@@ -1,10 +1,5 @@
 /**
  * React hook for lazy-loaded Cytoscape.js graph instance with async initialization
- * - Dynamic imports for code splitting: reduces initial bundle size significantly
- * - Handles position save/restore across graph updates and snapshot switches
- * - Same API as useCytoscape but with async initialize() returning Promise<Core>
- * - Extensive console logging for debugging initialization and layout issues
- * - Used by TopologyViewer for optimal performance and user position persistence
  */
 import { useRef, useCallback, useState, useEffect, useMemo } from 'react'
 import type cytoscape from 'cytoscape'
@@ -96,11 +91,6 @@ export interface UseCytoscapeLazyReturn {
 
 /**
  * Custom hook for managing lazy-loaded Cytoscape.js graph instance
- * Async version with code splitting for optimal bundle size
- * Includes position save/restore for user layout persistence
- * Used by TopologyViewer for performance-optimized graph rendering
- * @param config - Optional Cytoscape configuration overrides
- * @returns Object with graph ref, loading state, and manipulation methods
  */
 export function useCytoscapeLazy(config?: CytoscapeConfig): UseCytoscapeLazyReturn {
   const cyRef = useRef<Core | null>(null)

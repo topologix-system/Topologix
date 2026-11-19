@@ -1,12 +1,4 @@
-"""
-OSPF protocol data models (dataclasses)
-- OSPFProcessConfig: OSPF process configuration per node/VRF
-- OSPFAreaConfig: OSPF area configuration with active/passive interfaces
-- OSPFInterfaceConfig: OSPF interface-level configuration
-- OSPFSessionCompat: OSPF neighbor session compatibility information
-- Maps to Batfish OSPF query results
-- Supports OSPF cost, network types, hello/dead intervals
-"""
+"""OSPF protocol data models (dataclasses)"""
 from dataclasses import dataclass, field, asdict
 
 

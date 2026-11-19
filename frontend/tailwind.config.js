@@ -19,7 +19,7 @@ export default {
           300: '#7dd3fc',
           400: '#38bdf8',
           500: '#0ea5e9',
-          600: '#0369a1', // Updated from #0284c7 for better contrast (WCAG AA compliant)
+          600: '#0369a1',
           700: '#075985',
           800: '#0c4a6e',
           900: '#0a3a54',

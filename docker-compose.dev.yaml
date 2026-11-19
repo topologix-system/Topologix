@@ -56,6 +56,40 @@ services:
       - LOGIN_LOCKOUT_DURATION_MINUTES=${LOGIN_LOCKOUT_DURATION_MINUTES:-30}
       - DATABASE_URL=${DATABASE_URL:-sqlite:////app/data/topologix.db}
       - SQLALCHEMY_ECHO=${SQLALCHEMY_ECHO:-false}
+      # Snapshot history and result cache (see README "Snapshot History and Result Cache"
+      # and .env.example). An empty value is treated as unset and selects the backend default.
+      # DATA_DIR defaults to /app/data (the backend-db volume); RESULT_CACHE_DIR and
+      # SNAPSHOT_HISTORY_DIR default to result_cache/ and snapshot_history/ inside DATA_DIR.
+      # SNAPSHOTS_DIR, RESULT_CACHE_DIR, SNAPSHOT_HISTORY_DIR and DATA_DIR/_invalid-namespace
+      # must not equal or contain one another and DATA_DIR must not equal or lie inside
+      # SNAPSHOTS_DIR; otherwise versioning is unavailable and the result cache is off.
+      - DATA_DIR=${DATA_DIR:-}
+      - RESULT_CACHE_DIR=${RESULT_CACHE_DIR:-}
+      - SNAPSHOT_HISTORY_DIR=${SNAPSHOT_HISTORY_DIR:-}
+      # RESULT_CACHE_ENABLED=false turns the result cache off (kill switch)
+      - RESULT_CACHE_ENABLED=${RESULT_CACHE_ENABLED:-}
+      - RESULT_CACHE_MAX_BYTES=${RESULT_CACHE_MAX_BYTES:-}
+      - RESULT_CACHE_MAX_ENTRIES=${RESULT_CACHE_MAX_ENTRIES:-}
+      - RESULT_CACHE_PROTECT_SECONDS=${RESULT_CACHE_PROTECT_SECONDS:-}
+      - HISTORY_GC_GRACE_SECONDS=${HISTORY_GC_GRACE_SECONDS:-}
+      # Set only to the db_id named by the startup ERROR about a missing object store;
+      # remove it once the startup WARNING reports no marked snapshot
+      - HISTORY_ACCEPT_STORE_LOSS=${HISTORY_ACCEPT_STORE_LOSS:-}
+      - EXTERNAL_CHANGE_SETTLE_SECONDS=${EXTERNAL_CHANGE_SETTLE_SECONDS:-}
+      - BATFISH_VERSION_PROBE_TTL_SECONDS=${BATFISH_VERSION_PROBE_TTL_SECONDS:-}
+      - BATFISH_VERSION_GRACE_SECONDS=${BATFISH_VERSION_GRACE_SECONDS:-}
+      - SNAPSHOT_DIFF_MAX_BYTES=${SNAPSHOT_DIFF_MAX_BYTES:-}
+      - SNAPSHOT_DIFF_MAX_LINES=${SNAPSHOT_DIFF_MAX_LINES:-}
+      # This stack shares .env and the backend-db volume with docker-compose.yaml but not the
+      # snapshot store, so its history namespace and backend build id come from separate
+      # variables; one shared value would merge both stacks' namespaces and cached results.
+      # History namespace of this stack in the database (empty: the UUID stored in
+      # SNAPSHOTS_DIR/.topologix-store.json, here ./snapshots/.topologix-store.json). An existing
+      # deployment that adopts DEV_DEPLOYMENT_ID sets it to that UUID.
+      - DEPLOYMENT_ID=${DEV_DEPLOYMENT_ID:-}
+      # Backend build id of cached results; normally empty (derived from the backend sources).
+      # A set value must be unique per backend build.
+      - APP_BUILD_ID=${DEV_APP_BUILD_ID:-}
       - EMAIL_PROVIDER=${EMAIL_PROVIDER:-console}
       - EMAIL_FROM=${EMAIL_FROM:-noreply@topologix.local}
       - EMAIL_FROM_NAME=${EMAIL_FROM_NAME:-Topologix}

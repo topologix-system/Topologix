@@ -5,10 +5,12 @@
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { snapshotAPI, snapshotMigrationAPI } from '../services/api'
 import { validationKeys } from './useValidation'
+import { getClientGeneration, refetchVersionState, settleIfStaleActivation } from './useSnapshotVersions'
 import { useSnapshotStore } from '../store'
 import type {
   AssignSnapshotOwnerRequest,
   CreateSnapshotRequest,
+  NetworkInitializeResponse,
   ReplaceSnapshotArtifactContentRequest,
   SnapshotArtifactPreviewRequest,
   UpdateConfigFileContentRequest,
@@ -57,31 +59,26 @@ export const configFileContentQueryOptions = {
 /**
  * Query all available snapshots
  * Returns snapshot list with names, file counts, sizes, and creation dates
- * Used in SnapshotManagement page and Header dropdown
- * @param enabled - Optional flag to conditionally enable query (default: true)
  */
 export function useSnapshots(enabled = true) {
   return useQuery({
     queryKey: snapshotKeys.list(),
     queryFn: () => snapshotAPI.list(),
     enabled,
-    staleTime: 30000, // 30 seconds
+    staleTime: 30000,
   })
 }
 
 /**
  * Query configuration files within specific snapshot
  * Returns file list with names, sizes, and modification dates
- * Only fetches when snapshot name provided
- * @param name - Snapshot name to query files for
- * @param enabled - Optional flag to conditionally enable query (default: true)
  */
 export function useSnapshotFiles(name: string, enabled = true) {
   return useQuery({
     queryKey: snapshotKeys.files(name),
     queryFn: () => snapshotAPI.getFiles(name),
     enabled: enabled && !!name,
-    staleTime: 10000, // 10 seconds
+    staleTime: 10000,
   })
 }
 
@@ -155,8 +152,6 @@ export function useAssignSnapshotOwner() {
 
 /**
  * Mutation to create new empty snapshot
- * Creates snapshot directory and invalidates snapshot list
- * Used in SnapshotManagement page create dialog
  */
 export function useCreateSnapshot() {
   const queryClient = useQueryClient()
@@ -171,8 +166,6 @@ export function useCreateSnapshot() {
 
 /**
  * Mutation to delete snapshot and all its files
- * Removes snapshot from filesystem and invalidates snapshot list
- * Used in SnapshotManagement page with confirmation dialog
  */
 export function useDeleteSnapshot() {
   const queryClient = useQueryClient()
@@ -187,7 +180,6 @@ export function useDeleteSnapshot() {
 
 /**
  * Mutation to update snapshot metadata such as folder classification
- * Invalidates snapshot list so grouping stays in sync across the UI
  */
 export function useUpdateSnapshot() {
   const queryClient = useQueryClient()
@@ -203,9 +195,6 @@ export function useUpdateSnapshot() {
 
 /**
  * Mutation to upload configuration file to snapshot
- * Accepts network device config and log files (.cfg, .conf, .txt, .log)
- * Invalidates both file list and snapshot list (file count changed)
- * Used in SnapshotManagement page drag-and-drop and file picker
  */
 export function useUploadFile() {
   const queryClient = useQueryClient()
@@ -218,17 +207,15 @@ export function useUploadFile() {
         queryKey: snapshotKeys.fileContent(variables.name, variables.file.name),
         refetchType: 'none',
       })
-      // Invalidate files list for this snapshot
       queryClient.invalidateQueries({ queryKey: snapshotKeys.files(variables.name) })
-      // Also invalidate snapshots list (file count changed)
       queryClient.invalidateQueries({ queryKey: snapshotKeys.list() })
+      return refetchVersionState(queryClient, variables.name)
     },
   })
 }
 
 /**
  * Mutation to update a file's Batfish configuration format override.
- * Invalidates file metadata and snapshot list because the file content timestamp/size can change.
  */
 export function useUpdateSnapshotFileFormat() {
   const queryClient = useQueryClient()
@@ -250,6 +237,7 @@ export function useUpdateSnapshotFileFormat() {
       })
       queryClient.invalidateQueries({ queryKey: snapshotKeys.files(variables.name) })
       queryClient.invalidateQueries({ queryKey: snapshotKeys.list() })
+      return refetchVersionState(queryClient, variables.name)
     },
   })
 }
@@ -269,6 +257,7 @@ export function useUpdateConfigFileContent() {
         queryKey: snapshotKeys.fileContent(variables.name, variables.filename),
       })
       queryClient.invalidateQueries({ queryKey: snapshotKeys.list() })
+      return refetchVersionState(queryClient, variables.name)
     },
     onError: (_error, variables) => {
       queryClient.invalidateQueries({
@@ -281,7 +270,6 @@ export function useUpdateConfigFileContent() {
 
 /**
  * Mutation to delete one uploaded snapshot file.
- * Invalidates file metadata and snapshot list because file count and size can change.
  */
 export function useDeleteSnapshotFile() {
   const queryClient = useQueryClient()
@@ -296,6 +284,7 @@ export function useDeleteSnapshotFile() {
       })
       queryClient.invalidateQueries({ queryKey: snapshotKeys.files(variables.name) })
       queryClient.invalidateQueries({ queryKey: snapshotKeys.list() })
+      return refetchVersionState(queryClient, variables.name)
     },
   })
 }
@@ -322,6 +311,7 @@ export function useUploadSnapshotArtifact() {
       queryClient.invalidateQueries({ queryKey: snapshotKeys.artifactTree(variables.name) })
       queryClient.invalidateQueries({ queryKey: snapshotKeys.files(variables.name) })
       queryClient.invalidateQueries({ queryKey: snapshotKeys.list() })
+      return refetchVersionState(queryClient, variables.name)
     },
   })
 }
@@ -338,6 +328,7 @@ export function useUpdateSnapshotArtifact() {
       queryClient.invalidateQueries({ queryKey: snapshotKeys.artifactTree(variables.name) })
       queryClient.invalidateQueries({ queryKey: snapshotKeys.files(variables.name) })
       queryClient.invalidateQueries({ queryKey: snapshotKeys.list() })
+      return refetchVersionState(queryClient, variables.name)
     },
   })
 }
@@ -355,6 +346,7 @@ export function useReplaceSnapshotArtifactContent() {
       queryClient.invalidateQueries({ queryKey: snapshotKeys.artifactTree(variables.name) })
       queryClient.invalidateQueries({ queryKey: snapshotKeys.files(variables.name) })
       queryClient.invalidateQueries({ queryKey: snapshotKeys.list() })
+      return refetchVersionState(queryClient, variables.name)
     },
   })
 }
@@ -372,6 +364,7 @@ export function useDeleteSnapshotArtifact() {
       queryClient.invalidateQueries({ queryKey: snapshotKeys.artifactTree(variables.name) })
       queryClient.invalidateQueries({ queryKey: snapshotKeys.files(variables.name) })
       queryClient.invalidateQueries({ queryKey: snapshotKeys.list() })
+      return refetchVersionState(queryClient, variables.name)
     },
   })
 }
@@ -385,11 +378,14 @@ export function useValidateSnapshotArtifacts() {
   })
 }
 
+export interface ActivateSnapshotVariables {
+  name: string
+  ifStale?: boolean
+}
+
 /**
- * Mutation to activate snapshot for Batfish analysis
- * Initializes Batfish with snapshot and marks snapshot-dependent caches stale
- * Critical mutation that triggers full topology reload
- * Used in Header dropdown and SnapshotManagement page
+ * Activate a snapshot in Batfish; a forced activation that succeeds within the same session invalidates every
+ * Batfish query family, an `ifStale` one leaves invalidation to settleIfStaleActivation
  */
 export function useActivateSnapshot() {
   const queryClient = useQueryClient()
@@ -404,11 +400,35 @@ export function useActivateSnapshot() {
       )
     )
 
+  const applyParseStatus = (snapshotName: string, activationResult: NetworkInitializeResponse | undefined) => {
+    queryClient.setQueryData(validationKeys.fileParseStatus(snapshotName), activationResult?.file_parse_status ?? [])
+    queryClient.setQueryData(validationKeys.initIssues(snapshotName), activationResult?.init_issues ?? [])
+    queryClient.setQueryData(validationKeys.parseWarnings(snapshotName), activationResult?.parse_warnings ?? [])
+  }
+
   return useMutation({
-    mutationFn: async (snapshotName: string) => {
+    mutationFn: async (variables: string | ActivateSnapshotVariables) => {
+      const { name: snapshotName, ifStale = false } =
+        typeof variables === 'string' ? { name: variables } : variables
       const snapshotState = useSnapshotStore.getState()
       if (snapshotState.isSnapshotActivationInProgress) {
         throw new Error('Snapshot activation is already in progress.')
+      }
+
+      const generation = getClientGeneration(queryClient)
+      const sessionChanged = () => generation !== getClientGeneration(queryClient)
+
+      if (ifStale) {
+        setSnapshotActivationState(true, snapshotName)
+        try {
+          const activationResult = await snapshotAPI.activate(snapshotName, { if_stale: true })
+          if (sessionChanged()) return activationResult
+          applyParseStatus(snapshotName, activationResult)
+          await settleIfStaleActivation(queryClient, snapshotName, activationResult?.parsed !== false, generation)
+          return activationResult
+        } finally {
+          setSnapshotActivationState(false)
+        }
       }
 
       const previousSnapshotName = snapshotState.currentSnapshotName
@@ -422,18 +442,21 @@ export function useActivateSnapshot() {
 
         const activationResult = await snapshotAPI.activate(snapshotName)
         backendActivated = true
+        if (sessionChanged()) return activationResult
 
         await cancelBatfishQueries()
+        await refetchVersionState(queryClient, snapshotName)
         await invalidateBatfishQueriesWithoutRefetch()
+        if (sessionChanged()) return activationResult
 
-        queryClient.setQueryData(validationKeys.fileParseStatus(snapshotName), activationResult?.file_parse_status ?? [])
-        queryClient.setQueryData(validationKeys.initIssues(snapshotName), activationResult?.init_issues ?? [])
-        queryClient.setQueryData(validationKeys.parseWarnings(snapshotName), activationResult?.parse_warnings ?? [])
+        applyParseStatus(snapshotName, activationResult)
         setCurrentSnapshotName(snapshotName)
 
         return activationResult
       } catch (error) {
-        setCurrentSnapshotName(backendActivated ? snapshotName : previousSnapshotName)
+        if (!sessionChanged()) {
+          setCurrentSnapshotName(backendActivated ? snapshotName : previousSnapshotName)
+        }
         throw error
       } finally {
         setSnapshotActivationState(false)

@@ -4,14 +4,12 @@ import { Globe } from 'lucide-react'
 /**
  * Language switcher component for internationalization (i18n)
  * Allows users to switch between English and Japanese
- * Uses react-i18next for translation management
  */
 export function LanguageSwitcher() {
   const { i18n, t } = useTranslation()
 
   /**
    * Handle language change event from dropdown
-   * @param lang - Language code ('en' or 'ja')
    */
   const handleLanguageChange = (lang: string) => {
     i18n.changeLanguage(lang)

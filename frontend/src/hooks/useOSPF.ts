@@ -11,7 +11,6 @@ const snapshotSegment = (snapshotName: string | null) => snapshotName ?? inactiv
 
 /**
  * Query key factory for OSPF-related React Query caches
- * Hierarchical structure enables targeted cache invalidation
  */
 export const ospfKeys = {
   all: ['ospf'] as const,
@@ -24,7 +23,6 @@ export const ospfKeys = {
 /**
  * Query OSPF process configurations from network devices
  * Returns OSPF router IDs, process IDs, and configuration details
- * @param enabled - Optional flag to conditionally enable query (default: true)
  */
 export function useOSPFProcesses(enabled = true) {
   const currentSnapshotName = useSnapshotStore((state) => state.currentSnapshotName)
@@ -40,7 +38,6 @@ export function useOSPFProcesses(enabled = true) {
 /**
  * Query OSPF area configurations
  * Returns area IDs, types (standard, stub, NSSA), and associated interfaces
- * @param enabled - Optional flag to conditionally enable query (default: true)
  */
 export function useOSPFAreas(enabled = true) {
   const currentSnapshotName = useSnapshotStore((state) => state.currentSnapshotName)
@@ -56,7 +53,6 @@ export function useOSPFAreas(enabled = true) {
 /**
  * Query OSPF-enabled interfaces
  * Returns interfaces participating in OSPF with network types and costs
- * @param enabled - Optional flag to conditionally enable query (default: true)
  */
 export function useOSPFInterfaces(enabled = true) {
   const currentSnapshotName = useSnapshotStore((state) => state.currentSnapshotName)
@@ -71,8 +67,6 @@ export function useOSPFInterfaces(enabled = true) {
 
 /**
  * Query OSPF neighbor sessions/adjacencies
- * Returns neighbor states, router IDs, and adjacency status
- * @param enabled - Optional flag to conditionally enable query (default: true)
  */
 export function useOSPFSessions(enabled = true) {
   const currentSnapshotName = useSnapshotStore((state) => state.currentSnapshotName)

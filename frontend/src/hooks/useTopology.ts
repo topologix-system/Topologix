@@ -1,6 +1,5 @@
 /**
  * React Query hooks for network topology layers
- * Handles Layer 1/2 topology, VXLAN VNI properties, and switched VLAN edges
  */
 import { useQuery, useMutation } from '@tanstack/react-query'
 import { topologyAPI } from '../services/api'
@@ -30,7 +29,6 @@ export const topologyKeys = {
 /**
  * Query Layer 1 (physical) topology
  * Returns physical cable connections between devices
- * @param enabled - Optional flag to conditionally enable query (default: true)
  */
 export function useLayer1Topology(enabled = true) {
   const currentSnapshotName = useSnapshotStore((state) => state.currentSnapshotName)
@@ -45,8 +43,6 @@ export function useLayer1Topology(enabled = true) {
 
 /**
  * Query Layer 2 (data link) topology
- * Returns VLAN, switching, and MAC-level connectivity
- * @param enabled - Optional flag to conditionally enable query (default: true)
  */
 export function useLayer2Topology(enabled = true) {
   const currentSnapshotName = useSnapshotStore((state) => state.currentSnapshotName)
@@ -62,8 +58,6 @@ export function useLayer2Topology(enabled = true) {
 /**
  * Query VXLAN VNI (Virtual Network Identifier) properties
  * Returns VXLAN overlay network configurations and VNI mappings
- * Used for data center fabric analysis
- * @param enabled - Optional flag to conditionally enable query (default: true)
  */
 export function useVXLANVNIProperties(enabled = true) {
   const currentSnapshotName = useSnapshotStore((state) => state.currentSnapshotName)
@@ -79,7 +73,6 @@ export function useVXLANVNIProperties(enabled = true) {
 /**
  * Query VXLAN tunnel edges
  * Returns VXLAN tunnel connections between VTEPs (VXLAN Tunnel Endpoints)
- * @param enabled - Optional flag to conditionally enable query (default: true)
  */
 export function useVXLANEdges(enabled = true) {
   const currentSnapshotName = useSnapshotStore((state) => state.currentSnapshotName)
@@ -94,9 +87,6 @@ export function useVXLANEdges(enabled = true) {
 
 /**
  * Query IPsec VPN session status
- * Returns IPsec tunnel states and encryption status
- * Used for VPN connectivity monitoring
- * @param enabled - Optional flag to conditionally enable query (default: true)
  */
 export function useIPSecSessionStatus(enabled = true) {
   const currentSnapshotName = useSnapshotStore((state) => state.currentSnapshotName)
@@ -112,7 +102,6 @@ export function useIPSecSessionStatus(enabled = true) {
 /**
  * Query IPsec VPN tunnel edges
  * Returns IPsec tunnel connections between peers
- * @param enabled - Optional flag to conditionally enable query (default: true)
  */
 export function useIPSecEdges(enabled = true) {
   const currentSnapshotName = useSnapshotStore((state) => state.currentSnapshotName)
@@ -127,8 +116,6 @@ export function useIPSecEdges(enabled = true) {
 
 /**
  * Query IPsec peer configuration
- * Returns IPsec peer settings, IKE policies, and transform sets
- * @param enabled - Optional flag to conditionally enable query (default: true)
  */
 export function useIPSecPeerConfiguration(enabled = true) {
   const currentSnapshotName = useSnapshotStore((state) => state.currentSnapshotName)
@@ -144,8 +131,6 @@ export function useIPSecPeerConfiguration(enabled = true) {
 /**
  * Query interface MTU (Maximum Transmission Unit) settings
  * Returns MTU values for all interfaces across devices
- * Critical for identifying MTU mismatches causing packet fragmentation
- * @param enabled - Optional flag to conditionally enable query (default: true)
  */
 export function useInterfaceMTU(enabled = true) {
   const currentSnapshotName = useSnapshotStore((state) => state.currentSnapshotName)
@@ -160,9 +145,6 @@ export function useInterfaceMTU(enabled = true) {
 
 /**
  * Query IP address space assignments
- * Returns IP subnet allocations and address space organization
- * Used for IP address management and planning
- * @param enabled - Optional flag to conditionally enable query (default: true)
  */
 export function useIPSpaceAssignment(enabled = true) {
   const currentSnapshotName = useSnapshotStore((state) => state.currentSnapshotName)

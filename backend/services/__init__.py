@@ -1,9 +1,4 @@
-"""
-Services package exports
-- BatfishService: Complete Batfish API integration for network analysis
-- SnapshotService: Configuration snapshot management
-- Provides centralized imports for backend services
-"""
+"""Services package exports"""
 from .batfish_service import BatfishQueryError, BatfishService
 from .snapshot_service import SnapshotService
 

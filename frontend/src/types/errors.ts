@@ -29,8 +29,6 @@ function asRecord(value: unknown): Record<string, unknown> | null {
 /**
  * Extract the server-provided reason from an API error response body
  * Reads `message`, then `error`, then `details.message` / `details.reason`
- * @param data - The response body (non-JSON bodies such as HTML yield null)
- * @returns The server message, or null when the body carries none
  */
 export function extractResponseBodyMessage(data: unknown): string | null {
   const body = asRecord(data)
@@ -46,12 +44,6 @@ export function extractResponseBodyMessage(data: unknown): string | null {
 
 /**
  * Extract error message from AxiosError response
- * With a response: server response body message, then the fallback, then the AxiosError message
- * Without a response (network down, CORS, timeout): the localized network error for ERR_NETWORK,
- * otherwise the AxiosError message (e.g. "timeout of 120000ms exceeded"), then the fallback
- * @param error - The AxiosError to extract message from
- * @param fallback - Message used when the response body carries no message
- * @returns Extracted error message or fallback
  */
 export function extractAxiosErrorMessage(
   error: AxiosError,
@@ -68,9 +60,6 @@ export function extractAxiosErrorMessage(
 /**
  * Extract error message from unknown error type
  * Handles AxiosError, Error, and unknown types
- * @param error - The error to extract message from
- * @param fallback - Fallback message if extraction fails
- * @returns Extracted error message or fallback
  */
 export function extractErrorMessage(
   error: unknown,

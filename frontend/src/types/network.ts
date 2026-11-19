@@ -1,7 +1,5 @@
 /**
  * Network topology core type definitions
- * Node properties, interface details, routing tables, and IP ownership
- * Used throughout the application for network device modeling
  */
 import { NodeType } from './enums'
 

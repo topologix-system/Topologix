@@ -1,10 +1,5 @@
 /**
  * Security audit log viewer with advanced filtering
- * - Implements ReDoS-protected IP address and username validation to prevent regex attacks
- * - Real-time input validation with debounced feedback (300ms) for better UX
- * - Pagination, sorting, and comprehensive statistics dashboard
- * - Admin-only access with role-based security checks (hasRole('admin'))
- * - Displays login attempts with filtering by IP, username, success status, date range
  */
 import { useState, useCallback, useRef } from 'react'
 import { Link } from 'react-router-dom'
@@ -30,15 +25,12 @@ import type { SecurityLogsQueryParams } from '../types'
 export function SecurityLogsPage() {
   const { t } = useTranslation()
 
-  // Check admin permission
   const isAdmin = authAPI.hasRole('admin')
 
-  // State for filters and pagination
   const [page, setPage] = useState(1)
   const [perPage] = useState(50)
   const [filters, setFilters] = useState<Omit<SecurityLogsQueryParams, 'page' | 'per_page'>>({})
 
-  // Separate input state from filter state for better UX
   const [ipInput, setIpInput] = useState('')
   const [ipValidationError, setIpValidationError] = useState<string | null>(null)
   const [usernameInput, setUsernameInput] = useState('')
@@ -48,18 +40,15 @@ export function SecurityLogsPage() {
   const ipDebounceRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const usernameDebounceRef = useRef<ReturnType<typeof setTimeout> | null>(null)
 
-  // Build query params
   const queryParams: SecurityLogsQueryParams = {
     page,
     per_page: perPage,
     ...filters,
   }
 
-  // Fetch data
   const { data: logsData, isLoading: logsLoading, error: logsError } = useSecurityLogs(queryParams, isAdmin)
   const { data: stats, isLoading: statsLoading } = useSecurityStats(isAdmin)
 
-  // Enhanced IP validation with detailed error messages
   const validateIPAddress = useCallback((ip: string): { valid: boolean; error: string | null } => {
     if (!ip.trim()) return { valid: true, error: null }
 
@@ -83,7 +72,6 @@ export function SecurityLogsPage() {
       return { valid: true, error: null }
     }
 
-    // IPv6 validation
     const ipv6Pattern = /^([0-9a-fA-F]{0,4}:){2,7}[0-9a-fA-F]{0,4}$/
     if (ipv6Pattern.test(ip)) {
       return { valid: true, error: null }
@@ -92,7 +80,6 @@ export function SecurityLogsPage() {
     return { valid: false, error: 'Invalid IP format (must be IPv4 or IPv6)' }
   }, [])
 
-  // Enhanced username validation with detailed error messages
   const validateUsername = useCallback((username: string): { valid: boolean; error: string | null } => {
     if (!username.trim()) return { valid: true, error: null }
 
@@ -108,16 +95,13 @@ export function SecurityLogsPage() {
     return { valid: true, error: null }
   }, [])
 
-  // Handle IP input change (allows unrestricted typing)
   const handleIPInputChange = useCallback((value: string) => {
     setIpInput(value)
 
-    // Clear error while typing for better UX
     if (ipValidationError) {
       setIpValidationError(null)
     }
 
-    // Debounced validation for real-time feedback
     if (ipDebounceRef.current) {
       clearTimeout(ipDebounceRef.current)
     }
@@ -127,10 +111,9 @@ export function SecurityLogsPage() {
       if (!valid) {
         setIpValidationError(error)
       }
-    }, 500) // Validate 500ms after user stops typing
+    }, 500)
   }, [ipValidationError, validateIPAddress])
 
-  // Handle IP blur (validate and apply filter)
   const handleIPBlur = useCallback(() => {
     const { valid, error } = validateIPAddress(ipInput)
 
@@ -139,7 +122,6 @@ export function SecurityLogsPage() {
       return
     }
 
-    // Valid: apply filter
     setIpValidationError(null)
     setFilters((prev) => ({
       ...prev,
@@ -148,14 +130,12 @@ export function SecurityLogsPage() {
     setPage(1)
   }, [ipInput, validateIPAddress])
 
-  // Handle IP Enter key
   const handleIPKeyDown = useCallback((e: React.KeyboardEvent<HTMLInputElement>) => {
     if (e.key === 'Enter') {
-      e.currentTarget.blur() // Trigger blur validation
+      e.currentTarget.blur()
     }
   }, [])
 
-  // Handle username input change
   const handleUsernameInputChange = useCallback((value: string) => {
     setUsernameInput(value)
 
@@ -175,7 +155,6 @@ export function SecurityLogsPage() {
     }, 500)
   }, [usernameValidationError, validateUsername])
 
-  // Handle username blur
   const handleUsernameBlur = useCallback(() => {
     const { valid, error } = validateUsername(usernameInput)
 
@@ -192,7 +171,6 @@ export function SecurityLogsPage() {
     setPage(1)
   }, [usernameInput, validateUsername])
 
-  // Handle username Enter key
   const handleUsernameKeyDown = useCallback((e: React.KeyboardEvent<HTMLInputElement>) => {
     if (e.key === 'Enter') {
       e.currentTarget.blur()
@@ -207,7 +185,6 @@ export function SecurityLogsPage() {
     setPage(1)
   }, [])
 
-  // Handle clear filters - reset input states
   const handleClearFilters = useCallback(() => {
     setFilters({})
     setIpInput('')
@@ -363,7 +340,6 @@ export function SecurityLogsPage() {
         <div className="bg-white rounded-lg shadow p-6 mb-6">
           <h2 className="text-lg font-semibold text-gray-900 mb-4">{t('securityLogs.filters.title')}</h2>
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
-            {/* IP Address Filter - UPDATED */}
             <div>
               <label
                 htmlFor="filter-ip"
@@ -399,7 +375,6 @@ export function SecurityLogsPage() {
               )}
             </div>
 
-            {/* Username Filter - UPDATED */}
             <div>
               <label
                 htmlFor="filter-username"

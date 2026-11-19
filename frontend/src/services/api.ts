@@ -1,15 +1,8 @@
 /**
  * Main API client for Topologix backend communication
- * - Configures axios with authentication, CSRF protection, and rate limiting
- * - Implements automatic token refresh on 401 errors with interceptors
- * - Provides typed API methods for all network analysis endpoints (Batfish integration)
- * - Handles environment/runtime-based auth enable/disable configuration
- * - Role-based access control with hasRole() helper
- * - Uses CSRFService for stateless double-submit cookie pattern
  */
-import axios, { AxiosInstance, AxiosError, AxiosRequestConfig } from 'axios'
+import axios, { AxiosHeaders, AxiosInstance, AxiosError, AxiosRequestConfig, type AxiosResponse } from 'axios'
 import { runtimeConfig } from '../config/runtimeConfig'
-// isTokenExpired removed — expiry now checked via stored tokenExpiresAt timestamp
 import { logger } from '../utils/logger'
 import { getSafeApiErrorLog } from '../utils/apiError'
 import { CSRFService } from './csrfService'
@@ -95,6 +88,23 @@ import type {
   SecurityLogsQueryParams,
   PaginatedSecurityLogsResponse,
   SecurityStats,
+  HashKeyedResponse,
+  ResultIdentityHeaders,
+  ActivateSnapshotOptions,
+  SnapshotVersionState,
+  SnapshotVersionDetail,
+  VersionListParams,
+  VersionListResponse,
+  CommitVersionRequest,
+  CommitVersionResponse,
+  RestoreVersionRequest,
+  RestoreVersionResponse,
+  VersionDiffResponse,
+  VersionFileDiff,
+  VersionDeleteRequest,
+  SingleVersionDeleteRequest,
+  VersionDeleteResponse,
+  ClearResultCacheResponse,
 } from '../types'
 
 const API_BASE_URL = runtimeConfig.apiBaseUrl || ''
@@ -143,18 +153,10 @@ if (AUTH_ENABLED) {
 
 const apiClient: AxiosInstance = axios.create({
   baseURL: `${API_BASE_URL}/api`,
-  // The backend serializes every Batfish-backed request behind one lock, so
-  // any query can legitimately wait for a long-running aggregate (measured
-  // 34s at 170 devices) before its own execution starts. 30s starved those
-  // queued requests on large snapshots; connection-level failures still fail
-  // fast regardless of this ceiling.
+  // The backend serializes Batfish-backed requests behind one lock, so a request can wait for a long-running query before it starts
   timeout: 120000,
   headers: {
     'Content-Type': 'application/json',
-    ...(AUTH_ENABLED ? {} : {
-      'Cache-Control': 'no-cache, no-store, must-revalidate',
-      'Pragma': 'no-cache',
-    })
   },
   ...(AUTH_ENABLED ? { withCredentials: true } : {}),
 })
@@ -162,7 +164,6 @@ const apiClient: AxiosInstance = axios.create({
 if (AUTH_ENABLED) {
   apiClient.interceptors.request.use(
     async (config) => {
-      // Check if token is expired based on stored expiration time
       if (authState.tokenExpiresAt && Date.now() > authState.tokenExpiresAt) {
         logger.warn('[API] Access token expired, clearing local state')
 
@@ -180,10 +181,8 @@ if (AUTH_ENABLED) {
         return Promise.reject(new Error('Token expired'))
       }
 
-      // Add CSRF token for state-changing methods (double-submit pattern with async retrieval)
       if (['POST', 'PUT', 'DELETE', 'PATCH'].includes(config.method?.toUpperCase() || '')) {
         try {
-          // ASYNC TOKEN RETRIEVAL: Use async getToken() for automatic refresh + retry logic
           const csrfToken = await CSRFService.getToken()
           config.headers['X-CSRF-Token'] = csrfToken
           logger.debug('[API] CSRF token added to request (async)')
@@ -191,7 +190,6 @@ if (AUTH_ENABLED) {
           const safeError = getSafeApiErrorLog(error)
           const safeMessage = typeof safeError.message === 'string' ? safeError.message : 'unknown error'
           logger.error('[API] Failed to obtain CSRF token for request:', safeError)
-          // Fail fast - reject the request instead of proceeding without token
           return Promise.reject(new Error(`CSRF token unavailable: ${safeMessage}`))
         }
       }
@@ -214,7 +212,6 @@ apiClient.interceptors.response.use(
         originalRequest._retry = true
 
         try {
-          // Refresh via HTTP-only cookie (sent automatically with withCredentials)
           const refreshResponse = await axios.post(
             `${API_BASE_URL}/api/auth/refresh`,
             {},
@@ -227,7 +224,6 @@ apiClient.interceptors.response.use(
           authState.tokenExpiresAt = expiresAt
           localStorage.setItem('token_expires_at', expiresAt.toString())
 
-          // Retry original request (cookie updated by Set-Cookie header)
           return apiClient(originalRequest)
         } catch (refreshError) {
           logger.error('[API] Refresh token failed')
@@ -262,7 +258,6 @@ apiClient.interceptors.response.use(
             }
           } catch (csrfError) {
             logger.error('[API] Failed to refresh CSRF token:', getSafeApiErrorLog(csrfError))
-            // Let the error propagate to React Query error handler
             return Promise.reject(csrfError)
           }
         } else {
@@ -311,8 +306,6 @@ if (!AUTH_ENABLED) {
 /**
  * Authentication and authorization API methods
  * Handles login, logout, token refresh, CSRF token management, and password reset
- * Only enabled when VITE_AUTH_ENABLED=true in environment
- * Manages JWT access/refresh tokens and CSRF protection
  */
 export const authAPI = {
   async login(username: string, password: string) {
@@ -338,7 +331,6 @@ export const authAPI = {
     localStorage.setItem('user', JSON.stringify(data.user))
     localStorage.setItem('token_expires_at', expiresAt.toString())
 
-    // Store CSRF token in memory for immediate availability (prevents race condition)
     CSRFService.setMemoryToken(data.csrf_token)
 
     return data
@@ -393,7 +385,7 @@ export const authAPI = {
 
     // Use CSRFService to refresh token (uses axios directly to avoid interceptor loop)
     const newToken = await CSRFService.refreshToken()
-    authState.csrfToken = newToken  // Keep in state for reference
+    authState.csrfToken = newToken
     return newToken
   },
 
@@ -426,10 +418,22 @@ export const authAPI = {
   }
 }
 
+function readResultIdentity(headers: AxiosResponse['headers'] | undefined): ResultIdentityHeaders {
+  const read = (name: string): string | undefined => {
+    if (!headers) return undefined
+    const value = headers instanceof AxiosHeaders ? headers.get(name) : headers[name.toLowerCase()]
+    return value === undefined || value === null ? undefined : String(value)
+  }
+  return {
+    snapshotId: read('X-Topologix-Snapshot-Id'),
+    contentHash: read('X-Topologix-Content-Hash'),
+    cacheStatus: read('X-Topologix-Cache'),
+  }
+}
+
 /**
  * Core network data API methods
  * Provides access to network topology, nodes, interfaces, routes, VLANs, and IP ownership
- * Primary source for Batfish network analysis data
  */
 export const networkAPI = {
   async health() {
@@ -445,46 +449,43 @@ export const networkAPI = {
     return response.data.data
   },
 
-  async getAllData() {
-    // The aggregate endpoint runs ~70 Batfish queries server-side; measured
-    // 34s for 170 minimal configs, so real-world large snapshots need the
-    // full window nginx allows for /api (300s).
+  async getAllData(): Promise<HashKeyedResponse<AllNetworkData>> {
+    // Matches the 300 s window nginx allows for /api
     const response = await apiClient.get<APIResponse<AllNetworkData>>('/network/all-data', {
       timeout: 300000,
     })
-    return response.data.data
+    return { data: response.data.data, identity: readResultIdentity(response.headers) }
   },
 
-  async getNodes() {
+  async getNodes(): Promise<HashKeyedResponse<NodeProperties[]>> {
     const response = await apiClient.get<APIResponse<NodeProperties[]>>('/network/nodes')
-    return response.data.data
+    return { data: response.data.data, identity: readResultIdentity(response.headers) }
   },
 
-  async getInterfaces() {
+  async getInterfaces(): Promise<HashKeyedResponse<InterfaceProperties[]>> {
     const response = await apiClient.get<APIResponse<InterfaceProperties[]>>('/network/interfaces')
-    return response.data.data
+    return { data: response.data.data, identity: readResultIdentity(response.headers) }
   },
 
-  async getRoutes() {
+  async getRoutes(): Promise<HashKeyedResponse<Route[]>> {
     const response = await apiClient.get<APIResponse<Route[]>>('/network/routes')
-    return response.data.data
+    return { data: response.data.data, identity: readResultIdentity(response.headers) }
   },
 
-  async getVlans() {
+  async getVlans(): Promise<HashKeyedResponse<SwitchedVlanProperties[]>> {
     const response = await apiClient.get<APIResponse<SwitchedVlanProperties[]>>('/network/vlans')
-    return response.data.data
+    return { data: response.data.data, identity: readResultIdentity(response.headers) }
   },
 
-  async getIPOwners() {
+  async getIPOwners(): Promise<HashKeyedResponse<IPOwner[]>> {
     const response = await apiClient.get<APIResponse<IPOwner[]>>('/network/ip-owners')
-    return response.data.data
+    return { data: response.data.data, identity: readResultIdentity(response.headers) }
   },
 }
 
 /**
  * OSPF protocol API methods
  * Provides access to OSPF processes, areas, interface configurations, and adjacency sessions
- * Used for OSPF topology analysis and troubleshooting
  */
 export const ospfAPI = {
   async getProcesses() {
@@ -511,7 +512,6 @@ export const ospfAPI = {
 /**
  * Network edges API methods
  * Provides access to physical, layer 3, OSPF, and BGP connectivity edges
- * Core data for topology visualization with Cytoscape.js
  */
 export const edgesAPI = {
   async getOSPFEdges() {
@@ -538,7 +538,6 @@ export const edgesAPI = {
 /**
  * BGP protocol API methods
  * Provides access to BGP edges, peer configuration, process config, session status, and RIB
- * Used for BGP topology analysis and routing table inspection
  */
 export const bgpAPI = {
   async getEdges() {
@@ -575,7 +574,6 @@ export const bgpAPI = {
 /**
  * Configuration structures API methods
  * Provides access to defined/referenced/named structures and AAA authentication config
- * Used for configuration analysis and cross-reference validation
  */
 export const configAPI = {
   async getDefinedStructures() {
@@ -613,12 +611,7 @@ export const securityAPI = {
 /**
  * Network validation API methods
  * Provides configuration parsing status, init issues, warnings, and network validation
- * Includes unused structures, undefined references, forwarding loops, and multipath consistency
- * Critical for identifying network configuration errors before deployment
  */
-// Parse-result queries re-run Batfish parse-status questions server-side and
-// back the snapshot page's parse summary card; give large snapshots headroom
-// beyond the 30s default.
 const PARSE_RESULT_TIMEOUT_MS = 120000
 
 export const validationAPI = {
@@ -723,7 +716,6 @@ export const validationAPI = {
 /**
  * Network analysis API methods
  * Provides reachability analysis, route policies, traceroute, and bidirectional traceroute
- * Core functionality for end-to-end connectivity testing and path analysis
  */
 export const analysisAPI = {
   async getReachability(request?: ReachabilityRequest) {
@@ -754,7 +746,6 @@ export const analysisAPI = {
 /**
  * Snapshot management API methods
  * Handles snapshot CRUD operations, file uploads, and snapshot activation
- * Snapshots contain network device configurations for Batfish analysis
  */
 export const snapshotAPI = {
   async list() {
@@ -940,17 +931,79 @@ export const snapshotAPI = {
     return response.data.data
   },
 
-  async activate(name: string) {
-    // Activation parses every uploaded config in Batfish, so 100+ real-world
-    // files legitimately exceed the 30s default. A client-side timeout here is
-    // worse than a slow wait: the backend still finishes activating, leaving
-    // the UI rolled back to the previous snapshot while the backend serves the
-    // new one. nginx allows 300s for /api.
+  async activate(name: string, options?: ActivateSnapshotOptions) {
+    // Matches nginx's 300 s /api limit: a client timeout would restore the previous snapshot in the UI while the backend still activates the new one
     const response = await apiClient.post<APIResponse<NetworkInitializeResponse>>(
       `/snapshots/${name}/activate`,
-      undefined,
+      options?.if_stale ? { if_stale: true } : undefined,
       { timeout: 300000 }
     )
+    return response.data.data
+  },
+
+  async getVersionState(name: string) {
+    const response = await apiClient.get<APIResponse<SnapshotVersionState>>(`/snapshots/${name}/version-state`)
+    return response.data.data
+  },
+
+  async listVersions(name: string, params?: VersionListParams) {
+    const response = await apiClient.get<APIResponse<VersionListResponse>>(`/snapshots/${name}/versions`, { params })
+    return response.data.data
+  },
+
+  async getVersion(name: string, versionId: string) {
+    const response = await apiClient.get<APIResponse<SnapshotVersionDetail>>(
+      `/snapshots/${name}/versions/${encodeURIComponent(versionId)}`
+    )
+    return response.data.data
+  },
+
+  async commitVersion(name: string, request: CommitVersionRequest) {
+    const response = await apiClient.post<APIResponse<CommitVersionResponse>>(`/snapshots/${name}/versions`, request)
+    return response.data.data
+  },
+
+  async getVersionDiff(name: string, versionId: string, against: string) {
+    const response = await apiClient.get<APIResponse<VersionDiffResponse>>(
+      `/snapshots/${name}/versions/${encodeURIComponent(versionId)}/diff`,
+      { params: { against } }
+    )
+    return response.data.data
+  },
+
+  async getVersionFileDiff(name: string, versionId: string, against: string, path: string) {
+    const response = await apiClient.get<APIResponse<VersionFileDiff>>(
+      `/snapshots/${name}/versions/${encodeURIComponent(versionId)}/diff/file`,
+      { params: { against, path } }
+    )
+    return response.data.data
+  },
+
+  async restoreVersion(name: string, versionId: string, request?: RestoreVersionRequest) {
+    const response = await apiClient.post<APIResponse<RestoreVersionResponse>>(
+      `/snapshots/${name}/versions/${encodeURIComponent(versionId)}/restore`,
+      request
+    )
+    return response.data.data
+  },
+
+  async deleteVersion(name: string, versionId: string, request?: SingleVersionDeleteRequest) {
+    const response = await apiClient.delete<APIResponse<VersionDeleteResponse>>(
+      `/snapshots/${name}/versions/${encodeURIComponent(versionId)}`,
+      { data: request }
+    )
+    return response.data.data
+  },
+
+  async deleteVersions(name: string, request: VersionDeleteRequest) {
+    const response = await apiClient.delete<APIResponse<VersionDeleteResponse>>(`/snapshots/${name}/versions`, {
+      data: request,
+    })
+    return response.data.data
+  },
+
+  async clearResultCache(name: string) {
+    const response = await apiClient.post<APIResponse<ClearResultCacheResponse>>(`/snapshots/${name}/cache/clear`)
     return response.data.data
   },
 
@@ -983,7 +1036,6 @@ export const snapshotMigrationAPI = {
 /**
  * Layer1 topology management API methods
  * Provides access to physical topology configuration for snapshots
- * Used for manual Layer1 connection management in Batfish
  */
 export const layer1API = {
   async getTopology(snapshotName: string) {
@@ -1016,7 +1068,6 @@ export const layer1API = {
 /**
  * High availability protocols API methods
  * Provides access to VRRP, HSRP, MLAG properties, duplicate router IDs, and switching
- * Used for HA configuration analysis and redundancy validation
  */
 export const haAPI = {
   async getVRRPProperties() {
@@ -1048,7 +1099,6 @@ export const haAPI = {
 /**
  * Additional routing protocols API methods
  * Provides EIGRP, IS-IS, and BFD protocol data
- * Covers edges, interface configurations, and session status
  */
 export const protocolsAPI = {
   async getEIGRPEdges() {
@@ -1089,8 +1139,6 @@ export const protocolsAPI = {
 
 /**
  * Network topology API methods
- * Provides Layer 1/2 topology, VXLAN VNI properties, IPsec VPN data, and switched VLAN edges
- * Core data for multi-layer network visualization
  */
 export const topologyAPI = {
   async getLayer1Topology() {
@@ -1157,7 +1205,6 @@ export const topologyAPI = {
 /**
  * Advanced analysis features API methods
  * Provides F5 load balancer VIPs, route policy testing, ACL analysis, and filter reachability
- * Advanced network analysis capabilities for enterprise environments
  */
 export const advancedAPI = {
   async getF5VIPs() {
@@ -1281,7 +1328,6 @@ export const advancedAPI = {
 /**
  * User management API methods
  * Handles user registration, listing, updates, password changes, and deletion
- * Admin-only operations for user account management (except getMe and changePassword for self)
  */
 export const usersAPI = {
   async register(data: RegisterRequest) {
@@ -1323,7 +1369,6 @@ export const usersAPI = {
 /**
  * Security audit logs API methods
  * Provides access to login attempts, security events, and statistics
- * Admin-only endpoints for security monitoring and compliance
  */
 export const securityLogsAPI = {
   async list(params?: SecurityLogsQueryParams) {

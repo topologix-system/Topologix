@@ -11,7 +11,6 @@ const snapshotSegment = (snapshotName: string | null) => snapshotName ?? inactiv
 
 /**
  * Query key factory for edges-related React Query caches
- * Hierarchical structure enables targeted cache invalidation
  */
 export const edgesKeys = {
   all: ['edges'] as const,
@@ -24,8 +23,6 @@ export const edgesKeys = {
 /**
  * Query OSPF adjacency edges
  * Returns OSPF neighbor relationships and adjacency connections
- * Used for OSPF topology visualization
- * @param enabled - Optional flag to conditionally enable query (default: true)
  */
 export function useOSPFEdges(enabled = true) {
   const currentSnapshotName = useSnapshotStore((state) => state.currentSnapshotName)
@@ -41,7 +38,6 @@ export function useOSPFEdges(enabled = true) {
 /**
  * Query physical layer connections
  * Returns direct physical links between devices (cables, fiber, etc.)
- * @param enabled - Optional flag to conditionally enable query (default: true)
  */
 export function usePhysicalEdges(enabled = true) {
   const currentSnapshotName = useSnapshotStore((state) => state.currentSnapshotName)
@@ -56,8 +52,6 @@ export function usePhysicalEdges(enabled = true) {
 
 /**
  * Query layer 3 (IP) connectivity edges
- * Returns logical IP-level connections and subnets between devices
- * @param enabled - Optional flag to conditionally enable query (default: true)
  */
 export function useLayer3Edges(enabled = true) {
   const currentSnapshotName = useSnapshotStore((state) => state.currentSnapshotName)
@@ -73,8 +67,6 @@ export function useLayer3Edges(enabled = true) {
 /**
  * Query BGP peering edges
  * Returns BGP neighbor relationships and peering sessions
- * Used for BGP topology visualization
- * @param enabled - Optional flag to conditionally enable query (default: true)
  */
 export function useBGPEdges(enabled = true) {
   const currentSnapshotName = useSnapshotStore((state) => state.currentSnapshotName)

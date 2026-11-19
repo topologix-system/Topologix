@@ -1,18 +1,9 @@
 /**
  * Data formatting utilities for UI display
- * - IP address, CIDR, timestamp formatters for network topology data
- * - Byte size (KB, MB, GB) and millisecond duration formatters
- * - Number abbreviation (K, M, B) for large values like route counts
- * - Consistent formatting across the application for better UX
  */
 
 /**
  * Format date to localized string (year, month, day)
- * Uses Intl.DateTimeFormat for internationalization support
- * @param date - Date object, timestamp, or ISO string
- * @param locale - BCP 47 language tag (default: 'en')
- * @param options - Optional Intl date format options
- * @returns Formatted date string
  */
 export function formatDate(
   date: Date | string | number,
@@ -33,11 +24,6 @@ export function formatDate(
 
 /**
  * Format date and time to localized string (year, month, day, hour, minute)
- * Combines date and time formatting for complete timestamp display
- * @param date - Date object, timestamp, or ISO string
- * @param locale - BCP 47 language tag (default: 'en')
- * @param options - Optional Intl date format options
- * @returns Formatted date-time string
  */
 export function formatDateTime(
   date: Date | string | number,
@@ -60,11 +46,6 @@ export function formatDateTime(
 
 /**
  * Format time only to localized string (hour, minute, second)
- * Excludes date portion for time-only display
- * @param date - Date object, timestamp, or ISO string
- * @param locale - BCP 47 language tag (default: 'en')
- * @param options - Optional Intl date format options
- * @returns Formatted time string
  */
 export function formatTime(
   date: Date | string | number,
@@ -85,11 +66,6 @@ export function formatTime(
 
 /**
  * Format date as relative time (e.g., "5 minutes ago", "2 days ago")
- * Uses Intl.RelativeTimeFormat for human-friendly time display
- * Automatically selects appropriate unit (seconds, minutes, hours, days, months, years)
- * @param date - Date object, timestamp, or ISO string
- * @param locale - BCP 47 language tag (default: 'en')
- * @returns Relative time string
  */
 export function formatRelativeTime(
   date: Date | string | number,
@@ -131,11 +107,6 @@ export function formatRelativeTime(
 
 /**
  * Format number with locale-specific separators
- * Uses Intl.NumberFormat for internationalization
- * @param value - Number to format
- * @param locale - BCP 47 language tag (default: 'en')
- * @param options - Optional Intl number format options
- * @returns Formatted number string
  */
 export function formatNumber(
   value: number,
@@ -147,10 +118,6 @@ export function formatNumber(
 
 /**
  * Format number as percentage (0-1 range to 0%-100%)
- * @param value - Decimal value (e.g., 0.75 for 75%)
- * @param locale - BCP 47 language tag (default: 'en')
- * @param decimals - Number of decimal places (default: 0)
- * @returns Formatted percentage string (e.g., "75%")
  */
 export function formatPercent(
   value: number,
@@ -165,12 +132,7 @@ export function formatPercent(
 }
 
 /**
- * Format byte size to human-readable string (B, KB, MB, GB, TB)
- * Automatically selects appropriate unit based on size
- * @param bytes - Raw byte count
- * @param locale - BCP 47 language tag (default: 'en')
- * @param decimals - Number of decimal places (default: 2)
- * @returns Formatted size string (e.g., "1.25 MB")
+ * Format byte size to human-readable string
  */
 export function formatFileSize(
   bytes: number,
@@ -192,11 +154,6 @@ export function formatFileSize(
 
 /**
  * Format number as currency with symbol
- * Uses Intl.NumberFormat currency formatting
- * @param value - Numeric value to format
- * @param locale - BCP 47 language tag (default: 'en')
- * @param currency - ISO 4217 currency code (default: 'USD')
- * @returns Formatted currency string (e.g., "$1,234.56")
  */
 export function formatCurrency(
   value: number,
@@ -211,10 +168,6 @@ export function formatCurrency(
 
 /**
  * Format large numbers in compact notation (K, M, B)
- * Useful for route counts, interface counts, etc.
- * @param value - Number to format
- * @param locale - BCP 47 language tag (default: 'en')
- * @returns Compact number string (e.g., "1.2K", "3.5M")
  */
 export function formatCompactNumber(
   value: number,
@@ -228,10 +181,6 @@ export function formatCompactNumber(
 
 /**
  * Format duration in seconds to human-readable string (hours, minutes, seconds)
- * Supports Japanese and English locales with appropriate units
- * @param seconds - Duration in seconds
- * @param locale - BCP 47 language tag (default: 'en')
- * @returns Formatted duration string (e.g., "2h 30m 15s" or "2時間 30分 15秒")
  */
 export function formatDuration(
   seconds: number,
@@ -257,10 +206,7 @@ export function formatDuration(
 }
 
 /**
- * Format IP address (passthrough for future IPv6 formatting)
- * Currently returns IP as-is, placeholder for potential formatting
- * @param ip - IPv4 or IPv6 address string
- * @returns Formatted IP address string
+ * Format IP address (passthrough)
  */
 export function formatIPAddress(ip: string): string {
   return ip;
@@ -268,9 +214,6 @@ export function formatIPAddress(ip: string): string {
 
 /**
  * Format MAC address to standard colon-separated uppercase format
- * Normalizes various MAC address formats (hyphens, colons, none) to XX:XX:XX:XX:XX:XX
- * @param mac - MAC address string in any format
- * @returns Standardized MAC address (e.g., "AA:BB:CC:DD:EE:FF")
  */
 export function formatMACAddress(mac: string): string {
   return mac.replace(/[:-]/g, '').match(/.{1,2}/g)?.join(':').toUpperCase() || mac;
@@ -278,11 +221,6 @@ export function formatMACAddress(mac: string): string {
 
 /**
  * Truncate long text with ellipsis
- * Useful for long interface names, hostnames, or descriptions
- * @param text - Text string to truncate
- * @param maxLength - Maximum length including ellipsis
- * @param ellipsis - Ellipsis string to append (default: "...")
- * @returns Truncated string with ellipsis if needed
  */
 export function truncateText(
   text: string,

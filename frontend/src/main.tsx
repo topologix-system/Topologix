@@ -1,6 +1,5 @@
 /**
- * Application entry point with lazy loading and React Query configuration
- * See inline code for specific cache strategy and component mounting behavior
+ * Application entry point
  */
 import React, { Suspense, lazy, useEffect, useMemo, useRef } from 'react'
 import ReactDOM from 'react-dom/client'
@@ -10,10 +9,11 @@ import { QueryClient, QueryClientProvider, useQueryClient } from '@tanstack/reac
 import { runtimeConfig } from './config/runtimeConfig'
 import { authAPI } from './services/api'
 import { batfishQueryFamilies } from './hooks/useSnapshots'
+import { INVALIDATION_SIGNAL_KEY, handleInvalidationSignal } from './hooks/useSnapshotVersions'
+import { queryClient } from './queryClient'
 import { useSnapshotStore } from './store'
 import './index.css'
 
-// Lazy load components for code splitting
 const Layout = lazy(() => import('./components/Layout').then(m => ({ default: m.Layout })))
 const TopologyView = lazy(() => import('./pages/TopologyView').then(m => ({ default: m.TopologyView })))
 const SnapshotManagement = lazy(() => import('./pages/SnapshotManagement').then(m => ({ default: m.SnapshotManagement })))
@@ -31,33 +31,12 @@ const SecurityLogsPage = lazy(() => import('./pages/SecurityLogsPage').then(m =>
 const SnapshotOwnerMigrationPage = lazy(() => import('./pages/SnapshotOwnerMigrationPage').then(m => ({ default: m.SnapshotOwnerMigrationPage })))
 const ProtectedRoute = lazy(() => import('./components/ProtectedRoute').then(m => ({ default: m.ProtectedRoute })))
 
-// Lazy load React Query DevTools (only in development)
 const ReactQueryDevtools = lazy(() =>
   import('@tanstack/react-query-devtools').then(m => ({ default: m.ReactQueryDevtools }))
 )
 
-// Lazy load i18n configuration
 const loadI18n = () => import('./i18n/config')
-loadI18n() // Initialize i18n asynchronously
-
-// Create React Query client with optimized cache strategy
-const queryClient = new QueryClient({
-  defaultOptions: {
-    queries: {
-      staleTime: 5 * 60 * 1000, // 5 minutes - increased for better performance
-      gcTime: 10 * 60 * 1000, // 10 minutes - keep data in cache longer (renamed from cacheTime in v5)
-      refetchOnWindowFocus: false,
-      refetchOnReconnect: 'always',
-      retry: (failureCount, error: any) => {
-        // Only retry on network errors, not on 4xx errors
-        if (error?.response?.status >= 400 && error?.response?.status < 500) {
-          return false
-        }
-        return failureCount < 2
-      },
-    },
-  },
-})
+loadI18n()
 
 // Loading component for route transitions
 const RouteLoadingFallback = () => (
@@ -66,7 +45,6 @@ const RouteLoadingFallback = () => (
   </div>
 )
 
-// Create router with lazy loaded components
 const RouterFactory = runtimeConfig.useHashRouter ? createHashRouter : createBrowserRouter
 const authEnabled = authAPI.isAuthEnabled()
 const isSidebarPopoutRuntime = window.location.pathname === '/sidebar-popout'
@@ -85,12 +63,16 @@ function readPersistedSnapshotName(storageValue: string | null) {
   }
 }
 
-function SnapshotStorageSync() {
+export function SnapshotStorageSync() {
   const activeQueryClient = useQueryClient()
   const syncSequenceRef = useRef(0)
 
   useEffect(() => {
     const handleStorage = (event: StorageEvent) => {
+      if (event.key === INVALIDATION_SIGNAL_KEY) {
+        void handleInvalidationSignal(activeQueryClient, event.newValue)
+        return
+      }
       if (event.key !== snapshotStorageKey) return
 
       syncSequenceRef.current += 1
@@ -369,8 +351,6 @@ export function buildRoutes(authEnabled: boolean): RouteObject[] {
 const router = RouterFactory(buildRoutes(authEnabled))
 
 ReactDOM.createRoot(document.getElementById('root')!).render(
-  // StrictMode intentionally double-mounts components in development
-  // This is normal React behavior - see TopologyViewer cleanup hooks for handling
   <React.StrictMode>
     <QueryClientProvider client={queryClient}>
       {!isSidebarPopoutRuntime && <SnapshotStorageSync />}

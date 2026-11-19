@@ -31,7 +31,6 @@ export const validationKeys = {
 /**
  * Query configuration file parse status
  * Returns success/failure status for each device config file parsed by Batfish
- * @param enabled - Optional flag to conditionally enable query (default: true)
  */
 export function useFileParseStatus(enabled = true) {
   const currentSnapshotName = useSnapshotStore((state) => state.currentSnapshotName)
@@ -47,7 +46,6 @@ export function useFileParseStatus(enabled = true) {
 /**
  * Query Batfish initialization issues
  * Returns errors encountered during snapshot initialization phase
- * @param enabled - Optional flag to conditionally enable query (default: true)
  */
 export function useInitIssues(enabled = true) {
   const currentSnapshotName = useSnapshotStore((state) => state.currentSnapshotName)
@@ -63,7 +61,6 @@ export function useInitIssues(enabled = true) {
 /**
  * Query configuration parse warnings
  * Returns warnings from config parsing (non-fatal issues)
- * @param enabled - Optional flag to conditionally enable query (default: true)
  */
 export function useParseWarnings(enabled = true) {
   const currentSnapshotName = useSnapshotStore((state) => state.currentSnapshotName)
@@ -78,7 +75,6 @@ export function useParseWarnings(enabled = true) {
 
 /**
  * Aggregate Batfish parse result queries into a compact UI summary.
- * Uses React Query-backed data only; no effect-driven data fetching.
  */
 export function useParseResultSummary(enabled = true) {
   const fileParseStatus = useFileParseStatus(enabled)
@@ -121,7 +117,6 @@ export function useParseResultSummary(enabled = true) {
 /**
  * Query vendor-independent (VI) model conversion status
  * Returns status of converting vendor configs to Batfish VI model
- * @param enabled - Optional flag to conditionally enable query (default: true)
  */
 export function useVIConversionStatus(enabled = true) {
   const currentSnapshotName = useSnapshotStore((state) => state.currentSnapshotName)
@@ -137,8 +132,6 @@ export function useVIConversionStatus(enabled = true) {
 /**
  * Query unused configuration structures
  * Returns defined config objects (ACLs, route-maps, etc.) that are never referenced
- * Helps identify configuration bloat and cleanup opportunities
- * @param enabled - Optional flag to conditionally enable query (default: true)
  */
 export function useUnusedStructures(enabled = true) {
   const currentSnapshotName = useSnapshotStore((state) => state.currentSnapshotName)
@@ -154,8 +147,6 @@ export function useUnusedStructures(enabled = true) {
 /**
  * Query undefined configuration references
  * Returns references to non-existent config objects (broken references)
- * Critical validation issue that can cause failures
- * @param enabled - Optional flag to conditionally enable query (default: true)
  */
 export function useUndefinedReferences(enabled = true) {
   const currentSnapshotName = useSnapshotStore((state) => state.currentSnapshotName)
@@ -171,8 +162,6 @@ export function useUndefinedReferences(enabled = true) {
 /**
  * Query routing forwarding loops
  * Returns detected routing loops that cause packet cycling
- * Critical network issue requiring immediate attention
- * @param enabled - Optional flag to conditionally enable query (default: true)
  */
 export function useForwardingLoops(enabled = true) {
   const currentSnapshotName = useSnapshotStore((state) => state.currentSnapshotName)
@@ -188,8 +177,6 @@ export function useForwardingLoops(enabled = true) {
 /**
  * Query multipath routing consistency
  * Validates ECMP (Equal-Cost Multi-Path) configuration consistency
- * Ensures load balancing works as expected
- * @param enabled - Optional flag to conditionally enable query (default: true)
  */
 export function useMultipathConsistency(enabled = true) {
   const currentSnapshotName = useSnapshotStore((state) => state.currentSnapshotName)
@@ -204,9 +191,6 @@ export function useMultipathConsistency(enabled = true) {
 
 /**
  * Query loopback interface multipath consistency
- * Validates ECMP for loopback interfaces (typically used for router IDs)
- * Important for IGP and overlay network stability
- * @param enabled - Optional flag to conditionally enable query (default: true)
  */
 export function useLoopbackMultipathConsistency(enabled = true) {
   const currentSnapshotName = useSnapshotStore((state) => state.currentSnapshotName)
@@ -221,8 +205,6 @@ export function useLoopbackMultipathConsistency(enabled = true) {
 
 /**
  * Mutation to check subnet-level multipath consistency
- * Validates ECMP behavior per subnet (more granular than global check)
- * User-triggered analysis with optional max trace limit
  */
 export function useSubnetMultipathConsistency() {
   return useMutation({

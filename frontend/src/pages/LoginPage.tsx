@@ -1,10 +1,5 @@
 /**
  * User authentication login page
- * - Username/password form with validation and error display
- * - Zustand authentication store integration with login state management
- * - Redirect-to-from location handling: preserves original destination after login
- * - Links to registration and password reset flows for user convenience
- * - Displays app version in development mode only
  */
 import { useEffect, useState } from 'react'
 import { useNavigate, useLocation, Link } from 'react-router-dom'
@@ -49,7 +44,7 @@ export function LoginPage() {
   const successMessage = successMessageKey ? t(successMessageKey, { defaultValue: '' }) : ''
 
   /**
-   * Drop the one-time message from history state so reload / back does not show the banner again
+   * Drop the one-time message from history state
    */
   useEffect(() => {
     const state = location.state as Record<string, unknown> | null
@@ -90,7 +85,6 @@ export function LoginPage() {
           {!IS_PRODUCTION && <p className="text-sm text-gray-600 mt-1">v{APP_VERSION}</p>}
         </div>
 
-        {/* Login Form */}
         <form onSubmit={handleSubmit} className="space-y-6">
           {successMessage && (
             <div

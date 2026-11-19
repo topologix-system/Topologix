@@ -7,8 +7,6 @@ import { logger } from '../utils/logger'
 /**
  * Node selector dropdown component
  * Allows users to select network nodes from the topology
- * Fetches node data using React Query (NO useEffect)
- * Updates global UI store with selected node ID
  */
 export function NodeSelector() {
   const { t } = useTranslation()

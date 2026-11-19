@@ -1,3 +1,4 @@
+import test_00_environment  # noqa: F401
 import contextlib
 import json
 import unittest
@@ -10,9 +11,7 @@ import app as app_module
 from services import batfish_service as batfish_service_module
 from services.batfish_service import BatfishQueryError, BatfishService
 
-# Sanitized reproduction of a failed Batfish work item (RFC 5737 style
-# placeholders, synthetic ids, no real environment data). Matches the shape
-# observed for searchRoutePolicies constraint-regex failures.
+# Failed Batfish work item for a searchRoutePolicies constraint-regex failure.
 SANITIZED_WORK_LOG_FAILURE = (
     "Work terminated abnormally\n"
     'work_item: {"containerName": "example_network", '
@@ -35,8 +34,7 @@ SANITIZED_WORK_LOG_FAILURE = (
     "initAtomicPredicates(RegexAtomicPredicates.java:82)\n"
 )
 
-# Same failure as observed through the Flask API path, where Batfish embeds
-# the stack trace as JSON-encoded strings on one physical line.
+# Same failure with the stack trace as JSON-encoded strings on one physical line.
 SANITIZED_WORK_LOG_FAILURE_JSON_LINE = (
     "Work terminated abnormally "
     'work_item: {"containerName": "example_network"} '
@@ -50,10 +48,8 @@ SANITIZED_WORK_LOG_FAILURE_JSON_LINE = (
 )
 
 
-# Sanitized reproduction of a failed testRoutePolicies work item as observed
-# through the Flask API path: the JSON-encoded stack trace carries
-# module-qualified JDK frames ('at java.base/...'), and the cause rethrown by
-# reflection repeats the inner exception class name.
+# Failed testRoutePolicies work item: the JSON-encoded stack trace carries module-qualified JDK
+# frames ('at java.base/...'), and the cause rethrown by reflection repeats the inner exception class name.
 SANITIZED_WORK_LOG_FAILURE_JDK_FRAMES = (
     "Work terminated abnormally "
     'work_item: {"containerName": "example_network"} '
@@ -94,8 +90,7 @@ SANITIZED_WORK_LOG_FAILURE_NESTED_CAUSES = (
 )
 
 
-# Sanitized reproductions of Batfish coordinator HTTP 500 bodies for rejected
-# question JSON (synthetic ids, no real environment data).
+# Batfish coordinator HTTP 500 bodies for rejected question JSON.
 SANITIZED_COORDINATOR_CONFLICT_BODY = (
     "org.batfish.common.BatfishException: Invalid question example_network/"
     "__searchRoutePolicies_00000000-0000-0000-0000-000000000000: Could not parse JSON question: "

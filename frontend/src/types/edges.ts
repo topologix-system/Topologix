@@ -1,7 +1,5 @@
 /**
  * Network edge/connection type definitions
- * Physical, layer 3, and protocol adjacency edges (OSPF, BGP, VXLAN, EIGRP, IS-IS, IPsec)
- * Core data structures for topology graph visualization
  */
 export interface PhysicalEdge {
   interface: string

@@ -1,17 +1,4 @@
-"""
-Secure Flask application with comprehensive authentication and security
-- JWT authentication and role-based access control (RBAC)
-- CSRF protection, rate limiting, and security headers
-- Audit logging for all security-relevant events
-- Input validation and sanitization for all endpoints
-- Comprehensive network analysis REST API powered by Batfish (40+ endpoints)
-- Requires authentication for all API endpoints except health/config
-
-WARNING: This is a REFERENCE IMPLEMENTATION covering ~20% of endpoints (19 of 113).
-94 endpoints from app.py are missing. Use app.py for production deployments.
-To complete this file, port remaining endpoints from app.py with @require_auth,
-@require_role, sanitize_input(), and audit_log() applied to each handler.
-"""
+"""Secure Flask application with comprehensive authentication and security"""
 import logging
 import logging.handlers
 import json
@@ -32,7 +19,6 @@ from security import (
     CSRFProtect, SecurityHeaders, RateLimiter
 )
 
-# Configure logging with security considerations
 logging.basicConfig(
     level=getattr(logging, config.LOG_LEVEL),
     format=config.LOG_FORMAT,
@@ -71,10 +57,8 @@ def audit_log(event: str, details: dict):
         }))
 
 
-# Initialize Flask app
 app = Flask(__name__)
 
-# Configure Flask app with security settings
 app.config['SECRET_KEY'] = config.SECRET_KEY
 app.config['SESSION_TYPE'] = 'filesystem'
 app.config['SESSION_COOKIE_SECURE'] = config.SESSION_COOKIE_SECURE
@@ -83,16 +67,13 @@ app.config['SESSION_COOKIE_SAMESITE'] = config.SESSION_COOKIE_SAMESITE
 app.config['PERMANENT_SESSION_LIFETIME'] = config.PERMANENT_SESSION_LIFETIME
 app.config['MAX_CONTENT_LENGTH'] = config.MAX_CONTENT_LENGTH
 
-# Initialize Flask-Session
 Session(app)
 
-# Initialize security components
 jwt_manager = JWTManager(app, config.JWT_SECRET_KEY)
 csrf_protect = CSRFProtect(app, config.CSRF_SECRET_KEY)
 security_headers = SecurityHeaders(app)
 rate_limiter = RateLimiter(app)
 
-# Configure CORS with security
 CORS(app,
      origins=config.CORS_ORIGINS,
      allow_headers=config.CORS_ALLOW_HEADERS,
@@ -100,12 +81,10 @@ CORS(app,
      supports_credentials=config.CORS_SUPPORTS_CREDENTIALS,
      max_age=config.CORS_MAX_AGE)
 
-# Initialize services
 batfish_service = BatfishService()
 snapshot_service = SnapshotService()
 
 
-# ========== Error Handlers with Security ==========
 @app.errorhandler(400)
 def bad_request(error):
     """Handle 400 errors without exposing details"""
@@ -150,7 +129,6 @@ def internal_error(error):
         return jsonify({"error": str(error)}), 500
 
 
-# ========== Utility Functions ==========
 def success_response(data: Any, message: str = "Success") -> tuple:
     """Create success response"""
     return jsonify({"status": "success", "message": message, "data": data}), 200
@@ -163,7 +141,6 @@ def error_response(message: str, status_code: int = 400) -> tuple:
     return jsonify({"status": "error", "message": message}), status_code
 
 
-# ========== Authentication Endpoints ==========
 @app.route('/api/auth/login', methods=['POST'])
 @rate_limiter.limit(per_minute=5, per_hour=20)
 def login():
@@ -186,7 +163,6 @@ def login():
             user['id'], user['username'], user['roles']
         )
 
-        # Generate CSRF token
         csrf_token = csrf_protect.generate_csrf_token()
 
         audit_log('login', {'username': username})
@@ -205,7 +181,6 @@ def login():
             }
         })
 
-        # Set secure cookie for web clients
         if config.ENV == 'production':
             response.set_cookie(
                 'access_token',
@@ -233,14 +208,12 @@ def logout():
         username = request.jwt_payload.get('username')
         audit_log('logout', {'username': username})
 
-        # Clear session
         session.clear()
 
         from flask import make_response
         response_body, status_code = success_response({}, "Logout successful")
         response = make_response(response_body, status_code)
 
-        # Clear cookies
         response.set_cookie('access_token', '', expires=0)
         response.set_cookie('csrf_token', '', expires=0)
 
@@ -267,7 +240,6 @@ def refresh_token():
         if payload.get('type') != 'refresh':
             return error_response("Invalid token type", 401)
 
-        # Get user from database (simplified for demo)
         from security.auth import USERS_DB
         user = None
         for u in USERS_DB.values():
@@ -278,7 +250,6 @@ def refresh_token():
         if not user:
             return error_response("User not found", 401)
 
-        # Generate new access token
         tokens = jwt_manager.generate_tokens(
             user['id'], user['username'], user['roles']
         )
@@ -302,7 +273,6 @@ def get_csrf_token():
     return success_response({'csrf_token': csrf_token})
 
 
-# ========== Health Check (No Auth Required) ==========
 @app.route('/api/health', methods=['GET'])
 def health_check():
     """Health check endpoint"""
@@ -314,14 +284,12 @@ def health_check():
     })
 
 
-# ========== Configuration Endpoint ==========
 @app.route('/api/config', methods=['GET'])
 def get_config():
     """Get safe configuration for client"""
     return success_response(config.get_safe_config())
 
 
-# ========== Network Initialization with Security ==========
 @app.route('/api/network/initialize', methods=['POST'])
 @require_auth
 @require_role('admin', 'user')
@@ -335,10 +303,8 @@ def initialize_network():
             optional_fields=['snapshot_name']
         )
 
-        # Validate and sanitize inputs
         snapshot_dir = data['snapshot_dir']
 
-        # Validate path to prevent traversal
         safe_path = validate_path(config.ALLOWED_SNAPSHOT_PATH, snapshot_dir)
 
         snapshot_name = None
@@ -350,7 +316,6 @@ def initialize_network():
             'snapshot_name': snapshot_name
         })
 
-        # Initialize network
         result = batfish_service.initialize_network(str(safe_path), snapshot_name)
 
         return success_response(result, "Network initialized successfully")
@@ -363,8 +328,6 @@ def initialize_network():
         logger.error(f"Failed to initialize network: {e}")
         return error_response("Initialization failed", 500)
 
-
-# ========== Query Endpoints with Authentication ==========
 
 @app.route('/api/network/nodes', methods=['GET'])
 @require_auth
@@ -410,8 +373,6 @@ def get_routes():
         logger.error(f"Failed to get routes: {e}")
         return error_response("Failed to retrieve routes", 500)
 
-
-# ========== Snapshot Management with Security ==========
 
 @app.route('/api/snapshots', methods=['GET'])
 @require_auth
@@ -487,7 +448,6 @@ def upload_snapshot_file(name: str):
 
         file = request.files['file']
 
-        # Validate file upload
         validation = validate_file_upload(file)
 
         audit_log('file_upload', {
@@ -533,8 +493,6 @@ def activate_snapshot(name: str):
         return error_response("Failed to activate snapshot", 500)
 
 
-# ========== OSPF Endpoints with Auth ==========
-
 @app.route('/api/ospf/processes', methods=['GET'])
 @require_auth
 def get_ospf_processes():
@@ -563,8 +521,6 @@ def get_ospf_areas():
         return error_response("Failed to retrieve OSPF areas", 500)
 
 
-# ========== Analysis Endpoints with Input Validation ==========
-
 @app.route('/api/analysis/reachability', methods=['POST'])
 @require_auth
 @rate_limiter.limit(per_minute=20, per_hour=200)
@@ -573,10 +529,8 @@ def get_reachability():
     try:
         data = request.get_json() if request.is_json else {}
 
-        # Validate headers if provided
         if 'headers' in data and data['headers']:
             headers = data['headers']
-            # Validate IP addresses if provided
             if 'srcIps' in headers:
                 from security.validation import validate_ip_address, validate_cidr
                 try:
@@ -608,7 +562,6 @@ def get_reachability():
         return error_response("Reachability analysis failed", 500)
 
 
-# ========== API Documentation Endpoint ==========
 @app.route('/api/endpoints', methods=['GET'])
 def list_endpoints():
     """List all available API endpoints"""
@@ -625,7 +578,6 @@ def list_endpoints():
     return success_response(sorted(endpoints, key=lambda x: x['path']))
 
 
-# ========== Main ==========
 if __name__ == '__main__':
     logger.info(f"Starting Topologix Backend (Secure Mode)")
     logger.info(f"Environment: {config.ENV}")
@@ -636,7 +588,6 @@ if __name__ == '__main__':
     logger.info(f"Rate Limiting: ENABLED")
     logger.info(f"Listening on {config.HOST}:{config.PORT}")
 
-    # Run with security considerations
     app.run(
         host=config.HOST,
         port=config.PORT,

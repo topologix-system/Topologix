@@ -6,7 +6,6 @@ import { SidebarResizeHandle } from './SidebarResizeHandle'
 import { logger } from '../utils/logger'
 import { useRovingTabIndex } from '../hooks/useRovingTabIndex'
 
-// Lazy-loaded panels to improve initial page load performance
 const OverviewPanel = lazy(() => import('./panels/OverviewPanel'))
 const NodeDetailsPanel = lazy(() => import('./panels/NodeDetailsPanel'))
 const EdgeDetailsPanel = lazy(() => import('./panels/EdgeDetailsPanel'))
@@ -18,7 +17,6 @@ const SUPPORTED_SIDEBAR_TABS: readonly SidebarTab[] = ['overview', 'node-details
 
 /**
  * Resizable sidebar with tabbed panels
- * Supports popout to separate window for multi-monitor setups
  */
 export function Sidebar() {
   const { t } = useTranslation()
@@ -36,7 +34,6 @@ export function Sidebar() {
 
   /**
    * Opens sidebar in a centered popout window
-   * Useful for multi-monitor setups
    */
   const handlePopout = useCallback(() => {
     logger.log('[Sidebar] Opening sidebar in new window')
@@ -59,8 +56,6 @@ export function Sidebar() {
 
   /**
    * Sidebar tab configuration array
-   * Defines all available tabs with their icons, labels, and routing keys
-   * Each tab corresponds to a lazy-loaded panel component rendered below
    */
   const tabs: Array<{ id: SidebarTab; label: string; icon: React.ReactNode }> = [
     { id: 'overview', label: t('sidebar.tabs.overview'), icon: <Info className="w-4 h-4" /> },
@@ -128,8 +123,6 @@ export function Sidebar() {
         aria-labelledby={`tab-${activeTab}`}
         tabIndex={0}
       >
-        {/* Conditionally render panel based on active tab
-            Suspense handles loading state while lazy components are fetched */}
         <Suspense fallback={
           <div className="flex items-center justify-center py-8" role="status">
             <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-primary-600" />

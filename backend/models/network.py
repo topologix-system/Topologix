@@ -1,9 +1,4 @@
-"""
-Network topology data models (Pydantic/dataclass)
-- Node properties, interface details, routing tables
-- IP ownership and VLAN configurations
-- Maps to Batfish API response structures
-"""
+"""Network topology data models (dataclasses)"""
 from dataclasses import dataclass, field, asdict
 from typing import Any
 from .enums import NodeType
@@ -64,7 +59,6 @@ class NetworkNode:
     health_status: str = "healthy"
     config_issues: list[str] = field(default_factory=list)
 
-    # Additional properties from nodeProperties (supports 22 data types)
     configuration_format: str | None = None
     dns_servers: list[str] = field(default_factory=list)
     domain_name: str | None = None

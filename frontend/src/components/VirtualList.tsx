@@ -1,12 +1,5 @@
 /**
  * Generic virtualized list component using @tanstack/react-virtual
- * - Performance optimization: only renders visible items + overscan buffer (default 5 items)
- * - Supports both vertical (default) and horizontal virtualization modes
- * - Flexible sizing: fixed itemHeight or dynamic estimateSize callback
- * - Custom item rendering: renderItem prop for full control over item display
- * - React.memo wrapper prevents unnecessary re-renders on parent updates
- * - Used for rendering large datasets (10K+ routes, interfaces, etc.) efficiently
- * - Generic type parameter T allows reuse across different data types
  */
 import { useRef, memo, ReactNode } from 'react'
 import { useVirtualizer } from '@tanstack/react-virtual'
@@ -120,12 +113,6 @@ interface VirtualTableProps<T> {
 
 /**
  * Virtualized table component with column headers and row selection
- * - Built on VirtualList: inherits performance optimization for large datasets
- * - Column configuration: flexible width, custom render functions per column
- * - Interactive: optional row click handler and selected row highlighting
- * - Sticky header: column headers remain visible during vertical scroll
- * - Higher overscan (10 items) for smoother table scrolling experience
- * - Used for tabular data display (BGP routes, interfaces, ACLs, etc.)
  */
 export const VirtualTable = memo(function VirtualTable<T>({
   items,

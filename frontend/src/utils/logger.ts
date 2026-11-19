@@ -1,15 +1,11 @@
 /**
  * Centralized logging utility for Topologix
- * Provides environment-aware logging that can be disabled in production
- * Uses Vite's import.meta.env for build-time optimization
  */
 
 const isDevelopment = import.meta.env.DEV
 
 /**
  * Logger interface with environment-aware methods
- * In production builds, debug and log are no-ops for performance
- * warn and error are always enabled for critical issues
  */
 export const logger = {
   /**
@@ -29,7 +25,7 @@ export const logger = {
     : () => {},
 
   /**
-   * Info-level logging (alias for structured logging)
+   * Info-level logging
    * Only active in development environment
    */
   info: isDevelopment

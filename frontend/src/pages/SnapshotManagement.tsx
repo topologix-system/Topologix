@@ -1,10 +1,5 @@
 /**
  * Snapshot CRUD management page
- * - Create, delete, upload configuration or log files, and activate snapshots for Batfish analysis
- * - Drag-and-drop file upload with progress tracking and validation
- * - Form validation and React Query mutations for optimistic UI updates
- * - Zustand store integration for current snapshot state synchronization
- * - Handles multiple file uploads and snapshot lifecycle management
  */
 import { useState, useCallback, useEffect, useMemo, useRef } from 'react'
 import { Link, useBlocker } from 'react-router-dom'
@@ -52,7 +47,8 @@ import { SnapshotFolderCombobox } from '../components/SnapshotFolderCombobox'
 import { AdvancedArtifactPanel } from '../components/AdvancedArtifactPanel'
 import { runtimeConfig } from '../config/runtimeConfig'
 import { ParseResultSummaryCard } from '../components/validation/ParseResultDetails'
-import type { Snapshot, SnapshotFile } from '../types'
+import { SnapshotHistoryPanel } from '../components/SnapshotHistoryPanel'
+import type { Snapshot, SnapshotFile, SnapshotFileMutationResponse } from '../types'
 import { extractErrorMessage } from '../types/errors'
 
 const UNGROUPED_GROUP_KEY = 'ungrouped'
@@ -61,6 +57,10 @@ const UNSUPPORTED_FORMAT_PREFIX = 'unsupported:'
 const LARGE_CONFIG_WARNING_BYTES = 1024 * 1024
 const PASTE_CONFIG_ALLOWED_EXTENSIONS = ['.cfg', '.conf', '.txt', '.log'] as const
 const DEFAULT_PASTE_CONFIG_FILENAME = 'config.cfg'
+const FILE_LIST_PANEL_ID = 'snapshot-file-list'
+const FILE_LIST_HEADING_ID = 'snapshot-file-list-heading'
+const FILE_LIST_EDITING_STATUS_ID = 'snapshot-file-list-editing-status'
+const CONFIG_EDITOR_REGION_ID = 'snapshot-config-editor'
 const RANCID_FORMAT_OPTIONS = [
   { value: 'a10', labelKey: 'snapshots.format.options.a10' },
   { value: 'arista', labelKey: 'snapshots.format.options.arista' },
@@ -165,11 +165,12 @@ export function SnapshotManagement() {
   const [pasteOverwriteConfirmed, setPasteOverwriteConfirmed] = useState(false)
   const [pasteDiscardConfirmOpen, setPasteDiscardConfirmOpen] = useState(false)
   const fileChangeInProgressRef = useRef<string | null>(null)
+  const configEditorRef = useRef<HTMLDivElement | null>(null)
   const [collapsedFolderKeys, setCollapsedFolderKeys] = useState<Set<string>>(() => new Set())
+  const [isFileListCollapsed, setIsFileListCollapsed] = useState(false)
 
   /**
    * Global Zustand state for active snapshot tracking
-   * Synchronized across components to maintain consistent snapshot selection
    */
   const currentSnapshotName = useSnapshotStore((state) => state.currentSnapshotName)
   const setCurrentSnapshotName = useSnapshotStore((state) => state.setCurrentSnapshotName)
@@ -177,11 +178,6 @@ export function SnapshotManagement() {
   const activatingSnapshotName = useSnapshotStore((state) => state.activatingSnapshotName)
   const isSelectedSnapshotActive = !!selectedSnapshot && selectedSnapshot === currentSnapshotName
 
-  /**
-   * React Query data fetching hooks
-   * - useSnapshots: Fetches all available snapshots list
-   * - useSnapshotFiles: Fetches file list for selected snapshot (conditional query)
-   */
   const { data: snapshots, isLoading: loadingSnapshots } = useSnapshots()
   const { data: files } = useSnapshotFiles(selectedSnapshot || '', !!selectedSnapshot)
   const configContentQuery = useConfigFileContent(
@@ -191,13 +187,6 @@ export function SnapshotManagement() {
   )
   const parseResult = useParseResultSummary(isSelectedSnapshotActive)
 
-  /**
-   * React Query mutation hooks for snapshot operations
-   * - useCreateSnapshot: Creates new empty snapshot
-   * - useDeleteSnapshot: Deletes snapshot and all files
-   * - useUploadFile: Uploads configuration file to snapshot
-   * - useActivateSnapshot: Activates snapshot for Batfish analysis
-   */
   const createMutation = useCreateSnapshot()
   const deleteMutation = useDeleteSnapshot()
   const updateMutation = useUpdateSnapshot()
@@ -277,6 +266,21 @@ export function SnapshotManagement() {
     }
   }, [navigationBlocker, t])
 
+  const isEditorDraftLoaded = editorDraft !== null
+
+  /**
+   * Scrolls the config editor into view when it opens, when its content arrives and when it moves
+   * because the edited file left the list; focus is left where it is
+   */
+  useEffect(() => {
+    const editorRegion = configEditorRef.current
+    if (!editingFileName || !editorRegion || typeof editorRegion.scrollIntoView !== 'function') return
+
+    const prefersReducedMotion =
+      typeof window.matchMedia === 'function' && window.matchMedia('(prefers-reduced-motion: reduce)').matches
+    editorRegion.scrollIntoView({ block: 'nearest', behavior: prefersReducedMotion ? 'auto' : 'smooth' })
+  }, [editingFileName, editingFileMissing, isEditorDraftLoaded])
+
   const folderOptions = useMemo(() => {
     const folders = new Set<string>()
 
@@ -353,8 +357,6 @@ export function SnapshotManagement() {
 
   /**
    * Handle snapshot creation with validation
-   * Validates name (min 3 chars, alphanumeric+underscore+hyphen only)
-   * On success: closes dialog, resets form, and selects new snapshot
    */
   const handleCreate = useCallback(() => {
     const trimmedName = newSnapshotName.trim()
@@ -431,7 +433,6 @@ export function SnapshotManagement() {
 
   /**
    * Handle snapshot deletion with confirmation dialog
-   * Opens ConfirmDialog instead of native window.confirm
    */
   const handleDelete = useCallback((name: string) => {
     setSnapshotToDelete(name)
@@ -520,12 +521,19 @@ export function SnapshotManagement() {
         setUploadError('')
       }
 
-      let remainingUploads = uploadFiles.length
-      let requiresReinitialize = false
-      let hadUploadError = false
-      const finishUpload = () => {
-        remainingUploads -= 1
-        if (remainingUploads > 0) return
+      const finishUpload = (results: PromiseSettledResult<SnapshotFileMutationResponse>[]) => {
+        let requiresReinitialize = false
+        let hadUploadError = false
+        results.forEach((result, index) => {
+          if (result.status === 'rejected') {
+            hadUploadError = true
+            reportError(
+              extractErrorMessage(result.reason, t('snapshots.uploadFailedForFile', { name: uploadFiles[index].name }))
+            )
+          } else if (result.value?.requires_reinitialize) {
+            requiresReinitialize = true
+          }
+        })
 
         if (!hadUploadError) {
           options.onSuccess?.()
@@ -539,7 +547,7 @@ export function SnapshotManagement() {
           return
         }
 
-        activateMutation.mutate(changedSnapshotName, {
+        activateMutation.mutate({ name: changedSnapshotName, ifStale: true }, {
           onSuccess: () => {
             setCurrentSnapshotName(changedSnapshotName)
             setFileReinitializeError('')
@@ -548,6 +556,7 @@ export function SnapshotManagement() {
             setFileReinitializeError(
               extractErrorMessage(error, t('snapshots.reinitializeFailedAfterFileChange'))
             )
+            setIsFileListCollapsed(false)
           },
           onSettled: () => {
             fileChangeInProgressRef.current = null
@@ -556,27 +565,9 @@ export function SnapshotManagement() {
         })
       }
 
-      uploadFiles.forEach((file) => {
-        uploadMutation.mutate(
-          {
-            name: changedSnapshotName,
-            file,
-          },
-          {
-            onSuccess: (response) => {
-              if (response?.requires_reinitialize) {
-                requiresReinitialize = true
-              }
-              finishUpload()
-            },
-            onError: (error: unknown) => {
-              hadUploadError = true
-              reportError(extractErrorMessage(error, t('snapshots.uploadFailedForFile', { name: file.name })))
-              finishUpload()
-            },
-          }
-        )
-      })
+      void Promise.allSettled(
+        uploadFiles.map((file) => uploadMutation.mutateAsync({ name: changedSnapshotName, file }))
+      ).then(finishUpload)
     },
     [activateMutation, selectedSnapshot, setCurrentSnapshotName, snapshotActivationPending, t, uploadMutation]
   )
@@ -594,9 +585,6 @@ export function SnapshotManagement() {
 
   /**
    * Drag and drop event handlers for file upload
-   * - handleDragOver: Prevents default and sets visual feedback
-   * - handleDragLeave: Removes visual feedback when drag leaves area
-   * - handleDrop: Processes dropped files and triggers upload
    */
   const handleDragOver = useCallback((e: React.DragEvent) => {
     e.preventDefault()
@@ -618,8 +606,6 @@ export function SnapshotManagement() {
 
   /**
    * Activate snapshot for Batfish analysis
-   * Updates global state to make this snapshot the current active one
-   * Triggers Batfish initialization for network analysis queries
    */
   const handleActivate = useCallback(
     (name: string) => {
@@ -653,7 +639,7 @@ export function SnapshotManagement() {
   }, [])
 
   /**
-   * Re-activate the current snapshot after file content changes so Batfish cache is refreshed.
+   * Re-activate the current snapshot after a file change.
    */
   const reactivateCurrentSnapshotAfterFileChange = useCallback(
     (snapshotName: string, onSettled?: () => void) => {
@@ -662,7 +648,7 @@ export function SnapshotManagement() {
         return
       }
 
-      activateMutation.mutate(snapshotName, {
+      activateMutation.mutate({ name: snapshotName, ifStale: true }, {
         onSuccess: () => {
           setCurrentSnapshotName(snapshotName)
           setFileReinitializeError('')
@@ -671,6 +657,7 @@ export function SnapshotManagement() {
           setFileReinitializeError(
             extractErrorMessage(error, t('snapshots.reinitializeFailedAfterFileChange'))
           )
+          setIsFileListCollapsed(false)
         },
         onSettled: () => {
           onSettled?.()
@@ -713,6 +700,7 @@ export function SnapshotManagement() {
           },
           onError: (error: unknown) => {
             setFileFormatError(extractErrorMessage(error, t('snapshots.format.updateFailed')))
+            setIsFileListCollapsed(false)
             finishFileChangeOperation(changedSnapshotName)
           },
         }
@@ -776,6 +764,7 @@ export function SnapshotManagement() {
         },
         onError: (error: unknown) => {
           setFileDeleteError(extractErrorMessage(error, t('snapshots.deleteFileFailed')))
+          setIsFileListCollapsed(false)
           setFileDeleteConfirmOpen(false)
           setFileToDelete(null)
           finishFileChangeOperation(changedSnapshotName)
@@ -817,6 +806,7 @@ export function SnapshotManagement() {
 
       resetConfigEditor()
       setEditingFileName(file.name)
+      setIsFileListCollapsed(false)
       setEditingFileBaseline({
         name: file.name,
         modified_at: file.modified_at,
@@ -870,7 +860,6 @@ export function SnapshotManagement() {
 
   /**
    * Escape / backdrop dismissal of the paste-create dialog
-   * Ignored while its upload is pending (so the result stays visible); asks before discarding pasted text
    */
   const dismissPasteCreateDialog = useCallback(() => {
     if (uploadMutation.isPending) return
@@ -902,7 +891,6 @@ export function SnapshotManagement() {
 
   /**
    * Escape / backdrop dismissal of the create dialog
-   * Ignored while the create request is pending (so its result stays visible)
    */
   const dismissCreateDialog = useCallback(() => {
     if (createMutation.isPending) return
@@ -1009,6 +997,7 @@ export function SnapshotManagement() {
       editingFileName || DEFAULT_PASTE_CONFIG_FILENAME
     )
     closeConfigEditor()
+    setIsFileListCollapsed(false)
   }, [closeConfigEditor, editingFileName, editorDraft, editorRecoveryBuffer, openPasteCreateDialog])
 
   const handleConfigEditorSave = useCallback(() => {
@@ -1048,6 +1037,7 @@ export function SnapshotManagement() {
           onError: (error: unknown) => {
             const status = getErrorStatus(error)
             setEditorRecoveryBuffer(content)
+            setIsFileListCollapsed(false)
 
             if (status === 409) {
               setEditorConflict(true)
@@ -1120,9 +1110,6 @@ export function SnapshotManagement() {
 
   /**
    * Format byte size to human-readable string
-   * Converts raw bytes to appropriate unit (B, KB, MB, GB) with 2 decimal places
-   * @param bytes - Raw byte count to format
-   * @returns Formatted string like "1.25 MB" or "512 KB"
    */
   const formatBytes = (bytes: number) => {
     if (bytes === 0) return '0 B'
@@ -1156,9 +1143,110 @@ export function SnapshotManagement() {
   const isSelectedSnapshotFileActionBlocked =
     isSnapshotActivationPending || isFileChangeInProgress || isFileDeleteDialogOpenForSelectedSnapshot
 
+  /** Most severe editor notice from server data, repeated in the collapsed file list header */
+  const collapsedEditorNotice = editingFileMissing
+    ? { message: t('snapshots.configEditor.deleted'), isError: false }
+    : configContentQuery.isError
+    ? { message: t('snapshots.configEditor.loadFailed'), isError: true }
+    : editingFileMetadataChanged
+    ? { message: t('snapshots.configEditor.externalChange'), isError: false }
+    : null
+
+  const configEditorRegion = editingFileName ? (
+    <div
+      id={CONFIG_EDITOR_REGION_ID}
+      ref={configEditorRef}
+      role="region"
+      aria-label={t('snapshots.configEditor.title', { name: editingFileName })}
+      className="space-y-3 rounded-lg border border-gray-200 bg-white p-4 shadow"
+    >
+      {(editorError || editingFileMissing) && (
+        <div
+          className="flex flex-col gap-3 rounded-lg border border-yellow-200 bg-yellow-50 px-4 py-3 text-sm font-medium text-yellow-900 sm:flex-row sm:items-center sm:justify-between"
+          role="alert"
+        >
+          <span>
+            {editorError || t('snapshots.configEditor.deleted')}
+          </span>
+          {(editorConflict || editorDeleted || editingFileMissing) && (
+            <div className="flex flex-wrap gap-2">
+              {editorConflict && !editingFileMissing && (
+                <button
+                  type="button"
+                  onClick={reloadConfigEditorContent}
+                  className="inline-flex items-center gap-2 rounded-md border border-yellow-300 bg-white px-3 py-2 text-sm font-semibold text-yellow-900 transition-colors hover:bg-yellow-100 focus:outline-none focus:ring-2 focus:ring-yellow-600 focus:ring-offset-1"
+                >
+                  <RefreshCw className="h-4 w-4" aria-hidden="true" />
+                  {t('snapshots.configEditor.reload')}
+                </button>
+              )}
+              <button
+                type="button"
+                onClick={openDeletedEditorBufferAsNew}
+                className="inline-flex items-center gap-2 rounded-md border border-yellow-300 bg-white px-3 py-2 text-sm font-semibold text-yellow-900 transition-colors hover:bg-yellow-100 focus:outline-none focus:ring-2 focus:ring-yellow-600 focus:ring-offset-1"
+              >
+                <FilePlus2 className="h-4 w-4" aria-hidden="true" />
+                {t('snapshots.configEditor.saveAsNew')}
+              </button>
+            </div>
+          )}
+        </div>
+      )}
+      {!editorError && !editingFileMissing && editingFileMetadataChanged && (
+        <div
+          className="rounded-lg border border-yellow-200 bg-yellow-50 px-4 py-3 text-sm font-medium text-yellow-900"
+          role="alert"
+        >
+          {t('snapshots.configEditor.externalChange')}
+        </div>
+      )}
+      {configContentQuery.isLoading && (
+        <div
+          className="flex items-center rounded-lg border border-gray-200 bg-gray-50 px-4 py-6 text-sm font-medium text-gray-700"
+          role="status"
+        >
+          <Loader2 className="mr-2 h-4 w-4 animate-spin text-blue-600" aria-hidden="true" />
+          {t('snapshots.configEditor.loadingContent')}
+        </div>
+      )}
+      {configContentQuery.isError && (
+        <div
+          className="rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm font-medium text-red-700"
+          role="alert"
+        >
+          {extractErrorMessage(configContentQuery.error, t('snapshots.configEditor.loadFailed'))}
+        </div>
+      )}
+      {configContentQuery.data && editorDraft !== null && (
+        <ConfigFileEditor
+          key={`${editingFileName}-${editorLoadedSha256}`}
+          filename={editingFileName}
+          draft={editorDraft}
+          forceFallback={forceConfigEditorFallback}
+          isSaving={
+            updateConfigFileContentMutation.isPending &&
+            updateConfigFileContentMutation.variables?.name === selectedSnapshot &&
+            updateConfigFileContentMutation.variables?.filename === editingFileName
+          }
+          onDraftChange={setEditorDraft}
+          onSave={handleConfigEditorSave}
+          onCancel={requestCloseConfigEditor}
+        />
+      )}
+    </div>
+  ) : null
+
+  /** Table row spanning all columns that holds the config editor */
+  const configEditorRow = (
+    <tr key="config-editor">
+      <td colSpan={3} className="bg-gray-50 px-6 py-4">
+        {configEditorRegion}
+      </td>
+    </tr>
+  )
+
   return (
     <div className="flex flex-col h-screen bg-gray-50">
-      {/* Header */}
       <header className="bg-white border-b border-gray-200 px-6 py-4" role="banner">
         <div className="flex items-center justify-between">
           <div className="flex items-center gap-4">
@@ -1476,8 +1564,65 @@ export function SnapshotManagement() {
               </div>
 
               {/* Files list */}
+              {files && files.length > 0 && (
+                <div className="mb-3 flex flex-wrap items-center gap-x-4 gap-y-1">
+                  <button
+                    type="button"
+                    onClick={() => setIsFileListCollapsed((current) => !current)}
+                    className="flex items-center gap-2 px-1 py-1 text-left rounded focus:outline-none focus:ring-2 focus:ring-primary-600"
+                    aria-expanded={!isFileListCollapsed}
+                    aria-controls={FILE_LIST_PANEL_ID}
+                    aria-describedby={isFileListCollapsed && editingFileName ? FILE_LIST_EDITING_STATUS_ID : undefined}
+                  >
+                    {isFileListCollapsed ? (
+                      <ChevronRight className="w-4 h-4 text-gray-500 flex-shrink-0" aria-hidden="true" />
+                    ) : (
+                      <ChevronDown className="w-4 h-4 text-gray-500 flex-shrink-0" aria-hidden="true" />
+                    )}
+                    <span id={FILE_LIST_HEADING_ID} className="text-sm font-semibold text-gray-700">
+                      {t('snapshots.fileList')}
+                    </span>
+                    <span
+                      className="inline-flex min-w-6 justify-center rounded-full bg-gray-100 px-2 py-0.5 text-xs font-medium text-gray-700"
+                      aria-label={t('snapshots.fileCount', { count: files.length })}
+                    >
+                      {files.length}
+                    </span>
+                  </button>
+                  {isFileListCollapsed && editingFileName && (
+                    <p id={FILE_LIST_EDITING_STATUS_ID} className="flex min-w-0 flex-wrap items-center gap-2 text-sm text-gray-700">
+                      <span className="break-all font-medium">
+                        {t('snapshots.configEditor.title', { name: editingFileName })}
+                      </span>
+                      {isConfigEditorDirty && (
+                        <span className="rounded-full bg-yellow-100 px-2 py-0.5 text-xs font-medium text-yellow-800">
+                          {t('snapshots.configEditor.unsavedChanges')}
+                        </span>
+                      )}
+                      {collapsedEditorNotice && (
+                        <span
+                          className={`rounded-lg border px-2 py-0.5 text-xs font-medium ${
+                            collapsedEditorNotice.isError
+                              ? 'border-red-200 bg-red-50 text-red-700'
+                              : 'border-yellow-200 bg-yellow-50 text-yellow-900'
+                          }`}
+                          role="alert"
+                        >
+                          {collapsedEditorNotice.message}
+                        </span>
+                      )}
+                    </p>
+                  )}
+                </div>
+              )}
               {files && files.length > 0 ? (
-                <div className="space-y-3">
+                <div
+                  id={FILE_LIST_PANEL_ID}
+                  role="group"
+                  aria-labelledby={FILE_LIST_HEADING_ID}
+                  hidden={isFileListCollapsed}
+                  className="space-y-3"
+                >
                   <div className="rounded-lg border border-blue-100 bg-blue-50 px-4 py-3 text-sm text-blue-900">
                     <p className="font-medium">{t('snapshots.format.help')}</p>
                     <p className="mt-1 text-blue-800">{t('snapshots.format.logWarning')}</p>
@@ -1513,7 +1658,8 @@ export function SnapshotManagement() {
                         </tr>
                       </thead>
                       <tbody className="bg-white divide-y divide-gray-200">
-                        {files.map((file) => {
+                        {files.flatMap((file, fileIndex) => {
+                          const isEditingFile = file.name === editingFileName
                           const formatSelectValue = getFileFormatSelectValue(file)
                           const formatControlId = getFileFormatControlId(selectedSnapshot, file.name)
                           const unsupportedFormat = file.unsupported_configuration_format_override
@@ -1531,7 +1677,7 @@ export function SnapshotManagement() {
                             deleteFileMutation.variables?.name === selectedSnapshot &&
                             deleteFileMutation.variables?.filename === file.name
 
-                          return (
+                          const fileRow = (
                             <tr key={file.name} className="hover:bg-gray-50">
                               <td className="px-6 py-4 align-top text-sm text-gray-900">
                                 <div className="flex flex-col gap-2 xl:flex-row xl:items-center xl:gap-4">
@@ -1594,6 +1740,8 @@ export function SnapshotManagement() {
                                       disabled={isSelectedSnapshotFileActionBlocked}
                                       className="inline-flex h-9 w-9 items-center justify-center rounded-md border border-blue-200 text-blue-700 transition-colors hover:bg-blue-50 hover:text-blue-800 focus:outline-none focus:ring-2 focus:ring-primary-600 focus:ring-offset-1 disabled:cursor-not-allowed disabled:opacity-50"
                                       aria-label={t('snapshots.configEditor.viewEditAria', { name: file.name })}
+                                      aria-expanded={isEditingFile}
+                                      aria-controls={isEditingFile ? CONFIG_EDITOR_REGION_ID : undefined}
                                       title={t('snapshots.configEditor.viewEdit')}
                                     >
                                       <Pencil className="h-4 w-4" aria-hidden="true" />
@@ -1618,6 +1766,8 @@ export function SnapshotManagement() {
                               </td>
                             </tr>
                           )
+                          const rows = isEditingFile ? [fileRow, configEditorRow] : [fileRow]
+                          return fileIndex === 0 && editingFileMissing ? [configEditorRow, ...rows] : rows
                         })}
                       </tbody>
                     </table>
@@ -1630,83 +1780,15 @@ export function SnapshotManagement() {
                 </div>
               )}
 
-              {editingFileName && (
-                <div className="mt-4 space-y-3 rounded-lg border border-gray-200 bg-white p-4 shadow">
-                  {(editorError || editingFileMissing) && (
-                    <div
-                      className="flex flex-col gap-3 rounded-lg border border-yellow-200 bg-yellow-50 px-4 py-3 text-sm font-medium text-yellow-900 sm:flex-row sm:items-center sm:justify-between"
-                      role="alert"
-                    >
-                      <span>
-                        {editorError || t('snapshots.configEditor.deleted')}
-                      </span>
-                      {(editorConflict || editorDeleted || editingFileMissing) && (
-                        <div className="flex flex-wrap gap-2">
-                          {editorConflict && !editingFileMissing && (
-                            <button
-                              type="button"
-                              onClick={reloadConfigEditorContent}
-                              className="inline-flex items-center gap-2 rounded-md border border-yellow-300 bg-white px-3 py-2 text-sm font-semibold text-yellow-900 transition-colors hover:bg-yellow-100 focus:outline-none focus:ring-2 focus:ring-yellow-600 focus:ring-offset-1"
-                            >
-                              <RefreshCw className="h-4 w-4" aria-hidden="true" />
-                              {t('snapshots.configEditor.reload')}
-                            </button>
-                          )}
-                          <button
-                            type="button"
-                            onClick={openDeletedEditorBufferAsNew}
-                            className="inline-flex items-center gap-2 rounded-md border border-yellow-300 bg-white px-3 py-2 text-sm font-semibold text-yellow-900 transition-colors hover:bg-yellow-100 focus:outline-none focus:ring-2 focus:ring-yellow-600 focus:ring-offset-1"
-                          >
-                            <FilePlus2 className="h-4 w-4" aria-hidden="true" />
-                            {t('snapshots.configEditor.saveAsNew')}
-                          </button>
-                        </div>
-                      )}
-                    </div>
-                  )}
-                  {!editorError && !editingFileMissing && editingFileMetadataChanged && (
-                    <div
-                      className="rounded-lg border border-yellow-200 bg-yellow-50 px-4 py-3 text-sm font-medium text-yellow-900"
-                      role="alert"
-                    >
-                      {t('snapshots.configEditor.externalChange')}
-                    </div>
-                  )}
-                  {configContentQuery.isLoading && (
-                    <div
-                      className="flex items-center rounded-lg border border-gray-200 bg-gray-50 px-4 py-6 text-sm font-medium text-gray-700"
-                      role="status"
-                    >
-                      <Loader2 className="mr-2 h-4 w-4 animate-spin text-blue-600" aria-hidden="true" />
-                      {t('snapshots.configEditor.loadingContent')}
-                    </div>
-                  )}
-                  {configContentQuery.isError && (
-                    <div
-                      className="rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm font-medium text-red-700"
-                      role="alert"
-                    >
-                      {extractErrorMessage(configContentQuery.error, t('snapshots.configEditor.loadFailed'))}
-                    </div>
-                  )}
-                  {configContentQuery.data && editorDraft !== null && (
-                    <ConfigFileEditor
-                      key={`${editingFileName}-${editorLoadedSha256}`}
-                      filename={editingFileName}
-                      draft={editorDraft}
-                      forceFallback={forceConfigEditorFallback}
-                      isSaving={
-                        updateConfigFileContentMutation.isPending &&
-                        updateConfigFileContentMutation.variables?.name === selectedSnapshot &&
-                        updateConfigFileContentMutation.variables?.filename === editingFileName
-                      }
-                      onDraftChange={setEditorDraft}
-                      onSave={handleConfigEditorSave}
-                      onCancel={requestCloseConfigEditor}
-                    />
-                  )}
-                </div>
-              )}
+              {editingFileName && !files?.length && <div className="mt-4">{configEditorRegion}</div>}
+
+              <SnapshotHistoryPanel
+                key={selectedSnapshot}
+                snapshotName={selectedSnapshot}
+                actionsBlocked={isSelectedSnapshotFileActionBlocked}
+                onFileChangeStart={startFileChangeOperation}
+                onFileChangeEnd={finishFileChangeOperation}
+              />
 
               <AdvancedArtifactPanel snapshotName={selectedSnapshot} />
             </>
@@ -1940,7 +2022,6 @@ export function SnapshotManagement() {
         variant="warning"
       />
 
-      {/* Delete confirmation dialog */}
       <ConfirmDialog
         isOpen={!!largeFileToOpen}
         title={t('snapshots.configEditor.largeFileTitle')}

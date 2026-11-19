@@ -39,7 +39,7 @@ body {
 
 /* Japanese number formatting */
 .numeric-content {
-  font-feature-settings: 'tnum' 1; /* Tabular numbers for better alignment */
+  font-feature-settings: 'tnum' 1; /* Tabular numbers */
 }
 
 * {
@@ -85,7 +85,7 @@ body {
   border-width: 0;
 }
 
-/* Focus visible styles for better keyboard navigation */
+/* Focus visible styles */
 .focus-visible-ring {
   @apply focus:outline-none focus:ring-2 focus:ring-primary-600 focus:ring-offset-2;
 }

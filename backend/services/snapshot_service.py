@@ -1,13 +1,4 @@
-"""
-Network configuration snapshot management service
-- Create, list, delete, and manage configuration snapshots
-- Upload configuration files (.cfg, .conf, .txt, .log) to snapshots
-- File size validation (10MB limit per file)
-- Secure filename handling with werkzeug.secure_filename
-- Snapshot metadata sidecar for owner access control and folder classification
-- Calculate snapshot directory sizes
-- List files within snapshots with metadata
-"""
+"""Network configuration snapshot management service"""
 import json
 import logging
 import os
@@ -15,10 +6,12 @@ import re
 import shutil
 import tempfile
 import base64
+import functools
 import hashlib
 import hmac
 import time
 import threading
+import uuid
 from contextlib import contextmanager
 from io import BytesIO
 from pathlib import Path
@@ -40,8 +33,9 @@ except ImportError:  # pragma: no cover - Windows fallback for non-container dev
 
 ALLOWED_EXTENSIONS = {'.cfg', '.conf', '.txt', '.log'}
 MAX_FILE_SIZE = 10 * 1024 * 1024  # 10MB
-PROTECTED_SNAPSHOTS = set()  # No protected snapshots - all can be deleted
+PROTECTED_SNAPSHOTS = set()
 METADATA_FILENAME = '.topologix-snapshot.json'
+METADATA_SCHEMA_VERSION = 2
 FOLDER_SEGMENT_PATTERN = re.compile(r'^[A-Za-z0-9][A-Za-z0-9 _.-]{0,63}$')
 RANCID_CONTENT_TYPE_HEADER = '!RANCID-CONTENT-TYPE:'
 SUPPORTED_RANCID_FORMATS = {
@@ -85,6 +79,20 @@ CHECKPOINT_PACKAGE_FILES = {
     'show-package.json',
 }
 ARTIFACT_SEGMENT_PATTERN = re.compile(r'^[A-Za-z0-9][A-Za-z0-9_.-]{0,63}$')
+
+
+def _versioned_write(method):
+    """Close the writer protocol scope that _begin_versioned_write opened, whatever the method's outcome."""
+    @functools.wraps(method)
+    def wrapper(self, *args, **kwargs):
+        frames = self._versioned_write_frames()
+        frames.append([])
+        try:
+            return method(self, *args, **kwargs)
+        finally:
+            for state_service, scope in frames.pop():
+                state_service.close_write_scope(scope)
+    return wrapper
 
 
 class ConfigContentConflictError(Exception):
@@ -274,6 +282,30 @@ class SnapshotService:
         self.snapshots_dir = Path(config.SNAPSHOTS_DIR)
         self.snapshots_dir.mkdir(parents=True, exist_ok=True)
         self._metadata_lock = threading.RLock()
+        self._state_service = None
+        self._write_scope_state = threading.local()
+
+    def attach_state_service(self, state_service) -> None:
+        """Attach the snapshot state service that versions API writes."""
+        self._state_service = state_service
+
+    def _versioned_write_frames(self) -> list:
+        frames = getattr(self._write_scope_state, 'frames', None)
+        if frames is None:
+            frames = []
+            self._write_scope_state.frames = frames
+        return frames
+
+    def _begin_versioned_write(self, snapshot_path: Path) -> None:
+        """Ask the attached state service to settle external changes and flag the API write of the enclosing
+        versioned method."""
+        state_service = self._state_service
+        frames = self._versioned_write_frames()
+        if state_service is None or not frames:
+            return
+        scope = state_service.open_write_scope(snapshot_path)
+        if scope is not None:
+            frames[-1].append((state_service, scope))
 
     def _metadata_path(self, snapshot_path: Path) -> Path:
         """Return metadata sidecar path for a snapshot directory."""
@@ -335,13 +367,15 @@ class SnapshotService:
         owner_username: Optional[str],
         access_scope: str,
         created_at: Optional[str] = None,
+        snapshot_id: Optional[str] = None,
+        legacy_unowned: bool = False,
     ) -> dict[str, Any]:
         """Build normalized snapshot metadata payload."""
         now = datetime.utcnow().isoformat()
         normalized_owner_id = self._normalize_owner_user_id(owner_user_id)
 
-        return {
-            'schema_version': 1,
+        metadata = {
+            'schema_version': METADATA_SCHEMA_VERSION,
             'snapshot_name': snapshot_name,
             'folder_name': self._normalize_folder_name(folder_name),
             'owner_user_id': normalized_owner_id,
@@ -350,6 +384,11 @@ class SnapshotService:
             'created_at': created_at or now,
             'updated_at': now,
         }
+        if snapshot_id is not None:
+            metadata['snapshot_id'] = snapshot_id
+        if legacy_unowned:
+            metadata['legacy_unowned'] = True
+        return metadata
 
     def _write_metadata(self, snapshot_path: Path, metadata: dict[str, Any]) -> None:
         """Persist snapshot metadata sidecar using an atomic replace."""
@@ -394,7 +433,7 @@ class SnapshotService:
             metadata.setdefault('access_scope', 'private' if metadata['owner_user_id'] is not None else 'open')
             metadata.setdefault('created_at', datetime.utcfromtimestamp(snapshot_path.stat().st_ctime).isoformat())
             metadata.setdefault('updated_at', datetime.utcfromtimestamp(snapshot_path.stat().st_mtime).isoformat())
-            metadata['legacy_unowned'] = False
+            metadata['legacy_unowned'] = metadata.get('legacy_unowned') is True
             return metadata
 
         stat = snapshot_path.stat()
@@ -1253,12 +1292,7 @@ class SnapshotService:
         return self._build_snapshot_file_response(file_path)
 
     def list_snapshots(self, requester_user_id: Any = None, auth_enabled: bool = False) -> list[dict[str, Any]]:
-        """
-        List all available snapshots
-
-        Returns:
-            List of snapshot metadata
-        """
+        """List all available snapshots"""
         snapshots = []
 
         for snapshot_path in self.snapshots_dir.iterdir():
@@ -1275,7 +1309,6 @@ class SnapshotService:
 
             snapshots.append(self._build_snapshot_response(snapshot_path, metadata))
 
-        # Sort by creation time (newest first)
         snapshots.sort(key=lambda x: x['created_at'], reverse=True)
 
         return snapshots
@@ -1340,6 +1373,7 @@ class SnapshotService:
                 owner_username=normalized_owner_username,
                 access_scope='private',
                 created_at=current_metadata.get('created_at'),
+                snapshot_id=current_metadata.get('snapshot_id'),
             )
 
             result = self._build_snapshot_response(snapshot_path, next_metadata)
@@ -1390,18 +1424,7 @@ class SnapshotService:
         owner_username: Optional[str] = None,
         auth_enabled: bool = False,
     ) -> dict[str, Any]:
-        """
-        Create a new empty snapshot
-
-        Args:
-            name: Snapshot name
-
-        Returns:
-            Created snapshot metadata
-
-        Raises:
-            ValueError: If snapshot name is invalid or already exists
-        """
+        """Create a new empty snapshot"""
         safe_name = self._validate_snapshot_name(name)
 
         normalized_folder_name = self._normalize_folder_name(folder_name)
@@ -1415,7 +1438,6 @@ class SnapshotService:
         if snapshot_path.exists():
             raise ValueError(f"Snapshot '{safe_name}' already exists")
 
-        # Create directory structure
         configs_dir = snapshot_path / 'configs'
         configs_dir.mkdir(parents=True, exist_ok=True)
         metadata = self._build_metadata(
@@ -1424,6 +1446,7 @@ class SnapshotService:
             owner_user_id=normalized_owner_id,
             owner_username=owner_username,
             access_scope='private' if normalized_owner_id is not None else 'open',
+            snapshot_id=str(uuid.uuid4()),
         )
         self._write_metadata(snapshot_path, metadata)
 
@@ -1444,25 +1467,19 @@ class SnapshotService:
         requester_user_id: Any = None,
         auth_enabled: bool = False,
     ) -> dict[str, Any]:
-        """
-        Update editable snapshot metadata for an existing snapshot.
-
-        Args:
-            name: Snapshot name
-            folder_name: Folder classification to store
-
-        Returns:
-            Updated snapshot metadata response
-        """
+        """Update editable snapshot metadata for an existing snapshot."""
         snapshot_path, metadata = self._authorize_snapshot(
             name,
             requester_user_id=requester_user_id,
             auth_enabled=auth_enabled,
         )
 
-        metadata['folder_name'] = self._normalize_folder_name(folder_name)
-        metadata['updated_at'] = datetime.utcnow().isoformat()
-        self._write_metadata(snapshot_path, metadata)
+        normalized_folder_name = self._normalize_folder_name(folder_name)
+        with self._metadata_lock, self._snapshot_metadata_file_lock(snapshot_path):
+            metadata = self._load_metadata(snapshot_path)
+            metadata['folder_name'] = normalized_folder_name
+            metadata['updated_at'] = datetime.utcnow().isoformat()
+            self._write_metadata(snapshot_path, metadata)
 
         logger.info(
             "Updated snapshot metadata: name=%s folder=%s requester_user_id=%s",
@@ -1474,19 +1491,9 @@ class SnapshotService:
         return self._build_snapshot_response(snapshot_path, metadata)
 
     def delete_snapshot(self, name: str, requester_user_id: Any = None, auth_enabled: bool = False) -> None:
-        """
-        Delete a snapshot
-
-        Args:
-            name: Snapshot name
-
-        Raises:
-            ValueError: If snapshot is protected
-            FileNotFoundError: If snapshot does not exist
-        """
+        """Delete a snapshot"""
         safe_name = self._validate_snapshot_name(name)
 
-        # Check if snapshot is protected
         if safe_name in PROTECTED_SNAPSHOTS:
             raise ValueError(f"Cannot delete protected snapshot: '{safe_name}'")
 
@@ -1505,18 +1512,7 @@ class SnapshotService:
         requester_user_id: Any = None,
         auth_enabled: bool = False,
     ) -> list[dict[str, Any]]:
-        """
-        Get list of configuration files in a snapshot
-
-        Args:
-            name: Snapshot name
-
-        Returns:
-            List of file metadata
-
-        Raises:
-            FileNotFoundError: If snapshot does not exist
-        """
+        """Get list of configuration files in a snapshot"""
         safe_name = self._validate_snapshot_name(name)
         snapshot_path, _ = self._authorize_snapshot(
             safe_name,
@@ -1538,7 +1534,6 @@ class SnapshotService:
 
             files.append(self._build_snapshot_file_response(file_path))
 
-        # Sort by name
         files.sort(key=lambda x: x['name'])
 
         return files
@@ -1571,6 +1566,7 @@ class SnapshotService:
             'size_bytes': len(content_bytes),
         }
 
+    @_versioned_write
     def update_config_file_content(
         self,
         name: str,
@@ -1592,6 +1588,7 @@ class SnapshotService:
             requester_user_id=requester_user_id,
             auth_enabled=auth_enabled,
         )
+        self._begin_versioned_write(snapshot_path)
         file_path = self._get_snapshot_config_file(snapshot_path, filename)
 
         current_content = file_path.read_bytes()
@@ -1643,6 +1640,7 @@ class SnapshotService:
         file_info['requires_reinitialize'] = True
         return file_info
 
+    @_versioned_write
     def upload_file(
         self,
         name: str,
@@ -1650,32 +1648,19 @@ class SnapshotService:
         requester_user_id: Any = None,
         auth_enabled: bool = False,
     ) -> dict[str, Any]:
-        """
-        Upload a configuration file to a snapshot
-
-        Args:
-            name: Snapshot name
-            file_storage: Werkzeug FileStorage object
-
-        Returns:
-            Uploaded file metadata
-
-        Raises:
-            FileNotFoundError: If snapshot does not exist
-            ValueError: If file is invalid
-        """
+        """Upload a configuration file to a snapshot"""
         safe_name = self._validate_snapshot_name(name)
         snapshot_path, _ = self._authorize_snapshot(
             safe_name,
             requester_user_id=requester_user_id,
             auth_enabled=auth_enabled,
         )
+        self._begin_versioned_write(snapshot_path)
         configs_dir = snapshot_path / 'configs'
 
         if not configs_dir.exists():
             raise FileNotFoundError(f"Snapshot '{safe_name}' is missing configs directory")
 
-        # Validate file
         if not file_storage or not file_storage.filename:
             raise ValueError("No file provided")
 
@@ -1683,14 +1668,12 @@ class SnapshotService:
         if not filename:
             raise ValueError("Invalid filename")
 
-        # Check extension
         file_ext = Path(filename).suffix.lower()
         if file_ext not in ALLOWED_EXTENSIONS:
             raise ValueError(f"File type not allowed. Allowed: {', '.join(ALLOWED_EXTENSIONS)}")
 
         file_size = self._validate_upload_content(file_storage, filename)
 
-        # Save file
         file_path = configs_dir / filename
         file_storage.save(str(file_path))
 
@@ -1835,6 +1818,7 @@ class SnapshotService:
             'preview_token': self._sign_artifact_preview_token(claims),
         }
 
+    @_versioned_write
     def upload_artifact(
         self,
         name: str,
@@ -1852,6 +1836,7 @@ class SnapshotService:
             requester_user_id=requester_user_id,
             auth_enabled=auth_enabled,
         )
+        self._begin_versioned_write(snapshot_path)
         normalized_type = self._normalize_artifact_type(artifact_type)
         definition = ARTIFACT_TYPE_DEFINITIONS[normalized_type]
         normalized_metadata = self._normalize_artifact_metadata(metadata)
@@ -1897,6 +1882,7 @@ class SnapshotService:
 
         return record
 
+    @_versioned_write
     def update_artifact_metadata(
         self,
         name: str,
@@ -1915,6 +1901,7 @@ class SnapshotService:
             requester_user_id=requester_user_id,
             auth_enabled=auth_enabled,
         )
+        self._begin_versioned_write(snapshot_path)
         current_record, current_path = self._get_artifact_record_by_id(snapshot_path, artifact_id)
         artifact_type = current_record['artifact_type']
         requested_type = payload.get('artifact_type')
@@ -1963,6 +1950,7 @@ class SnapshotService:
 
         return updated_record
 
+    @_versioned_write
     def replace_artifact_content(
         self,
         name: str,
@@ -1979,6 +1967,7 @@ class SnapshotService:
             requester_user_id=requester_user_id,
             auth_enabled=auth_enabled,
         )
+        self._begin_versioned_write(snapshot_path)
         current_record, current_path = self._get_artifact_record_by_id(snapshot_path, artifact_id)
         artifact_type = current_record['artifact_type']
         preview_claims = self._preview_claims(
@@ -2010,6 +1999,7 @@ class SnapshotService:
 
         return updated_record
 
+    @_versioned_write
     def delete_artifact(
         self,
         name: str,
@@ -2025,6 +2015,7 @@ class SnapshotService:
             requester_user_id=requester_user_id,
             auth_enabled=auth_enabled,
         )
+        self._begin_versioned_write(snapshot_path)
         current_record, current_path = self._get_artifact_record_by_id(snapshot_path, artifact_id)
         preview_claims = self._preview_claims(
             safe_name,
@@ -2136,6 +2127,7 @@ class SnapshotService:
             'warnings': warnings,
         }
 
+    @_versioned_write
     def update_snapshot_file_format(
         self,
         name: str,
@@ -2151,6 +2143,7 @@ class SnapshotService:
             requester_user_id=requester_user_id,
             auth_enabled=auth_enabled,
         )
+        self._begin_versioned_write(snapshot_path)
         file_path = self._get_snapshot_config_file(snapshot_path, filename)
         normalized_format = self._normalize_rancid_format_override(configuration_format_override)
         file_info = self._write_rancid_format_override(file_path, normalized_format)
@@ -2166,6 +2159,7 @@ class SnapshotService:
 
         return file_info
 
+    @_versioned_write
     def delete_snapshot_file(
         self,
         name: str,
@@ -2180,6 +2174,7 @@ class SnapshotService:
             requester_user_id=requester_user_id,
             auth_enabled=auth_enabled,
         )
+        self._begin_versioned_write(snapshot_path)
         file_path = self._get_snapshot_config_file(snapshot_path, filename)
         deleted_filename = file_path.name
 
@@ -2203,18 +2198,7 @@ class SnapshotService:
         requester_user_id: Any = None,
         auth_enabled: bool = False,
     ) -> Path:
-        """
-        Get the full path to a snapshot directory
-
-        Args:
-            name: Snapshot name
-
-        Returns:
-            Path object
-
-        Raises:
-            FileNotFoundError: If snapshot does not exist
-        """
+        """Get the full path to a snapshot directory"""
         snapshot_path, _ = self._authorize_snapshot(
             name,
             requester_user_id=requester_user_id,
@@ -2236,19 +2220,7 @@ class SnapshotService:
         requester_user_id: Any = None,
         auth_enabled: bool = False,
     ) -> dict[str, Any]:
-        """
-        Get Layer1 topology configuration for a snapshot
-
-        Args:
-            name: Snapshot name
-
-        Returns:
-            Layer1 topology data with edges array
-
-        Raises:
-            FileNotFoundError: If snapshot does not exist
-            ValueError: If layer1_topology.json contains invalid JSON
-        """
+        """Get Layer1 topology configuration for a snapshot"""
         safe_name = self._validate_snapshot_name(name)
         snapshot_path, _ = self._authorize_snapshot(
             safe_name,
@@ -2270,6 +2242,7 @@ class SnapshotService:
             logger.error(f"Invalid JSON in layer1_topology.json for '{safe_name}': {e}")
             raise ValueError(f"Invalid Layer1 topology file: {e}")
 
+    @_versioned_write
     def save_layer1_topology(
         self,
         name: str,
@@ -2277,28 +2250,15 @@ class SnapshotService:
         requester_user_id: Any = None,
         auth_enabled: bool = False,
     ) -> dict[str, Any]:
-        """
-        Save Layer1 topology configuration with comprehensive validation
-
-        Args:
-            name: Snapshot name
-            topology_data: Layer1 topology data with edges array
-
-        Returns:
-            Save result metadata
-
-        Raises:
-            FileNotFoundError: If snapshot does not exist
-            ValueError: If topology data is invalid
-        """
+        """Save Layer1 topology configuration with comprehensive validation"""
         safe_name = self._validate_snapshot_name(name)
         snapshot_path, _ = self._authorize_snapshot(
             safe_name,
             requester_user_id=requester_user_id,
             auth_enabled=auth_enabled,
         )
+        self._begin_versioned_write(snapshot_path)
 
-        # Validate topology data structure
         if not isinstance(topology_data, dict):
             raise ValueError("Topology data must be a JSON object")
 
@@ -2308,7 +2268,6 @@ class SnapshotService:
         if not isinstance(topology_data['edges'], list):
             raise ValueError("'edges' must be an array")
 
-        # Validate each edge
         for idx, edge in enumerate(topology_data['edges']):
             if not isinstance(edge, dict):
                 raise ValueError(f"Edge at index {idx} must be an object")
@@ -2326,15 +2285,12 @@ class SnapshotService:
                         f"Edge at index {idx}: '{node_key}' must contain 'hostname' and 'interfaceName'"
                     )
 
-        # Save to batfish/ directory only (Batfish reads from this location)
         batfish_dir = snapshot_path / 'batfish'
         layer1_file = batfish_dir / 'layer1_topology.json'
 
         try:
-            # Ensure batfish directory exists
             batfish_dir.mkdir(exist_ok=True)
 
-            # Write to batfish/ directory
             with open(layer1_file, 'w', encoding='utf-8') as f:
                 json.dump(topology_data, f, indent=2, ensure_ascii=False)
 
@@ -2352,27 +2308,21 @@ class SnapshotService:
             logger.error(f"Failed to write layer1_topology.json for '{safe_name}': {e}")
             raise
 
+    @_versioned_write
     def delete_layer1_topology(
         self,
         name: str,
         requester_user_id: Any = None,
         auth_enabled: bool = False,
     ) -> None:
-        """
-        Delete Layer1 topology configuration
-
-        Args:
-            name: Snapshot name
-
-        Raises:
-            FileNotFoundError: If snapshot or Layer1 file does not exist
-        """
+        """Delete Layer1 topology configuration"""
         safe_name = self._validate_snapshot_name(name)
         snapshot_path, _ = self._authorize_snapshot(
             safe_name,
             requester_user_id=requester_user_id,
             auth_enabled=auth_enabled,
         )
+        self._begin_versioned_write(snapshot_path)
 
         layer1_file = snapshot_path / 'batfish' / 'layer1_topology.json'
 
@@ -2389,19 +2339,7 @@ class SnapshotService:
         requester_user_id: Any = None,
         auth_enabled: bool = False,
     ) -> dict[str, Any]:
-        """
-        Get all interfaces for devices in a snapshot
-
-        Args:
-            name: Snapshot name
-            batfish_service: Batfish service instance
-
-        Returns:
-            Dictionary mapping hostnames to interface lists
-
-        Raises:
-            FileNotFoundError: If snapshot does not exist
-        """
+        """Get all interfaces for devices in a snapshot"""
         safe_name = self._validate_snapshot_name(name)
         snapshot_path, _ = self._authorize_snapshot(
             safe_name,
@@ -2409,10 +2347,8 @@ class SnapshotService:
             auth_enabled=auth_enabled,
         )
 
-        # A snapshot other than the active one is loaded and queried by name without activating it
         interfaces_data = batfish_service.get_snapshot_interface_properties(snapshot_path, safe_name)
 
-        # Group interfaces by hostname
         result = {}
 
         for interface in interfaces_data:
@@ -2434,7 +2370,6 @@ class SnapshotService:
                 'description': interface.get('description', '')
             })
 
-        # Sort interfaces by name for each device
         for device in result.values():
             device['interfaces'].sort(key=lambda x: x['name'])
 

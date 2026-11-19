@@ -202,7 +202,7 @@ export function AdvancedArtifactPanel({ snapshotName }: AdvancedArtifactPanelPro
       return
     }
 
-    activateMutation.mutate(snapshotName, {
+    activateMutation.mutate({ name: snapshotName, ifStale: true }, {
       onSuccess: () => {
         setCurrentSnapshotName(snapshotName)
         setPanelNotice(t('snapshots.artifacts.reactivated'))

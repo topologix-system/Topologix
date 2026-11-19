@@ -1,16 +1,11 @@
 /**
  * Node position persistence across snapshot switches
- * - Stores graph node positions per snapshot in nested Record<snapshot, Record<nodeId, position>>
- * - Implements debounced saves (300ms) to prevent excessive localStorage writes during dragging
- * - Maintains position history for all loaded snapshots during browser session
- * - Automatically restores saved positions when switching between snapshots
- * - Limits stored snapshots to prevent unbounded localStorage growth
  */
 import { create } from 'zustand'
 import { persist } from 'zustand/middleware'
 import { logger } from '../utils/logger'
 
-// Maximum number of snapshot positions to keep in storage to prevent memory bloat
+// Maximum number of snapshot positions to keep in storage
 const MAX_SNAPSHOTS = 50
 
 /**
@@ -46,8 +41,6 @@ interface PositionState {
 
 /**
  * Zustand position store with localStorage persistence
- * Saves node positions per snapshot for layout consistency
- * Used by TopologyViewer to restore user-arranged graphs
  */
 export const usePositionStore = create<PositionState>()(
   persist(
@@ -62,10 +55,9 @@ export const usePositionStore = create<PositionState>()(
             [snapshotName]: positions,
           }
 
-          // Enforce MAX_SNAPSHOTS limit to prevent unbounded localStorage growth
           const snapshotKeys = Object.keys(newPositions)
           if (snapshotKeys.length > MAX_SNAPSHOTS) {
-            // Remove oldest entries (first keys in object) to stay within limit
+            // Remove oldest entries (first keys in object)
             const keysToRemove = snapshotKeys.slice(0, snapshotKeys.length - MAX_SNAPSHOTS)
             for (const key of keysToRemove) {
               delete newPositions[key]

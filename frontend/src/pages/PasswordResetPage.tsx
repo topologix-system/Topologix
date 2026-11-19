@@ -1,11 +1,5 @@
 /**
  * Password reset confirmation page (step 2 of password reset flow)
- * - Token-based password reset from email link (/password-reset/:token route)
- * - Password/confirm password fields with show/hide toggles (Eye/EyeOff icons)
- * - Integrated PasswordPolicyHelper for real-time password strength feedback
- * - Client-side validation: password mismatch detection before API call
- * - Token validation: shows error page if token missing or invalid
- * - Auto-redirect to login page after successful reset (2s delay)
  */
 import { useState } from 'react'
 import { useParams, useNavigate, Link } from 'react-router-dom'
@@ -31,14 +25,11 @@ export function PasswordResetPage() {
 
   /**
    * React Query mutation for password reset API call
-   * On success: redirects to login page after 2s delay
-   * On error: displays error message from API
    */
   const mutation = useMutation({
     mutationFn: ({ token, password }: { token: string; password: string }) =>
       authAPI.resetPassword(token, password),
     onSuccess: () => {
-      // Redirect to login after a brief delay
       setTimeout(() => {
         navigate('/login', { state: { message: 'passwordReset.resetSuccess' } })
       }, 2000)
@@ -50,13 +41,10 @@ export function PasswordResetPage() {
 
   /**
    * Handle password reset form submission
-   * Validates password match before calling mutation
-   * Requires valid token from URL params
    */
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
 
-    // Check if passwords match
     if (password !== confirmPassword) {
       setPasswordMismatch(true)
       return
@@ -71,7 +59,6 @@ export function PasswordResetPage() {
     mutation.mutate({ token, password })
   }
 
-  // Show error if token is missing
   if (!token) {
     return (
       <div className="min-h-screen bg-gradient-to-br from-primary-50 to-primary-100 flex items-center justify-center px-4">
@@ -127,7 +114,6 @@ export function PasswordResetPage() {
             </div>
           </div>
         ) : (
-          /* Reset Form */
           <form onSubmit={handleSubmit} className="space-y-6">
             {mutation.isError && (
               <div
@@ -214,7 +200,6 @@ export function PasswordResetPage() {
               </div>
             </div>
 
-            {/* Password Policy Helper */}
             <PasswordPolicyHelper password={password} />
 
             <button

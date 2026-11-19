@@ -1,16 +1,10 @@
 /**
  * Cytoscape.js layout configurations for network topology visualization
- * - Defines layout algorithms (cola, cose, grid, circle, etc.) with optimized parameters
- * - Handles large graph performance with node/edge limits and smart spacing
- * - Provides layout switching for different network sizes and topologies
- * - Force-directed layouts for organic clustering, grid/circle for ordered views
  */
 import type { CytoscapeLayoutOptions, LayoutName } from './types'
 
 /**
  * Pre-configured layout settings for each supported algorithm
- * Maps layout names to their optimized Cytoscape.js configuration
- * Tuned for network topology visualization with appropriate spacing and animation
  */
 export const layoutConfigs: Record<LayoutName, CytoscapeLayoutOptions> = {
   cola: {
@@ -140,10 +134,6 @@ export const layoutConfigs: Record<LayoutName, CytoscapeLayoutOptions> = {
 
 /**
  * Get layout configuration by name
- * Returns the specified layout config or defaults to 'cola' if not found
- * Used by topology hooks to apply user-selected layout algorithms
- * @param layoutName - Name of the layout algorithm to retrieve
- * @returns Cytoscape layout configuration object
  */
 export function getLayoutConfig(layoutName: LayoutName): CytoscapeLayoutOptions {
   return layoutConfigs[layoutName] || layoutConfigs.cola

@@ -1,10 +1,5 @@
 /**
  * Password reset request page (step 1 of password reset flow)
- * - Email input form that sends password reset link via email
- * - React Query mutation with success/error state management
- * - Conditional rendering: shows success message after submission
- * - Backend sends reset token via email for step 2 (PasswordResetPage)
- * - Links back to login page for easy navigation
  */
 import { useState } from 'react'
 import { Link } from 'react-router-dom'
@@ -22,13 +17,10 @@ export function PasswordResetRequestPage() {
 
   /**
    * React Query mutation for password reset request API call
-   * Sends reset link email to provided address
-   * On success: displays confirmation message
    */
   const mutation = useMutation({
     mutationFn: (email: string) => authAPI.requestPasswordReset(email),
     onSuccess: () => {
-      // Keep email visible for user confirmation
     },
     onError: (error: any) => {
       logger.error('Password reset request failed:', error)
@@ -84,7 +76,6 @@ export function PasswordResetRequestPage() {
             </Link>
           </div>
         ) : (
-          /* Request Form */
           <form onSubmit={handleSubmit} className="space-y-6">
             {mutation.isError && (
               <div

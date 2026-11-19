@@ -1,3 +1,4 @@
+import test_00_environment  # noqa: F401
 import inspect
 import json
 import unittest

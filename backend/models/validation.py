@@ -1,13 +1,4 @@
-"""
-Configuration validation and parsing data models (dataclasses)
-- FileParseStatus: Configuration file parse status and format
-- InitIssue: Initialization issues detected by Batfish
-- ParseWarning: Parse warnings from Batfish parser
-- ViConversionStatus: Vendor-independent format conversion status
-- DuplicateRouterID: Duplicate OSPF router ID detection
-- Maps to Batfish fileParseStatus and initIssues queries
-- Used for configuration validation and troubleshooting
-"""
+"""Configuration validation and parsing data models (dataclasses)"""
 from dataclasses import dataclass, field, asdict
 
 
@@ -34,7 +25,6 @@ class InitIssue:
     parser_context: str = ""
 
     def to_dict(self) -> dict:
-        # Safely convert source_lines manually
         result = {
             "nodes": self.nodes,
             "source_lines": self.source_lines if isinstance(self.source_lines, list) else [],

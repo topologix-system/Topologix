@@ -1,10 +1,5 @@
 /**
  * Admin-only user list management page
- * - Role-based access control: requires admin role to access
- * - Displays all registered users in UserTable component with role badges
- * - Delete user functionality with confirmation dialogs (handled by UserTable)
- * - React Query for user list fetching and delete mutations
- * - Current user cannot delete themselves (enforced in UserTable)
  */
 import { useTranslation } from 'react-i18next'
 import { Link } from 'react-router-dom'
@@ -29,8 +24,6 @@ export function UserManagementPage() {
 
   /**
    * Handle user deletion via React Query mutation
-   * Called by UserTable component after confirmation dialog
-   * Error messages are displayed from mutation.error state
    */
   const handleDelete = async (userId: number) => {
     try {
@@ -77,7 +70,6 @@ export function UserManagementPage() {
 
   /**
    * Extract error message from delete mutation error
-   * Uses type-safe helper to avoid unsafe type casts
    */
   const errorMessage = deleteUserMutation.error
     ? extractErrorMessage(deleteUserMutation.error, t('users.deleteFailed'))
@@ -119,7 +111,6 @@ export function UserManagementPage() {
           </div>
         )}
 
-        {/* User Table */}
         {users && currentUser && (
           <UserTable
             users={users}

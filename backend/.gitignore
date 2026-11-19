@@ -18,7 +18,7 @@ backend/flask_session/*
 *.sqlite3
 db.sqlite3-journal
 
-# Snapshots (User data - keep test-env)
+# Snapshots
 snapshots/*
 !snapshots/.gitkeep
 backend/snapshots/*

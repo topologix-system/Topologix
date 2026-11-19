@@ -1,7 +1,6 @@
 /**
  * Snapshot Comparison Page
  * Displays differential analysis between two network snapshots
- * Shows changes in nodes, topology (edges), routing tables, and reachability
  */
 import { useState } from 'react'
 import { Link } from 'react-router-dom'
@@ -27,14 +26,8 @@ export function SnapshotComparison() {
   const [comparisonResult, setComparisonResult] = useState<ComparisonResult | null>(null)
   const [error, setError] = useState<string | null>(null)
 
-  /**
-   * Fetch available snapshots for selection dropdowns
-   */
   const { data: snapshots, isLoading: loadingSnapshots } = useSnapshots()
 
-  /**
-   * React Query mutation for snapshot comparison
-   */
   const compareMutation = useCompareSnapshots()
 
   /**
@@ -99,7 +92,6 @@ export function SnapshotComparison() {
 
   return (
     <div className="flex flex-col h-screen bg-gray-50">
-      {/* Header */}
       <header className="bg-white border-b border-gray-200 px-6 py-4" role="banner">
         <div className="flex items-center gap-4">
           <Link
@@ -166,7 +158,6 @@ export function SnapshotComparison() {
             </div>
           </div>
 
-          {/* Compare button */}
           <button
             onClick={handleCompare}
             disabled={!baseSnapshot || !comparisonSnapshot || compareMutation.isPending}

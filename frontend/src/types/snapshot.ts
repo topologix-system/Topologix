@@ -1,6 +1,5 @@
 /**
  * Snapshot management type definitions
- * Snapshot metadata, files, creation requests, user management, and security logs
  */
 export interface Snapshot {
   name: string
@@ -193,4 +192,149 @@ export interface DeleteSnapshotArtifactResponse {
   artifact_type: string
   relative_path: string
   requires_reinitialize: boolean
+}
+
+export interface ActivateSnapshotOptions {
+  if_stale?: boolean
+}
+
+export type SnapshotVersionKind = 'baseline' | 'manual' | 'external' | 'restore'
+
+export interface VersionRef {
+  version_id: string | null
+  seq: number
+}
+
+export interface SnapshotVersion {
+  version_id: string
+  seq: number
+  message: string
+  kind: SnapshotVersionKind
+  created_at: string
+  author: string | null
+  file_count: number
+  total_bytes: number
+  parent: VersionRef | null
+  restored_from: VersionRef | null
+}
+
+export interface SnapshotVersionFile {
+  path: string
+  sha256: string
+  size: number
+}
+
+export interface SnapshotVersionDetail extends SnapshotVersion {
+  files: SnapshotVersionFile[]
+}
+
+export interface SnapshotVersionState {
+  snapshot_id: string
+  content_hash: string | null
+  loaded_content_hash: string | null
+  loaded_batfish_version: string | null
+  loaded_live: boolean
+  result_cache_enabled: boolean
+  head: SnapshotVersion | null
+  uncommitted: boolean
+  pending_external: boolean
+  external_settling: boolean
+  restored_from: VersionRef | null
+}
+
+export type VersioningUnavailableReason = 'database' | 'namespace' | 'storage' | 'sidecar' | 'missing_objects'
+
+export type SnapshotVersionErrorCode =
+  | 'version_conflict'
+  | 'version_unchanged'
+  | 'version_not_found'
+  | 'namespace_not_found'
+  | 'snapshot_not_found'
+  | 'restore_failed'
+  | 'versioning_unavailable'
+
+export interface VersionListParams {
+  limit?: number
+  offset?: number
+}
+
+export interface VersionListResponse {
+  items: SnapshotVersion[]
+  total: number
+}
+
+export interface CommitVersionRequest {
+  message: string
+  expected_head?: string | null
+}
+
+export type CommitVersionResponse = SnapshotVersion
+
+export interface RestoreVersionRequest {
+  expected_working_hash?: string
+}
+
+export interface RestoreVersionResponse {
+  requires_reinitialize: boolean
+  restored_from: VersionRef
+}
+
+export type VersionDiffStatus = 'added' | 'removed' | 'modified' | 'unchanged'
+
+export interface VersionDiffSummary {
+  path: string
+  status: VersionDiffStatus
+  size: number | null
+  against_size: number | null
+}
+
+export interface VersionDiffResponse {
+  from: string
+  against: string
+  files: VersionDiffSummary[]
+  working_content_hash?: string
+}
+
+export interface VersionDiffLine {
+  type: ' ' | '+' | '-'
+  text: string
+}
+
+export interface VersionDiffHunk {
+  old_start: number
+  old_lines: number
+  new_start: number
+  new_lines: number
+  lines: VersionDiffLine[]
+}
+
+export interface VersionFileDiff {
+  path: string
+  binary: boolean
+  too_large: boolean
+  truncated: boolean
+  hunks: VersionDiffHunk[]
+}
+
+export type VersionDeleteMode = 'all' | 'oldest' | 'newest'
+
+export interface VersionDeleteRequest {
+  mode: VersionDeleteMode
+  count?: number
+  expected_head?: string | null
+  expected_total?: number
+  expected_unavailable?: VersioningUnavailableReason
+}
+
+export interface SingleVersionDeleteRequest {
+  expected_head?: string | null
+}
+
+export interface VersionDeleteResponse {
+  deleted: number
+  head: VersionRef | null
+}
+
+export interface ClearResultCacheResponse {
+  cleared: boolean
 }

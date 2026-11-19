@@ -1,9 +1,5 @@
 /**
  * Edge details panel displaying properties of selected network connections
- * - Supports all topology edge types: physical, layer1, layer3, OSPF, BGP, VXLAN, EIGRP, IS-IS, IPsec
- * - Finds the source edge record by rebuilding the Cytoscape stable edge ID of every candidate edge
- * - Works from the edge ID alone (pop-out window ?edge=<id>)
- * - Shows endpoint nodes, interfaces, IP addresses and protocol-specific details
  */
 import { useMemo, type ReactNode } from 'react'
 import { useTranslation } from 'react-i18next'
@@ -27,10 +23,6 @@ export interface EdgeDetails {
 
 /**
  * Resolve the selected Cytoscape edge ID to its edge record and endpoint nodes
- * Falls back to the type and endpoints encoded in the ID when no record matches
- * @param edgeId - Cytoscape edge ID ("edge-<type>-<source>-<target>[-<ports>]")
- * @param data - Aggregated network data the topology graph was built from
- * @returns Edge details, or null when the ID does not carry a known edge type
  */
 export function resolveEdgeDetails(edgeId: string, data: Partial<AllNetworkData>): EdgeDetails | null {
   const match = findEdgeByStableId(edgeId, {

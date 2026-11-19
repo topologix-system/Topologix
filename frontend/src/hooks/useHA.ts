@@ -25,8 +25,6 @@ export const haKeys = {
 /**
  * Query VRRP (Virtual Router Redundancy Protocol) properties
  * Returns VRRP groups, priorities, and virtual IP configurations
- * Used for gateway redundancy analysis
- * @param enabled - Optional flag to conditionally enable query (default: true)
  */
 export function useVRRPProperties(enabled = true) {
   const currentSnapshotName = useSnapshotStore((state) => state.currentSnapshotName)
@@ -42,8 +40,6 @@ export function useVRRPProperties(enabled = true) {
 /**
  * Query HSRP (Hot Standby Router Protocol) properties
  * Returns HSRP groups, priorities, and standby configurations
- * Cisco-specific gateway redundancy protocol
- * @param enabled - Optional flag to conditionally enable query (default: true)
  */
 export function useHSRPProperties(enabled = true) {
   const currentSnapshotName = useSnapshotStore((state) => state.currentSnapshotName)
@@ -59,8 +55,6 @@ export function useHSRPProperties(enabled = true) {
 /**
  * Query MLAG (Multi-Chassis Link Aggregation) properties
  * Returns MLAG peer configurations and port-channel settings
- * Used for switch-level redundancy analysis
- * @param enabled - Optional flag to conditionally enable query (default: true)
  */
 export function useMLAGProperties(enabled = true) {
   const currentSnapshotName = useSnapshotStore((state) => state.currentSnapshotName)
@@ -76,8 +70,6 @@ export function useMLAGProperties(enabled = true) {
 /**
  * Query duplicate router IDs across devices
  * Returns conflicts where multiple devices share same router ID
- * Critical issue that breaks OSPF/IS-IS routing
- * @param enabled - Optional flag to conditionally enable query (default: true)
  */
 export function useDuplicateRouterIDs(enabled = true) {
   const currentSnapshotName = useSnapshotStore((state) => state.currentSnapshotName)
@@ -92,8 +84,6 @@ export function useDuplicateRouterIDs(enabled = true) {
 
 /**
  * Query layer 2 switching properties
- * Returns switch configuration including VLANs, trunking, and spanning-tree
- * @param enabled - Optional flag to conditionally enable query (default: true)
  */
 export function useSwitchingProperties(enabled = true) {
   const currentSnapshotName = useSnapshotStore((state) => state.currentSnapshotName)

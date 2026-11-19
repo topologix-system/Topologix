@@ -1,9 +1,4 @@
-"""
-Database package exports
-- SQLAlchemy models: Base, User, Role, Permission
-- Session management: DatabaseManager, init_db, get_db
-- Provides centralized imports for database operations
-"""
+"""Database package exports"""
 from database.models import Base, User, Role, Permission
 from database.session import DatabaseManager, init_db, get_db
 

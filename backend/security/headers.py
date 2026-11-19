@@ -1,17 +1,4 @@
-"""
-HTTP security headers management for Flask responses
-- Content Security Policy (CSP) with environment-based configuration
-- Development: Allow localhost connections for hot reload
-- Production: Strict CSP for data exfiltration prevention
-- X-Frame-Options: DENY (clickjacking protection)
-- X-Content-Type-Options: nosniff (MIME sniffing prevention)
-- X-XSS-Protection: 1; mode=block (legacy XSS protection)
-- Referrer-Policy: strict-origin-when-cross-origin
-- Permissions-Policy: Disable unnecessary browser features
-- Strict-Transport-Security (HSTS): Always enabled for HTTPS
-- Cache-Control: no-store for sensitive data, allow for static assets
-- Server header removal for security through obscurity
-"""
+"""HTTP security headers management for Flask responses"""
 import logging
 import os
 from flask import Response
@@ -23,14 +10,7 @@ class SecurityHeaders:
     """Manages security headers for HTTP responses"""
 
     def __init__(self, app=None):
-        """Initialize Security Headers
-
-        Args:
-            app: Flask application instance
-        """
-        # Determine CSP connect-src based on environment
-        # Development: Allow localhost connections for hot reload and dev tools
-        # Production: Restrict to self only for security (prevents data exfiltration)
+        """Initialize Security Headers"""
         flask_env = os.getenv('FLASK_ENV', 'production')
 
         if flask_env == 'development':
@@ -41,7 +21,6 @@ class SecurityHeaders:
             logger.info("CSP configured for production environment (localhost connections restricted)")
 
         self.headers = {
-            # Content Security Policy - Environment-aware policy for OSS distribution
             'Content-Security-Policy': (
                 "default-src 'self'; "
                 "script-src 'self' https://cdn.jsdelivr.net; "
@@ -54,27 +33,20 @@ class SecurityHeaders:
                 "base-uri 'self'; "
                 "object-src 'none'"
             ),
-            # Prevent clickjacking
             'X-Frame-Options': 'DENY',
-            # Prevent MIME type sniffing
             'X-Content-Type-Options': 'nosniff',
-            # Enable XSS protection (legacy browsers)
             'X-XSS-Protection': '1; mode=block',
-            # Control referrer information
             'Referrer-Policy': 'strict-origin-when-cross-origin',
-            # Permissions Policy (formerly Feature Policy)
             'Permissions-Policy': (
                 'geolocation=(), microphone=(), camera=(), '
                 'payment=(), usb=(), magnetometer=(), '
                 'accelerometer=(), gyroscope=()'
             ),
-            # Cache control for sensitive data
             'Cache-Control': 'no-store, no-cache, must-revalidate, private',
             'Pragma': 'no-cache',
             'Expires': '0'
         }
 
-        # HSTS header for production only
         self.hsts_header = (
             'max-age=31536000; includeSubDomains; preload'
         )
@@ -87,9 +59,7 @@ class SecurityHeaders:
         @app.after_request
         def add_security_headers(response: Response) -> Response:
             """Add security headers to every response"""
-            # Add standard security headers
             for header, value in self.headers.items():
-                # Skip cache headers for static files
                 if header in ['Cache-Control', 'Pragma', 'Expires']:
                     if response.mimetype and (
                         'image' in response.mimetype or
@@ -99,56 +69,34 @@ class SecurityHeaders:
                         continue
                 response.headers[header] = value
 
-            # Add HSTS header (always enabled - assumes reverse proxy with HTTPS)
-            # Safe when using Caddy or nginx reverse proxy with TLS termination
             response.headers['Strict-Transport-Security'] = self.hsts_header
 
             # CORS headers are managed by Flask-CORS middleware
             # Do not set CORS headers here to avoid conflicts
 
-            # Remove server identification headers to prevent information disclosure
             response.headers.pop('Server', None)
             response.headers.pop('X-Powered-By', None)
 
             return response
 
     def update_header(self, header_name: str, value: str):
-        """Update a specific security header
-
-        Args:
-            header_name: Name of the header
-            value: New value for the header
-        """
+        """Update a specific security header"""
         self.headers[header_name] = value
         logger.info(f"Updated security header: {header_name}")
 
     def remove_header(self, header_name: str):
-        """Remove a specific security header
-
-        Args:
-            header_name: Name of the header to remove
-        """
+        """Remove a specific security header"""
         if header_name in self.headers:
             del self.headers[header_name]
             logger.info(f"Removed security header: {header_name}")
 
     def get_csp_nonce(self) -> str:
-        """Generate a nonce for Content Security Policy
-
-        Returns:
-            Nonce string for CSP
-        """
+        """Generate a nonce for Content Security Policy"""
         import secrets
         return secrets.token_urlsafe(16)
 
     def set_csp_with_nonce(self, response: Response, nonce: str):
-        """Set CSP header with a specific nonce
-
-        Args:
-            response: Flask response object
-            nonce: Nonce string for scripts
-        """
-        # Use environment-based connect-src (same logic as __init__)
+        """Set CSP header with a specific nonce"""
         flask_env = os.getenv('FLASK_ENV', 'production')
         connect_src = "'self' http://localhost:* ws://localhost:*" if flask_env == 'development' else "'self'"
 

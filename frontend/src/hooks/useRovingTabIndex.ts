@@ -1,7 +1,5 @@
 /**
  * Roving tabindex for WAI-ARIA tablists and radiogroups
- * - Only the active item is in the Tab sequence (tabIndex 0), the others get -1
- * - Arrow keys, Home and End move both selection and focus (automatic activation)
  */
 import { useCallback, useRef, type KeyboardEvent } from 'react'
 

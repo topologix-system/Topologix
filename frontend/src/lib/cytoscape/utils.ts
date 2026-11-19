@@ -1,9 +1,5 @@
 /**
  * Graph data conversion utilities for Cytoscape.js visualization
- * - Converts Batfish network analysis data to Cytoscape-compatible graph format
- * - Handles multiple edge types: physical, layer3, OSPF, BGP, VXLAN, EIGRP, IS-IS, BFD, IPsec
- * - Implements edge deduplication and layer-based filtering logic
- * - Core utility for TopologyViewer component graph rendering
  */
 import type { NodeProperties, PhysicalEdge, Layer1Edge, Layer3Edge, OSPFEdge, BGPEdge, VXLANEdge, EIGRPEdge, ISISEdge, IPsecEdge } from '../../types'
 import type { CytoscapeElements, CytoscapeNode, CytoscapeEdge, LayerType } from './types'
@@ -11,7 +7,6 @@ import { logger } from '../../utils/logger'
 
 /**
  * Generate stable edge ID from edge properties
- * Uses source-target-type-ports composite key for uniqueness
  */
 export function generateStableEdgeId(
   source: string,
@@ -33,10 +28,6 @@ export function generateStableEdgeId(
 
 /**
  * Convert Batfish node properties to Cytoscape node elements
- * Transforms device information into graph-renderable format with proper labeling
- * Filters out invalid nodes and logs warnings for debugging
- * @param nodes - Array of Batfish node property objects
- * @returns Array of Cytoscape-compatible node elements
  */
 export function convertNodesToElements(nodes: NodeProperties[]): CytoscapeNode[] {
   if (!nodes || !Array.isArray(nodes)) {
@@ -70,10 +61,6 @@ export function convertNodesToElements(nodes: NodeProperties[]): CytoscapeNode[]
 
 /**
  * Generic converter for interface-based edge types
- * Handles edge types that use interface-to-interface connections
- * @param edges - Array of edge objects with interface/remote_interface properties
- * @param edgeType - Type identifier ('physical', 'layer1', etc.)
- * @returns Array of Cytoscape-compatible edge elements
  */
 function convertInterfaceBasedEdgesToElements(
   edges: (PhysicalEdge | Layer1Edge)[],
@@ -112,10 +99,6 @@ function convertInterfaceBasedEdgesToElements(
 
 /**
  * Convert Batfish physical layer edges to Cytoscape edge elements
- * Represents direct cable connections between network devices
- * Parses interface names to extract node and port information
- * @param edges - Array of Batfish physical edge objects
- * @returns Array of Cytoscape-compatible physical edge elements
  */
 export function convertPhysicalEdgesToElements(edges: PhysicalEdge[]): CytoscapeEdge[] {
   return convertInterfaceBasedEdgesToElements(edges, 'physical')
@@ -123,10 +106,6 @@ export function convertPhysicalEdgesToElements(edges: PhysicalEdge[]): Cytoscape
 
 /**
  * Convert Batfish layer 1 edges to Cytoscape edge elements
- * Represents manually defined physical connections from layer1_topology.json
- * Used to supplement auto-detected physical connections
- * @param edges - Array of Batfish layer 1 edge objects
- * @returns Array of Cytoscape-compatible layer 1 edge elements
  */
 export function convertLayer1EdgesToElements(edges: Layer1Edge[]): CytoscapeEdge[] {
   return convertInterfaceBasedEdgesToElements(edges, 'layer1')
@@ -134,10 +113,6 @@ export function convertLayer1EdgesToElements(edges: Layer1Edge[]): CytoscapeEdge
 
 /**
  * Convert Batfish layer 3 edges to Cytoscape edge elements
- * Represents IP-based connections with address information
- * Includes source/target IPs for troubleshooting connectivity
- * @param edges - Array of Batfish layer 3 edge objects
- * @returns Array of Cytoscape-compatible layer 3 edge elements
  */
 export function convertLayer3EdgesToElements(edges: Layer3Edge[]): CytoscapeEdge[] {
   if (!edges || !Array.isArray(edges)) {
@@ -175,10 +150,6 @@ export function convertLayer3EdgesToElements(edges: Layer3Edge[]): CytoscapeEdge
 
 /**
  * Convert Batfish OSPF adjacency edges to Cytoscape edge elements
- * Represents OSPF neighbor relationships with IP addresses
- * Used for OSPF topology visualization and troubleshooting
- * @param edges - Array of Batfish OSPF edge objects
- * @returns Array of Cytoscape-compatible OSPF edge elements with protocol styling
  */
 export function convertOSPFEdgesToElements(edges: OSPFEdge[]): CytoscapeEdge[] {
   return edges.map((edge) => {
@@ -204,10 +175,6 @@ export function convertOSPFEdgesToElements(edges: OSPFEdge[]): CytoscapeEdge[] {
 
 /**
  * Convert Batfish BGP session edges to Cytoscape edge elements
- * Represents BGP peer connections with ASN and IP information
- * Node-to-node connections without specific interface requirements
- * @param edges - Array of Batfish BGP edge objects
- * @returns Array of Cytoscape-compatible BGP edge elements with AS numbers
  */
 export function convertBGPEdgesToElements(edges: BGPEdge[]): CytoscapeEdge[] {
   return edges.map((edge) => {
@@ -215,7 +182,6 @@ export function convertBGPEdgesToElements(edges: BGPEdge[]): CytoscapeEdge[] {
     const sourceNode = edge.node
     const targetNode = edge.remote_node
 
-    // Extract port from interface if available
     const sourcePort = edge.interface ? parseInterface(edge.interface)[1] : ''
     const targetPort = edge.remote_interface ? parseInterface(edge.remote_interface)[1] : ''
 
@@ -247,10 +213,6 @@ export function convertBGPEdgesToElements(edges: BGPEdge[]): CytoscapeEdge[] {
 
 /**
  * Convert Batfish VXLAN tunnel edges to Cytoscape edge elements
- * Represents VXLAN overlay tunnels between VTEPs (VXLAN Tunnel Endpoints)
- * Includes VNI, VTEP addresses, and multicast group information
- * @param edges - Array of Batfish VXLAN edge objects
- * @returns Array of Cytoscape-compatible VXLAN edge elements (dashed lines)
  */
 export function convertVXLANEdgesToElements(edges: VXLANEdge[]): CytoscapeEdge[] {
   if (!edges || !Array.isArray(edges)) {
@@ -295,10 +257,6 @@ export function convertVXLANEdgesToElements(edges: VXLANEdge[]): CytoscapeEdge[]
 
 /**
  * Convert Batfish EIGRP adjacency edges to Cytoscape edge elements
- * Represents EIGRP neighbor relationships with IP addresses
- * Used for EIGRP topology visualization in Cisco networks
- * @param edges - Array of Batfish EIGRP edge objects
- * @returns Array of Cytoscape-compatible EIGRP edge elements with protocol styling
  */
 export function convertEIGRPEdgesToElements(edges: EIGRPEdge[]): CytoscapeEdge[] {
   if (!edges || !Array.isArray(edges)) {
@@ -337,10 +295,6 @@ export function convertEIGRPEdgesToElements(edges: EIGRPEdge[]): CytoscapeEdge[]
 
 /**
  * Convert Batfish IS-IS adjacency edges to Cytoscape edge elements
- * Represents IS-IS neighbor relationships with level information (L1/L2)
- * Used for IS-IS topology visualization in service provider networks
- * @param edges - Array of Batfish IS-IS edge objects
- * @returns Array of Cytoscape-compatible IS-IS edge elements with level labels
  */
 export function convertISISEdgesToElements(edges: ISISEdge[]): CytoscapeEdge[] {
   if (!edges || !Array.isArray(edges)) {
@@ -378,10 +332,6 @@ export function convertISISEdgesToElements(edges: ISISEdge[]): CytoscapeEdge[] {
 
 /**
  * Convert Batfish IPsec VPN tunnel edges to Cytoscape edge elements
- * Represents encrypted tunnel connections between IPsec peers
- * Node-to-node connections with tunnel interface information
- * @param edges - Array of Batfish IPsec edge objects
- * @returns Array of Cytoscape-compatible IPsec edge elements (dashed lines)
  */
 export function convertIPsecEdgesToElements(edges: IPsecEdge[]): CytoscapeEdge[] {
   if (!edges || !Array.isArray(edges)) {
@@ -425,10 +375,6 @@ export function convertIPsecEdgesToElements(edges: IPsecEdge[]): CytoscapeEdge[]
 
 /**
  * Parse Batfish interface string into node name and port/interface name
- * Handles multiple formats: "node[port]", "node:port", "node/port"
- * Returns tuple of [nodeName, portName] for edge creation
- * @param interfaceStr - Batfish interface string (e.g., "router1[GigabitEthernet0/0]")
- * @returns Tuple of [nodeName, portName] extracted from interface string
  */
 export function parseInterface(interfaceStr: string): [string, string] {
   if (!interfaceStr || typeof interfaceStr !== 'string') {
@@ -441,13 +387,11 @@ export function parseInterface(interfaceStr: string): [string, string] {
     return [match[1], match[2]]
   }
 
-  // If no brackets, try to split by last colon or slash
   const parts = interfaceStr.split(/[:/]/)
   if (parts.length > 1) {
     const port = parts[parts.length - 1]
     const node = parts.slice(0, -1).join(':')
 
-    // Validate node is not empty
     if (!node || node.trim() === '') {
       logger.warn('[Topology] Empty node name in interface:', interfaceStr)
       return ['', port]
@@ -461,10 +405,6 @@ export function parseInterface(interfaceStr: string): [string, string] {
 
 /**
  * Determine device type from vendor/platform string
- * Maps vendor and model info to visual node types (router, switch, firewall)
- * Used for applying appropriate node shapes and colors in graph visualization
- * @param vendor - Vendor or platform string from Batfish node properties
- * @returns Device type string (router, switch, firewall, or unknown)
  */
 export function determineNodeType(vendor: string): string {
   const v = vendor.toLowerCase()
@@ -486,10 +426,6 @@ export function determineNodeType(vendor: string): string {
 
 /**
  * Merge multiple edge arrays while preventing duplicates
- * Deduplicates edges by source-target-edge_type key combination
- * Allows multiple edge types (OSPF, BGP) between same node pair
- * @param edgeArrays - Variable number of edge arrays to merge
- * @returns Single deduplicated array of Cytoscape edges
  */
 export function mergeEdges(...edgeArrays: CytoscapeEdge[][]): CytoscapeEdge[] {
   const edgeMap = new Map<string, CytoscapeEdge>()
@@ -506,7 +442,6 @@ export function mergeEdges(...edgeArrays: CytoscapeEdge[][]): CytoscapeEdge[] {
         continue
       }
 
-      // Include edge_type in the key to allow multiple edge types between same nodes
       const edgeType = edge.data.edge_type || 'unknown'
       const key = `${edge.data.source}-${edge.data.target}-${edgeType}`
       if (!edgeMap.has(key)) {
@@ -520,14 +455,6 @@ export function mergeEdges(...edgeArrays: CytoscapeEdge[][]): CytoscapeEdge[] {
 
 /**
  * Build complete Cytoscape graph from Batfish network data
- * Primary function for converting Batfish analysis results to renderable graph
- * Supports selective layer visibility for protocol-specific views
- * Merges all edge types and deduplicates automatically
- * Used by TopologyViewer to construct graph visualization
- * @param nodes - Array of Batfish node properties (devices)
- * @param edges - Object containing edge arrays by protocol type
- * @param visibleLayers - Optional set of layers to include (defaults to all)
- * @returns Complete Cytoscape elements object with nodes and merged edges
  */
 export function buildGraphElements(
   nodes: NodeProperties[],
@@ -556,10 +483,8 @@ export function buildGraphElements(
     return { nodes: cytoscapeNodes, edges: [] }
   }
 
-  // If visibleLayers is not provided, show all layers by default
   const layers = visibleLayers || new Set(['physical', 'layer1', 'layer3', 'ospf', 'bgp', 'vxlan', 'eigrp', 'isis', 'ipsec'])
 
-  // Conditionally convert edges based on visible layers
   const physicalEdges = layers.has('physical') && edges.physical ? convertPhysicalEdgesToElements(edges.physical) : []
   const layer1Edges = layers.has('layer1') && edges.layer1 ? convertLayer1EdgesToElements(edges.layer1) : []
   const layer3Edges = layers.has('layer3') && edges.layer3 ? convertLayer3EdgesToElements(edges.layer3) : []
@@ -570,7 +495,6 @@ export function buildGraphElements(
   const isisEdges = layers.has('isis') && edges.isis ? convertISISEdgesToElements(edges.isis) : []
   const ipsecEdges = layers.has('ipsec') && edges.ipsec ? convertIPsecEdgesToElements(edges.ipsec) : []
 
-  // Filter out empty arrays before merging to reduce merge overhead
   const allEdgeArrays = [
     physicalEdges,
     layer1Edges,
@@ -678,10 +602,6 @@ function findBgpEdge(edges: BGPEdge[] | undefined, edgeId: string): { edge: BGPE
 
 /**
  * Find the source edge record of a Cytoscape edge by rebuilding the stable ID of every candidate
- * Uses the same ID derivation as the convert*EdgesToElements functions
- * @param edgeId - Cytoscape edge ID produced by buildGraphElements
- * @param edges - Edge collections the graph was built from
- * @returns Matching edge with its type and endpoint node names, or null
  */
 export function findEdgeByStableId(edgeId: string, edges: StableEdgeCollections): StableEdgeMatch | null {
   const type = getStableEdgeType(edgeId)
@@ -730,9 +650,6 @@ export function findEdgeByStableId(edgeId: string, edges: StableEdgeCollections)
 /**
  * Resolve the edge type and endpoint node names encoded in a stable edge ID
  * Node names may contain "-", so endpoints are matched against the known node names (longest first)
- * @param edgeId - Cytoscape edge ID produced by buildGraphElements
- * @param nodeNames - Node names of the snapshot
- * @returns Edge type with endpoints (null when they cannot be resolved), or null for IDs without a known type
  */
 export function resolveStableEdgeEndpoints(
   edgeId: string,

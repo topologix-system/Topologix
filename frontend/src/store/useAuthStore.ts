@@ -1,16 +1,14 @@
 /**
  * Authentication state management with Zustand
- * - Manages user login/logout state and authentication status
- * - Integrates with authAPI for login, logout, and token management
- * - Provides error handling and loading states for auth operations
- * - Auto-initializes from localStorage tokens via authAPI.getCurrentUser()
- * - Only active when VITE_AUTH_ENABLED=true
  */
 import { create } from 'zustand'
 import i18n from 'i18next'
 import { authAPI } from '../services/api'
 import { logger } from '../utils/logger'
 import { extractErrorMessage } from '../types/errors'
+import { queryClient } from '../queryClient'
+import { INVALIDATION_SIGNAL_KEY, resetSnapshotTriggerState } from '../hooks/snapshotTriggerState'
+import { useSnapshotStore } from './useSnapshotStore'
 
 /**
  * User data structure for authenticated users
@@ -42,14 +40,21 @@ interface AuthStore {
 }
 
 function clearSnapshotClientState() {
+  queryClient.clear()
+  resetSnapshotTriggerState(queryClient)
+  useSnapshotStore.setState({
+    currentSnapshotName: null,
+    isSnapshotActivationInProgress: false,
+    activatingSnapshotName: null,
+  })
   localStorage.removeItem('topologix-snapshot-storage')
   localStorage.removeItem('topologix-position-storage')
+  localStorage.removeItem(INVALIDATION_SIGNAL_KEY)
 }
 
 /**
  * Zustand authentication store
  * Provides user authentication state and actions throughout the application
- * Initializes from authAPI.getCurrentUser() on store creation
  */
 export const useAuthStore = create<AuthStore>((set, get) => ({
   user: authAPI.getCurrentUser(),
@@ -129,7 +134,6 @@ export const useAuthStore = create<AuthStore>((set, get) => ({
 
     const currentState = get()
 
-    // If was authenticated but now not, log the change
     if (currentState.isAuthenticated && !isAuth) {
       logger.info('[AuthStore] Authentication expired')
     }

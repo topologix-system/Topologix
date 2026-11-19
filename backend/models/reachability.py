@@ -1,11 +1,4 @@
-"""
-Reachability and flow analysis data models (dataclasses)
-- FlowTrace: Flow trace information with traces list
-- ReachabilityTrace: Detailed path trace from source to destination
-- Includes flow definition, hops, status, and disposition
-- Maps to Batfish reachability and traceroute query results
-- Safe serialization of Batfish FileLines objects
-"""
+"""Reachability and flow analysis data models (dataclasses)"""
 from dataclasses import dataclass, field, asdict
 from typing import Any
 
@@ -18,7 +11,6 @@ class FlowTrace:
     trace_count: int = 0
 
     def to_dict(self) -> dict:
-        # Safely convert traces
         safe_traces = []
         for trace in self.traces:
             if hasattr(trace, '__class__') and 'FileLines' in str(trace.__class__):

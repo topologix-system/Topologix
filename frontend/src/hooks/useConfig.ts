@@ -24,8 +24,6 @@ export const configKeys = {
 /**
  * Query defined configuration structures
  * Returns all named config objects (ACLs, route-maps, prefix-lists, etc.)
- * Shows what structures are declared in device configurations
- * @param enabled - Optional flag to conditionally enable query (default: true)
  */
 export function useDefinedStructures(enabled = true) {
   const currentSnapshotName = useSnapshotStore((state) => state.currentSnapshotName)
@@ -41,8 +39,6 @@ export function useDefinedStructures(enabled = true) {
 /**
  * Query referenced configuration structures
  * Returns all config objects that are actually used/referenced
- * Useful for identifying active vs. unused configurations
- * @param enabled - Optional flag to conditionally enable query (default: true)
  */
 export function useReferencedStructures(enabled = true) {
   const currentSnapshotName = useSnapshotStore((state) => state.currentSnapshotName)
@@ -58,8 +54,6 @@ export function useReferencedStructures(enabled = true) {
 /**
  * Query named configuration structures summary
  * Returns organized view of named structures by type
- * Higher-level view than defined/referenced structures
- * @param enabled - Optional flag to conditionally enable query (default: true)
  */
 export function useNamedStructures(enabled = true) {
   const currentSnapshotName = useSnapshotStore((state) => state.currentSnapshotName)
@@ -74,9 +68,6 @@ export function useNamedStructures(enabled = true) {
 
 /**
  * Query AAA (Authentication, Authorization, Accounting) configuration
- * Returns authentication methods, TACACS+/RADIUS servers, and AAA settings
- * Critical for security and access control analysis
- * @param enabled - Optional flag to conditionally enable query (default: true)
  */
 export function useAAAAuthentication(enabled = true) {
   const currentSnapshotName = useSnapshotStore((state) => state.currentSnapshotName)

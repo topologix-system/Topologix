@@ -1,14 +1,4 @@
-"""
-SQLAlchemy database session management and connection pooling
-- DatabaseManager: Centralized engine and session factory management
-- Support for SQLite, PostgreSQL, and MySQL with database-specific configurations
-- Context manager for automatic commit/rollback/close (get_db_session())
-- Flask integration functions (init_db(), get_db())
-- SQLite optimizations: foreign keys, WAL mode for concurrency
-- Connection pooling with pre-ping for reliability
-- SQLAlchemy 2.0 style with future=True
-- Thread-safe session handling
-"""
+"""SQLAlchemy database session management and connection pooling"""
 from contextlib import contextmanager
 from typing import Generator
 from sqlalchemy import create_engine, event, pool
@@ -20,21 +10,12 @@ logger = logging.getLogger(__name__)
 
 
 class DatabaseManager:
-    """Centralized database connection and session management
+    """Centralized database connection and session management"""
 
-    Handles engine creation, session factory, and lifecycle management.
-    Supports SQLite, PostgreSQL, and MySQL with appropriate configurations.
-    """
-
-    def __init__(self, database_url: str, echo: bool = False):
-        """Initialize database manager
-
-        Args:
-            database_url: SQLAlchemy database URL
-            echo: Whether to echo SQL statements (for debugging)
-        """
+    def __init__(self, database_url: str, echo: bool = False, poolclass=None):
+        """Initialize database manager"""
         self.database_url = database_url
-        self.engine = self._create_engine(database_url, echo)
+        self.engine = self._create_engine(database_url, echo, poolclass)
         self.SessionLocal = sessionmaker(
             bind=self.engine,
             autocommit=False,
@@ -43,26 +24,15 @@ class DatabaseManager:
         )
         logger.info(f"DatabaseManager initialized with {database_url.split(':')[0]} database")
 
-    def _create_engine(self, database_url: str, echo: bool) -> Engine:
-        """Create SQLAlchemy engine with database-specific configuration
-
-        Args:
-            database_url: SQLAlchemy database URL
-            echo: Whether to echo SQL statements
-
-        Returns:
-            Configured SQLAlchemy engine
-        """
-        # Common engine settings
+    def _create_engine(self, database_url: str, echo: bool, poolclass=None) -> Engine:
+        """Create SQLAlchemy engine with database-specific configuration"""
         engine_kwargs = {
             'echo': echo,
             'future': True,  # Use SQLAlchemy 2.0 style
-            'pool_pre_ping': True,  # Verify connections before use
+            'pool_pre_ping': True,
         }
 
-        # Database-specific configurations
         if database_url.startswith('sqlite'):
-            # SQLite specific settings
             engine_kwargs.update({
                 'connect_args': {
                     'check_same_thread': False,  # Allow multi-threading
@@ -73,17 +43,15 @@ class DatabaseManager:
             logger.info("Using SQLite database configuration")
 
         elif database_url.startswith('postgresql'):
-            # PostgreSQL specific settings
             engine_kwargs.update({
                 'pool_size': 10,
                 'max_overflow': 20,
                 'pool_timeout': 30,
-                'pool_recycle': 3600,  # Recycle connections after 1 hour
+                'pool_recycle': 3600,
             })
             logger.info("Using PostgreSQL database configuration")
 
         elif database_url.startswith('mysql'):
-            # MySQL specific settings
             engine_kwargs.update({
                 'pool_size': 10,
                 'max_overflow': 20,
@@ -91,6 +59,11 @@ class DatabaseManager:
                 'pool_recycle': 3600,
             })
             logger.info("Using MySQL database configuration")
+
+        if poolclass is not None:
+            for pool_option in ('pool_size', 'max_overflow', 'pool_timeout', 'pool_recycle'):
+                engine_kwargs.pop(pool_option, None)
+            engine_kwargs['poolclass'] = poolclass
 
         engine = create_engine(database_url, **engine_kwargs)
 
@@ -106,22 +79,13 @@ class DatabaseManager:
 
         return engine
 
+    def create_null_pool_manager(self) -> 'DatabaseManager':
+        """Return a manager for the same database with a NullPool engine and the same connect pragmas"""
+        return DatabaseManager(self.database_url, echo=self.engine.echo, poolclass=pool.NullPool)
+
     @contextmanager
     def get_db_session(self) -> Generator[Session, None, None]:
-        """Context manager for database sessions
-
-        Automatically commits on success or rolls back on exception.
-        Always closes the session in the finally block.
-
-        Yields:
-            SQLAlchemy session
-
-        Example:
-            with db_manager.get_db_session() as session:
-                user = session.get(User, 1)
-                user.email = 'new@example.com'
-                # Automatic commit
-        """
+        """Context manager for database sessions"""
         session = self.SessionLocal()
         try:
             yield session
@@ -129,18 +93,14 @@ class DatabaseManager:
             logger.debug("Database session committed successfully")
         except Exception as e:
             session.rollback()
-            logger.error(f"Database error, rolling back: {e}")
+            logger.error("Database error, rolling back: %s", type(e).__name__)
             raise
         finally:
             session.close()
             logger.debug("Database session closed")
 
     def create_all(self):
-        """Create all tables defined in Base.metadata
-
-        Should only be called when AUTH_ENABLED=true.
-        In production, use Alembic migrations instead.
-        """
+        """Create all tables defined in Base.metadata"""
         from database.models import Base, User
         Base.metadata.create_all(self.engine)
         if self.database_url.startswith('sqlite'):
@@ -149,18 +109,7 @@ class DatabaseManager:
         logger.info("Database tables created")
 
     def _add_missing_nullable_columns(self, table) -> None:
-        """Add the model's nullable columns that an existing table lacks
-
-        create_all() never alters existing tables. A nullable column without a default is
-        added with ALTER TABLE ADD COLUMN, which SQLite applies without rebuilding the
-        table; existing rows read NULL. Columns that are NOT NULL or have a default are
-        left alone. On MySQL, an existing nullable column whose model type declares
-        fractional-second precision but whose stored DATETIME has none is changed to the
-        model type with ALTER TABLE MODIFY.
-
-        Args:
-            table: SQLAlchemy Table to bring up to date
-        """
+        """Add the model's nullable columns that an existing table lacks"""
         from sqlalchemy import inspect
 
         dialect = self.engine.dialect
@@ -198,15 +147,8 @@ class DatabaseManager:
     def _rebuild_sqlite_table_with_autoincrement(self, table) -> None:
         """Rebuild an existing SQLite table that was created without AUTOINCREMENT
 
-        create_all() never alters existing tables, so a table created before its model
-        declared sqlite_autoincrement keeps reusing the highest deleted id. This follows
-        the SQLite table rebuild procedure (create, copy, drop, rename, recreate indexes)
-        in one transaction with foreign key enforcement off, so rows keep their ids and
+        Runs in one transaction with foreign key enforcement off, so rows keep their ids and
         ON DELETE CASCADE does not remove rows that reference the table.
-        No-op when the table is missing or already uses AUTOINCREMENT.
-
-        Args:
-            table: SQLAlchemy Table whose model declares sqlite_autoincrement=True
         """
         from sqlalchemy.schema import CreateIndex, CreateTable
 
@@ -266,21 +208,13 @@ class DatabaseManager:
             pooled_connection.close()
 
     def drop_all(self):
-        """Drop all tables (use with caution!)
-
-        WARNING: This will delete all data in the database.
-        Only use in development or testing environments.
-        """
+        """Drop all tables"""
         from database.models import Base
         Base.metadata.drop_all(self.engine)
         logger.warning("All database tables dropped")
 
     def check_connection(self) -> bool:
-        """Check if database connection is working
-
-        Returns:
-            True if connection is successful
-        """
+        """Check if database connection is working"""
         try:
             with self.engine.connect() as conn:
                 from sqlalchemy import text
@@ -292,20 +226,8 @@ class DatabaseManager:
             return False
 
 
-# Flask integration functions
-
 def init_db(app):
-    """Initialize database with Flask app
-
-    Creates DatabaseManager and stores it in app context.
-    Only called when AUTH_ENABLED=true.
-
-    Args:
-        app: Flask application instance
-
-    Returns:
-        DatabaseManager instance
-    """
+    """Initialize database with Flask app"""
     from config import config
 
     db_manager = DatabaseManager(
@@ -313,7 +235,6 @@ def init_db(app):
         echo=config.SQLALCHEMY_ECHO
     )
 
-    # Store in app context
     app.db_manager = db_manager
 
     logger.info("Database initialized with Flask app")
@@ -321,26 +242,13 @@ def init_db(app):
 
 
 def get_db() -> Generator[Session, None, None]:
-    """Dependency injection function for Flask routes
-
-    Provides a database session that is automatically managed.
-
-    Yields:
-        SQLAlchemy session
-
-    Example:
-        @app.route('/api/users')
-        def get_users():
-            with next(get_db()) as db:
-                users = db.scalars(select(User)).all()
-                return jsonify([u.to_dict() for u in users])
-    """
+    """Dependency injection function for Flask routes"""
     from flask import current_app
 
     if not hasattr(current_app, 'db_manager'):
         raise RuntimeError(
             "Database not initialized. "
-            "Ensure AUTH_ENABLED=true and init_db() was called."
+            "Ensure init_db() was called and succeeded."
         )
 
     with current_app.db_manager.get_db_session() as session:

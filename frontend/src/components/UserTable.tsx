@@ -1,11 +1,5 @@
 /**
  * User management table component for admin dashboard
- * - Displays user list with ID, username, email, roles, and active status
- * - Edit user functionality via React Router Link
- * - Delete confirmation flow with two-step process (prevents accidental deletion)
- * - Prevents users from deleting themselves (safety check)
- * - Visual indicators: Shield icon for superusers, "(You)" label for current user
- * - Used in UserManagementPage for admin user CRUD operations
  */
 import { useState } from 'react'
 import { Link } from 'react-router-dom'

@@ -39,7 +39,6 @@ export function Layer1TopologyEditor() {
   const [hasChanges, setHasChanges] = useState(false)
   const [saveSuccess, setSaveSuccess] = useState(false)
 
-  // Use topology edges when not editing, otherwise use local copy
   const displayEdges = hasChanges ? localEdges : (topology?.edges || [])
   const editingEdge = editingIndex !== null ? displayEdges[editingIndex] : null
 

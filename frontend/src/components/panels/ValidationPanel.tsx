@@ -1,13 +1,5 @@
 /**
  * Configuration validation panel with collapsible severity-based sections
- * - File parse status: successful/failed file parsing with error details
- * - Init issues: Batfish initialization errors (error severity)
- * - Parse warnings: configuration syntax warnings (warning severity)
- * - Unused structures: defined but never referenced config objects
- * - Undefined references: referenced but never defined config objects
- * - Forwarding loops: detected routing loops in network
- * - Multipath consistency: ECMP path validation
- * - Color-coded sections: red (error), yellow (warning), gray (info)
  */
 import { useMemo, useState } from 'react'
 import { useTranslation } from 'react-i18next'
@@ -51,10 +43,6 @@ interface SectionProps {
 
 /**
  * Collapsible validation section with severity-based styling
- * - Accordion-style: click to expand/collapse
- * - Color-coded: red (error), yellow (warning), gray (info)
- * - Badge: shows item count with severity-appropriate colors
- * - Displays JSON data or "No issues found" message
  */
 function Section({
   title,
@@ -246,7 +234,6 @@ export function ValidationPanel() {
   const currentSnapshotName = useSnapshotStore((state) => state.currentSnapshotName)
   const hasActiveSnapshot = Boolean(currentSnapshotName)
 
-  // Validation-specific queries
   const fileParseStatus = useFileParseStatus(hasActiveSnapshot)
   const initIssues = useInitIssues(hasActiveSnapshot)
   const parseWarnings = useParseWarnings(hasActiveSnapshot)
@@ -289,7 +276,6 @@ export function ValidationPanel() {
     [fileParseStatus.data, initIssues.data, parseWarnings.data]
   )
 
-  // Calculate overall validation status
   const hasErrors =
     hasValidationQueryError ||
     hasParseResultQueryError ||

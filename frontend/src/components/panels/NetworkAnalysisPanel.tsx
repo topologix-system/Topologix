@@ -1,13 +1,5 @@
 /**
  * Comprehensive network data explorer with 40+ collapsible sections
- * - Imports ~50 React Query hooks for all Batfish data types
- * - Protocol sections: OSPF, BGP, EIGRP, IS-IS, BFD, EVPN, VXLAN, IPSec
- * - HA sections: VRRP, HSRP, MLAG properties
- * - Topology sections: Layer1, Layer2, physical/layer3 edges, VLAN edges
- * - Config sections: routes, VLANs, interfaces, structures, AAA auth
- * - Advanced: F5 VIPs, vendor-independent model, route policies
- * - Each section shows data count badge and JSON-formatted results
- * - Used for deep dive analysis and debugging network configurations
  */
 import { Fragment, useState, type KeyboardEvent } from 'react'
 import { useTranslation } from 'react-i18next'
@@ -130,11 +122,6 @@ function StructuredErrorNotice({ error }: { error: StructuredApiError }) {
 
 /**
  * Reusable collapsible section component for displaying Batfish query results
- * - Accordion-style: click header to expand/collapse content
- * - Badge: shows item count when data is available (array length or object keys)
- * - JSON display: renders data as formatted JSON in scrollable pre block
- * - Loading/empty states: handles loading spinner and "no data" message
- * - Accessibility: ARIA expanded/controls attributes for screen readers
  */
 function Section({ title, icon, isLoading, data, error, defaultOpen = false }: SectionProps) {
   const { t } = useTranslation()
@@ -211,8 +198,6 @@ function Section({ title, icon, isLoading, data, error, defaultOpen = false }: S
 
 /**
  * Route Policies section with filter inputs
- * - Filter by node name (partial match)
- * - Filter by action (PERMIT/DENY)
  */
 function RoutePoliciesSection({ data, isLoading, error }: { data: any; isLoading: boolean; error?: unknown }) {
   const { t } = useTranslation()
@@ -835,32 +820,27 @@ export function NetworkAnalysisPanel() {
   const topologyEnabled = hasActiveSnapshot && activeTab === 'topology'
   const advancedEnabled = hasActiveSnapshot && activeTab === 'advanced'
 
-  // OSPF queries
   const ospfProcesses = useOSPFProcesses(protocolsEnabled)
   const ospfAreas = useOSPFAreas(protocolsEnabled)
   const ospfInterfaces = useOSPFInterfaces(protocolsEnabled)
   const ospfSessions = useOSPFSessions(protocolsEnabled)
   const ospfEdges = useOSPFEdges(protocolsEnabled)
 
-  // Network queries
   const nodes = useNodes(networkEnabled)
   const interfaces = useInterfaces(networkEnabled)
   const routes = useRoutes(networkEnabled)
   const vlans = useVlans(networkEnabled)
   const ipOwners = useIPOwners(networkEnabled)
 
-  // Edge queries
   const physicalEdges = usePhysicalEdges(topologyEnabled)
   const layer3Edges = useLayer3Edges(topologyEnabled)
 
-  // High Availability queries
   const vrrpProperties = useVRRPProperties(haEnabled)
   const hsrpProperties = useHSRPProperties(haEnabled)
   const mlagProperties = useMLAGProperties(haEnabled)
   const duplicateRouterIds = useDuplicateRouterIDs(haEnabled)
   const switchingProperties = useSwitchingProperties(haEnabled)
 
-  // Protocols queries
   const bgpEdges = useBGPEdges(protocolsEnabled)
   const bgpProcessConfig = useBGPProcessConfiguration(protocolsEnabled)
   const bgpPeerConfig = useBGPPeerConfiguration(protocolsEnabled)
@@ -874,7 +854,6 @@ export function NetworkAnalysisPanel() {
   const isisLoopbackInterfaces = useISISLoopbackInterfaces(protocolsEnabled)
   const bfdSessionStatus = useBFDSessionStatus(protocolsEnabled)
 
-  // Topology queries
   const layer1Topology = useLayer1Topology(topologyEnabled)
   const layer2Topology = useLayer2Topology(topologyEnabled)
   const vxlanVNI = useVXLANVNIProperties(topologyEnabled)
@@ -883,7 +862,6 @@ export function NetworkAnalysisPanel() {
   const ipsecEdges = useIPSecEdges(topologyEnabled)
   const ipsecPeerConfig = useIPSecPeerConfiguration(topologyEnabled)
 
-  // Advanced queries
   const f5VIPs = useF5VIPs(advancedEnabled)
   const viModel = useVIModel(advancedEnabled)
   const evpnRib = useEVPNRib(protocolsEnabled)
@@ -895,10 +873,6 @@ export function NetworkAnalysisPanel() {
   const aaaAuthentication = useAAAAuthentication(advancedEnabled)
   const routePolicies = useRoutePolicies({}, advancedEnabled)
 
-  /**
-   * Tab navigation configuration for analysis categories
-   * Five tabs: Protocols (BGP/OSPF/etc), HA (VRRP/HSRP), Network (nodes/routes), Topology (layers/edges), Advanced (F5/structures)
-   */
   const tabs = [
     { id: 'protocols' as const, label: t('analysis.tabs.protocols'), icon: Activity },
     { id: 'ha' as const, label: t('analysis.tabs.highAvailability'), icon: Shield },

@@ -1,10 +1,5 @@
 /**
  * Admin-only user management page for editing other users
- * - Role-based access control: requires admin role to access
- * - Manages user email, full name, roles (admin/engineer/viewer), and account status
- * - Form state management with controlled inputs and isEditing tracking
- * - React Query mutations for optimistic updates with auto-navigation after success
- * - Cannot modify username (immutable) or superuser status
  */
 import { useState, useEffect } from 'react'
 import { useParams, useNavigate, Link } from 'react-router-dom'
@@ -45,8 +40,6 @@ export function UserEditPage() {
 
   /**
    * Handle user update form submission
-   * Updates user email, full name, roles, and active status via React Query
-   * Shows success message and navigates back to user management page after 2s
    */
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
@@ -65,11 +58,9 @@ export function UserEditPage() {
         },
       })
 
-      // Show success message
       setSuccessMessage(t('userEdit.updated'))
       setIsEditing(false)
 
-      // Clear success message and navigate back after 2 seconds
       setTimeout(() => {
         setSuccessMessage('')
         navigate('/admin/users')
@@ -96,8 +87,6 @@ export function UserEditPage() {
 
   /**
    * Toggle role selection for user
-   * Adds or removes role from selectedRoles array based on current state
-   * Sets isEditing flag to enable save/cancel buttons
    */
   const handleRoleToggle = (role: string) => {
     setIsEditing(true)
@@ -155,9 +144,6 @@ export function UserEditPage() {
 
   /**
    * Available role options for user assignment
-   * - admin: Full system access including user management
-   * - engineer: Network configuration and analysis access
-   * - viewer: Read-only access to topology and analysis
    */
   const availableRoles = ['admin', 'engineer', 'viewer']
 

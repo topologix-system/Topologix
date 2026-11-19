@@ -1,16 +1,12 @@
-"""
-Flask application entry point with authentication
-- Configurable auth via AUTH_ENABLED env var (disabled by default for OSS distribution)
-- Set AUTH_ENABLED=false for development or evaluation environments
-- Comprehensive network analysis REST API powered by Batfish
-- CORS, compression, rate limiting, and security headers for production
-- Health check, snapshot management, and 40+ Batfish query endpoints
-"""
+"""Flask application entry point with authentication"""
+import functools
 import logging
 import os
 import re
 import sys
 import time
+from contextlib import contextmanager
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 from datetime import datetime, timedelta, timezone
@@ -24,26 +20,47 @@ from flask_cors import CORS
 from flask_compress import Compress
 from werkzeug.middleware.proxy_fix import ProxyFix
 from werkzeug.exceptions import BadRequest, RequestEntityTooLarge, UnsupportedMediaType
+import pybatfish
 from pybatfish.datamodel.route import BgpRoute
 
-from config import config
+from config import RESULT_IDENTITY_HEADERS, config
 from services import BatfishQueryError, BatfishService, SnapshotService
 from services.batfish_service import (
     BATFISH_NOT_INITIALIZED_MESSAGE,
     JAVA_STACK_FRAME_IN_TEXT,
+    LIVE_RETRY_SECONDS,
     BatfishSnapshotLoadError,
 )
+from services.batfish_version_probe import BatfishVersionProbe
+from services.result_cache import CacheEntryError, ResultCache, owner_scope_for
 from services.snapshot_service import ConfigContentConflictError
-from security.validation import RequestValidationError, validate_path
+from services.snapshot_history_service import (
+    EXPECTED_HEAD_UNSET,
+    CurrentNamespaceError,
+    InvalidDiffPathError,
+    NamespaceNotFoundError,
+    PathClashError,
+    SnapshotHistoryService,
+    VersionConflictError,
+    VersionNotFoundError,
+    VersionUnchangedError,
+    is_database_error,
+)
+from services.snapshot_state_service import (
+    NAMESPACE_PATTERN,
+    SnapshotStateService,
+    StagingVanishedError,
+    TreeMovedError,
+    VersioningUnavailableError,
+)
+from security.validation import RequestValidationError
 
-# Configure logging early so it's available during conditional imports
 logging.basicConfig(
     level=logging.INFO if not config.DEBUG else logging.DEBUG,
     format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
 )
 logger = logging.getLogger(__name__)
 
-# Conditional imports for authentication
 if config.AUTH_ENABLED:
     from flask_session import Session
     from security import (
@@ -54,14 +71,12 @@ if config.AUTH_ENABLED:
         SecurityHeaders, RateLimiter
     )
     from security.auth import TooManyAttemptsError
-    # Import CSRF protection based on mode
     if config.CSRF_MODE == 'double-submit':
         from security.csrf_double_submit import DoubleSubmitCSRFProtect as CSRFProtect
         logger.info("CSRF Mode: Double-Submit Cookie Pattern (stateless)")
     else:
         from security.csrf import CSRFProtect
         logger.info("CSRF Mode: Session-Based Synchronized Token Pattern")
-    # Import database modules (only when AUTH_ENABLED=true)
     from database import init_db
     from database.seed import initialize_database
 else:
@@ -74,12 +89,9 @@ else:
             return f
         return decorator
 
-# Initialize Flask app
 app = Flask(__name__)
 app.config['MAX_CONTENT_LENGTH'] = config.MAX_CONTENT_LENGTH
 
-# Apply ProxyFix middleware if behind reverse proxy (Caddy/nginx)
-# This ensures request.remote_addr contains real client IP, not proxy IP
 if config.BEHIND_REVERSE_PROXY:
     app.wsgi_app = ProxyFix(
         app.wsgi_app,
@@ -91,7 +103,6 @@ if config.BEHIND_REVERSE_PROXY:
     )
     logger.info(f"ProxyFix middleware applied: trusting {config.TRUSTED_PROXY_COUNT} proxies")
 
-# Configure Flask app
 if config.AUTH_ENABLED:
     app.config['SECRET_KEY'] = config.SECRET_KEY
     app.config['SESSION_TYPE'] = 'filesystem'
@@ -101,8 +112,6 @@ if config.AUTH_ENABLED:
     app.config['PERMANENT_SESSION_LIFETIME'] = config.PERMANENT_SESSION_LIFETIME
     app.config['JWT_ACCESS_TOKEN_EXPIRES'] = config.JWT_ACCESS_TOKEN_EXPIRES
 
-# Initialize CORS
-# When auth is disabled, use simpler CORS configuration
 if config.AUTH_ENABLED:
     CORS(app,
          origins=config.CORS_ORIGINS,
@@ -111,19 +120,17 @@ if config.AUTH_ENABLED:
          supports_credentials=config.CORS_SUPPORTS_CREDENTIALS,
          max_age=config.CORS_MAX_AGE)
 else:
-    # Simple CORS for non-auth mode
     CORS(app,
          origins=config.CORS_ORIGINS,
          allow_headers=['Content-Type', 'Cache-Control', 'Pragma'],
+         expose_headers=list(RESULT_IDENTITY_HEADERS),
          supports_credentials=False)
 
-# Enable gzip compression for responses > 500 bytes
 Compress(app)
 app.config['COMPRESS_ALGORITHM'] = 'gzip'
 app.config['COMPRESS_LEVEL'] = 6  # Balanced compression level
 app.config['COMPRESS_MIN_SIZE'] = 500
 
-# Initialize security components (only if auth is enabled)
 if config.AUTH_ENABLED:
     Session(app)
     jwt_manager = JWTManager(app, config.JWT_SECRET_KEY)
@@ -132,21 +139,16 @@ if config.AUTH_ENABLED:
     rate_limiter = RateLimiter(app)
     logger.info("Authentication and security features: ENABLED")
 
-    # Initialize database (only if auth is enabled)
     try:
-        # Store config in app for database access
         app.config['AUTH_ENABLED'] = config.AUTH_ENABLED
         app.config['DEBUG'] = config.DEBUG
 
-        # Initialize database manager
         db_manager = init_db(app)
         logger.info(f"Database initialized: {config.SQLALCHEMY_DATABASE_URI.split(':')[0]}")
 
-        # Create tables if they don't exist
         db_manager.create_all()
         logger.info("Database tables created/verified")
 
-        # Seed database with default data
         with app.app_context():
             seed_result = initialize_database(
                 admin_username=config.AUTH_DEFAULT_ADMIN_USER,
@@ -160,10 +162,16 @@ if config.AUTH_ENABLED:
         raise RuntimeError(f"Failed to initialize database: {e}")
 else:
     logger.info("Authentication and security features: DISABLED (open access)")
+    from database import init_db
+    try:
+        db_manager = init_db(app)
+        db_manager.create_all()
+        logger.info("Database initialized for snapshot versioning: %s", config.SQLALCHEMY_DATABASE_URI.split(':')[0])
+    except Exception as e:
+        db_manager = None
+        logger.error("Database initialization failed; snapshot versioning is unavailable: %s", type(e).__name__)
 
-# ========== Global Authentication Check (only if AUTH_ENABLED) ==========
 if config.AUTH_ENABLED:
-    # Define routes that don't require authentication
     AUTH_EXEMPT_ROUTES = {
         '/api/health',
         '/api/auth/login',
@@ -176,20 +184,15 @@ if config.AUTH_ENABLED:
 
     @app.before_request
     def check_authentication():
-        # Skip authentication for exempt routes
         if request.path in AUTH_EXEMPT_ROUTES:
             return None
 
-        # Skip authentication for OPTIONS requests (CORS preflight)
         if request.method == 'OPTIONS':
             return None
 
-        # Special handling for POST /api/users (self-registration)
-        # Allow unauthenticated POST for self-registration, but require auth for other methods (GET, PUT, DELETE)
         if request.path == '/api/users' and request.method == 'POST':
             return None
 
-        # Extract token from Authorization header or cookie
         auth_header = request.headers.get('Authorization')
         token = None
         if auth_header:
@@ -204,11 +207,9 @@ if config.AUTH_ENABLED:
             logger.warning(f"Missing authentication: {request.path} from {request.remote_addr}")
             return error_response("Authentication required", 401)
 
-        # Validate JWT token
         try:
             payload = jwt_manager.decode_token(token)
 
-            # Check if token is access token (not refresh token)
             if payload.get('type') != 'access':
                 logger.warning(f"Invalid token type: {request.path} from {request.remote_addr}")
                 return error_response("Invalid token type", 401)
@@ -217,7 +218,6 @@ if config.AUTH_ENABLED:
             logger.warning(f"Token validation failed: {request.path} from {request.remote_addr} - {e}")
             return error_response("Invalid or expired token", 401)
 
-        # Store user info in request context for use in route handlers
         request.user_id = payload.get('user_id')
         request.username = payload.get('username')
         request.roles = payload.get('roles', [])
@@ -246,10 +246,52 @@ if config.AUTH_ENABLED:
                 logger.debug(f"Token cleanup skipped: {e}")
         return response
 
-# Initialize services
 batfish_service = BatfishService()
 snapshot_service = SnapshotService()
 batfish_request_lock = RLock()
+snapshot_state_service = SnapshotStateService(db_manager, snapshot_service)
+snapshot_history_service = SnapshotHistoryService(db_manager, snapshot_state_service, config.SNAPSHOT_HISTORY_DIR)
+snapshot_service.attach_state_service(snapshot_state_service)
+batfish_service.attach_state_service(snapshot_state_service)
+batfish_service.version_probe = BatfishVersionProbe(
+    config.BATFISH_HOST,
+    config.BATFISH_PORT,
+    ttl_seconds=config.BATFISH_VERSION_PROBE_TTL_SECONDS,
+    grace_seconds=config.BATFISH_VERSION_GRACE_SECONDS,
+)
+result_cache = ResultCache(
+    config.RESULT_CACHE_DIR,
+    max_bytes=config.RESULT_CACHE_MAX_BYTES,
+    max_entries=config.RESULT_CACHE_MAX_ENTRIES,
+    protect_seconds=config.RESULT_CACHE_PROTECT_SECONDS,
+    build_id=config.BACKEND_BUILD_ID,
+    pybatfish_version=str(getattr(pybatfish, '__version__', '')),
+    schema_version=config.RESULT_CACHE_SCHEMA_VERSION,
+    forced_off=snapshot_state_service.result_cache_forced_off,
+)
+result_cache.current_batfish_version = batfish_service.version_probe.peek
+snapshot_history_service.attach_result_cache(result_cache)
+snapshot_history_service.run_startup_tasks()
+
+
+def seed_active_snapshot_from_file() -> None:
+    """Seed the AUTH OFF snapshot selection from the stored active snapshot name."""
+    if config.AUTH_ENABLED or not snapshot_state_service.result_cache_enabled:
+        return
+    name = snapshot_state_service.load_active_snapshot_once()
+    if name:
+        batfish_service.current_snapshot_name = name
+        logger.info("Selected the stored active snapshot at start: snapshot=%s", name)
+
+
+seed_active_snapshot_from_file()
+
+
+@app.after_request
+def schedule_snapshot_history_maintenance(response):
+    """After-request hook that starts the hourly snapshot history maintenance when it is due."""
+    snapshot_history_service.schedule_periodic_gc()
+    return response
 
 
 def _parse_gunicorn_workers(command_text: str | None) -> int | None:
@@ -336,9 +378,109 @@ def get_batfish_request_network_name() -> str:
     return f"{config.BATFISH_NETWORK}_user_{int(requester_user_id)}"
 
 
+# Snapshot version endpoints and whether each needs exclusive Batfish access
+VERSION_ENDPOINT_USES_BATFISH = {
+    'get_snapshot_version_state': False,
+    'list_snapshot_versions': False,
+    'commit_snapshot_version': False,
+    'get_snapshot_version': False,
+    'get_snapshot_version_diff': False,
+    'get_snapshot_version_file_diff': False,
+    'restore_snapshot_version': True,
+    'delete_snapshot_version': False,
+    'delete_snapshot_versions': False,
+    'purge_snapshot_history_orphans': False,
+    'list_snapshot_history_namespaces': False,
+    'clear_snapshot_result_cache': False,
+}
+
+# Result-cached GET endpoints: (path, view). The views read neither request.args nor a body.
+CACHED_QUERY_ROUTES = (
+    ('/api/network/all-data', 'get_all_data'),
+    ('/api/network/nodes', 'get_nodes'),
+    ('/api/network/interfaces', 'get_interfaces'),
+    ('/api/network/routes', 'get_routes'),
+    ('/api/network/vlans', 'get_vlans'),
+    ('/api/network/ip-owners', 'get_ip_owners'),
+    ('/api/ospf/processes', 'get_ospf_processes'),
+    ('/api/ospf/areas', 'get_ospf_areas'),
+    ('/api/ospf/interfaces', 'get_ospf_interfaces'),
+    ('/api/ospf/sessions', 'get_ospf_sessions'),
+    ('/api/edges/ospf', 'get_ospf_edges'),
+    ('/api/edges/physical', 'get_physical_edges'),
+    ('/api/edges/layer3', 'get_layer3_edges'),
+    ('/api/config/defined-structures', 'get_defined_structures'),
+    ('/api/config/referenced-structures', 'get_referenced_structures'),
+    ('/api/config/named-structures', 'get_named_structures'),
+    ('/api/config/aaa-authentication', 'get_aaa_authentication'),
+    ('/api/validation/file-parse-status', 'get_file_parse_status'),
+    ('/api/validation/init-issues', 'get_init_issues'),
+    ('/api/validation/parse-warnings', 'get_parse_warnings'),
+    ('/api/validation/vi-conversion-status', 'get_vi_conversion_status'),
+    ('/api/validation/unused-structures', 'get_unused_structures'),
+    ('/api/validation/undefined-references', 'get_undefined_references'),
+    ('/api/validation/detect-loops', 'get_detect_loops'),
+    ('/api/validation/multipath-consistency', 'get_multipath_consistency'),
+    ('/api/validation/loopback-multipath-consistency', 'get_loopback_multipath_consistency'),
+    ('/api/security/snmp-communities', 'get_snmp_communities'),
+    ('/api/bgp/edges', 'get_bgp_edges'),
+    ('/api/bgp/peer-configuration', 'get_bgp_peer_configuration'),
+    ('/api/bgp/process-configuration', 'get_bgp_process_configuration'),
+    ('/api/bgp/session-status', 'get_bgp_session_status'),
+    ('/api/bgp/session-compatibility', 'get_bgp_session_compatibility'),
+    ('/api/bgp/rib', 'get_bgp_rib'),
+    ('/api/ha/vrrp-properties', 'get_vrrp_properties'),
+    ('/api/ha/hsrp-properties', 'get_hsrp_properties'),
+    ('/api/ha/mlag-properties', 'get_mlag_properties'),
+    ('/api/ha/duplicate-router-ids', 'get_duplicate_router_ids'),
+    ('/api/ha/switching-properties', 'get_switching_properties'),
+    ('/api/protocols/evpn/rib', 'get_evpn_rib'),
+    ('/api/protocols/evpn/vxlan-edges', 'get_vxlan_edges'),
+    ('/api/protocols/evpn/vxlan-vni-properties', 'get_vxlan_vni_properties'),
+    ('/api/protocols/eigrp/edges', 'get_eigrp_edges'),
+    ('/api/protocols/eigrp/interface-configuration', 'get_eigrp_interface_configuration'),
+    ('/api/protocols/isis/edges', 'get_isis_edges'),
+    ('/api/protocols/isis/interface-configuration', 'get_isis_interface_configuration'),
+    ('/api/protocols/isis-loopback-interfaces', 'get_isis_loopback_interfaces'),
+    ('/api/protocols/bfd-session-status', 'get_bfd_session_status'),
+    ('/api/topology/layer1-edges', 'get_layer1_edges'),
+    ('/api/topology/layer1-topology', 'get_layer1_topology'),
+    ('/api/topology/ipsec-session-status', 'get_ipsec_session_status'),
+    ('/api/topology/ipsec-edges', 'get_ipsec_edges'),
+    ('/api/topology/ipsec-peer-configuration', 'get_ipsec_peer_configuration'),
+    ('/api/topology/layer2-topology', 'get_layer2_topology'),
+    ('/api/topology/switched-vlan-edges', 'get_switched_vlan_edges'),
+    ('/api/topology/interface-mtu', 'get_interface_mtu'),
+    ('/api/topology/ip-space-assignment', 'get_ip_space_assignment'),
+    ('/api/advanced/f5-bigip-vip-configuration', 'get_f5_bigip_vip_configuration'),
+    ('/api/advanced/questions', 'get_questions'),
+    ('/api/advanced/node-roles', 'get_node_roles'),
+    ('/api/advanced/interface-blacklist', 'get_interface_blacklist'),
+    ('/api/advanced/vi-model', 'get_vi_model'),
+)
+CACHED_QUERY_EXCLUSIONS = {
+    '/api/analysis/route-policies': 'reads request.args',
+    '/api/acl/filter-line-reachability': 'reads request.args',
+    '/api/advanced/route-policies': 'reads request.args',
+    '/api/advanced/compare-peer-group-policies': 'reads request.args or a body and names snapshots',
+}
+CACHED_QUERY_ENDPOINTS = frozenset(view for _, view in CACHED_QUERY_ROUTES)
+
+
+def cached_endpoint_skips_hooks() -> bool:
+    """Return whether the current request is a cached endpoint that the Batfish hooks leave to the decorator."""
+    return snapshot_state_service.result_cache_enabled and request.endpoint in CACHED_QUERY_ENDPOINTS
+
+
 def request_uses_batfish() -> bool:
     """Check whether the current request needs exclusive Batfish access."""
     path = request.path
+
+    if request.endpoint in VERSION_ENDPOINT_USES_BATFISH:
+        return VERSION_ENDPOINT_USES_BATFISH[request.endpoint]
+
+    if cached_endpoint_skips_hooks():
+        return False
 
     if path.startswith(SNAPSHOT_QUERY_PREFIXES):
         return True
@@ -386,6 +528,8 @@ OPTIONAL_BODY_ENDPOINTS = frozenset({
     'update_snapshot_artifact',
     'validate_snapshot_artifacts',
     'activate_snapshot',
+    'restore_snapshot_version',
+    'clear_snapshot_result_cache',
 })
 
 BODY_METHODS = frozenset({'POST', 'PUT', 'PATCH'})
@@ -441,7 +585,17 @@ def prepare_batfish_request_context():
     batfish_request_lock.acquire()
     request._batfish_lock_acquired = True
     batfish_service.set_network_context(get_batfish_request_network_name())
-    return None
+
+    if config.AUTH_ENABLED or not is_lazy_load_request():
+        return None
+    snapshot_name = batfish_service.current_snapshot_name
+    if not snapshot_name:
+        return None
+    try:
+        snapshot_path = snapshot_service.get_snapshot_path(snapshot_name, **get_snapshot_request_context())
+    except Exception:
+        return None
+    return ensure_request_snapshot_loaded(snapshot_name, snapshot_path).error
 
 
 @app.after_request
@@ -474,10 +628,11 @@ if config.AUTH_ENABLED:
         if not request.path.startswith(SNAPSHOT_QUERY_PREFIXES):
             return None
 
+        if cached_endpoint_skips_hooks():
+            return None
+
         active_snapshot_name = session.get('current_snapshot_name')
         if not active_snapshot_name:
-            # Sessions without an active snapshot get the uninitialized-service error;
-            # the shared Batfish state stays as other sessions left it.
             return error_response(BATFISH_NOT_INITIALIZED_MESSAGE, 400)
 
         try:
@@ -486,13 +641,9 @@ if config.AUTH_ENABLED:
                 **get_snapshot_request_context(),
             )
 
-            if batfish_service.current_snapshot_name != active_snapshot_name:
-                activate_batfish_snapshot(snapshot_path, active_snapshot_name)
-                logger.info(
-                    "Synchronized Batfish snapshot for user=%s snapshot=%s",
-                    getattr(request, 'username', 'unknown'),
-                    active_snapshot_name,
-                )
+            outcome = ensure_request_snapshot_loaded(active_snapshot_name, snapshot_path)
+            if outcome.error is not None:
+                return outcome.error
         except PermissionError:
             session.pop('current_snapshot_name', None)
             logger.warning(
@@ -521,7 +672,6 @@ if config.AUTH_ENABLED:
         return None
 
 
-# ========== Error Handlers ==========
 @app.errorhandler(RequestEntityTooLarge)
 def request_entity_too_large(error):
     return error_response("Request body exceeds the maximum allowed size", 413, code="request_too_large")
@@ -548,7 +698,6 @@ def internal_error(error):
     return jsonify({"error": "Internal server error"}), 500
 
 
-# ========== Utility Functions ==========
 def generate_etag(data: Any) -> str:
     json_str = json.dumps(data, sort_keys=True)
     return hashlib.md5(json_str.encode()).hexdigest()
@@ -567,7 +716,6 @@ def add_cache_headers(response, cache_time: int = 300, private: bool = False):
     response.headers['Cache-Control'] = ', '.join(cache_control)
     response.headers['Vary'] = 'Accept-Encoding, Authorization, Cookie' if private else 'Accept-Encoding'
 
-    # Add expires header for older proxies
     expires = datetime.utcnow() + timedelta(seconds=cache_time)
     response.headers['Expires'] = expires.strftime('%a, %d %b %Y %H:%M:%S GMT')
 
@@ -575,22 +723,12 @@ def add_cache_headers(response, cache_time: int = 300, private: bool = False):
 
 
 def success_response(data: Any, message: str = "Success", cache_time: int = 0, use_etag: bool = False, status_code: int = 200) -> tuple:
-    """Create success response with optional caching
-
-    Args:
-        data: Response data
-        message: Success message
-        cache_time: Cache time in seconds (0 = no cache)
-        use_etag: Whether to generate and check ETags
-        status_code: HTTP status code (default 200)
-    """
+    """Create success response with optional caching"""
     response_data = {"status": "success", "message": message, "data": data}
 
-    # Generate ETag if requested
     if use_etag:
         etag = generate_etag(response_data)
 
-        # Check if client has matching ETag
         if request.headers.get('If-None-Match') == etag:
             return '', 304  # Not Modified
 
@@ -599,7 +737,6 @@ def success_response(data: Any, message: str = "Success", cache_time: int = 0, u
     else:
         response = make_response(jsonify(response_data), status_code)
 
-    # Add cache headers if cache_time > 0
     if cache_time > 0:
         add_cache_headers(response, cache_time, private=config.AUTH_ENABLED)
 
@@ -799,27 +936,97 @@ def extract_batfish_failure_reason(message: str) -> str | None:
 
 
 def snapshot_has_config_files(snapshot_path: Path) -> bool:
-    """Check whether a snapshot holds any input file outside Topologix metadata and Batfish supplemental data."""
-    for file_path in snapshot_path.rglob('*'):
-        relative_parts = file_path.relative_to(snapshot_path).parts
-        if len(relative_parts) > 1 and relative_parts[0] != 'batfish' and file_path.is_file():
+    """Check whether a snapshot holds a consumable file at depth >= 2 outside Batfish supplemental data (True when
+    that cannot be determined)."""
+    for _ in range(3):
+        try:
+            for relative_path, _absolute in snapshot_state_service.iter_consumable_files(snapshot_path):
+                parts = relative_path.split('/')
+                if len(parts) > 1 and parts[0] != 'batfish':
+                    return True
+            return False
+        except TreeMovedError:
+            continue
+        except FileNotFoundError:
+            return False
+        except OSError:
             return True
-    return False
+    return True
+
+
+def snapshot_empty_response(name: str) -> tuple:
+    return error_response(
+        f"Snapshot '{name}' has no configuration files to analyze",
+        400,
+        code="snapshot_empty",
+        details={"snapshot": name},
+        hints=["Upload at least one device configuration file to the snapshot, then activate it again."],
+    )
+
+
+def activation_snapshot_id(snapshot_path: Path) -> str | None:
+    try:
+        return snapshot_state_service.read_sidecar_id(snapshot_path)
+    except Exception:
+        return None
+
+
+def activation_failure_key(snapshot_id: str | None, snapshot_name: str, content_hash: str | None = None) -> tuple:
+    """Key of the activation negative cache: content-keyed when the hash is known, else the id or the name."""
+    namespace = snapshot_state_service.namespace
+    if snapshot_id and content_hash:
+        return ('hash', namespace, snapshot_id, content_hash)
+    if snapshot_id:
+        return ('id', namespace, snapshot_id)
+    return ('name', namespace, snapshot_name)
+
+
+def record_activation_failure(snapshot_path: Path, name: str, error: Exception, content_hash: str | None) -> None:
+    if isinstance(error, StagingVanishedError):
+        return
+    snapshot_id = activation_snapshot_id(snapshot_path)
+    batfish_service.activation_failures.record(
+        activation_failure_key(snapshot_id, name, content_hash), error, snapshot_id, name,
+    )
+
+
+def note_activation_success(snapshot_path: Path, name: str) -> None:
+    """Bookkeeping after a successful parse of the requester's current snapshot."""
+    snapshot_id = activation_snapshot_id(snapshot_path)
+    batfish_service.activation_failures.remove_snapshot(snapshot_id, name)
+    snapshot_state_service.consume_reparse(snapshot_id, batfish_service.loaded_clear_counter)
+    if not config.AUTH_ENABLED:
+        snapshot_state_service.persist_active_snapshot(name)
+
+
+def clear_current_snapshot_after_failure(name: str) -> None:
+    """Deselect a snapshot that is current in the requester's context after a failed activation."""
+    if batfish_service.current_snapshot_name == name:
+        batfish_service.clear_active_snapshot()
+        if not config.AUTH_ENABLED:
+            snapshot_state_service.clear_active_snapshot_file()
+    if config.AUTH_ENABLED and session.get('current_snapshot_name') == name:
+        session.pop('current_snapshot_name', None)
 
 
 def activate_batfish_snapshot(snapshot_path: Path, name: str) -> dict[str, Any]:
-    """Initialize Batfish with a snapshot, leaving the snapshot inactive when Batfish rejects it."""
+    """Initialize Batfish with a snapshot, leaving the snapshot inactive when the activation fails."""
     previous_snapshot_name = batfish_service.current_snapshot_name
+    batfish_service.last_upload_hash = None
     try:
-        return batfish_service.initialize_network(str(snapshot_path), name)
-    except Exception:
-        # No snapshot stays active when re-initializing the active one fails
-        batfish_service.current_snapshot_name = (
-            None if previous_snapshot_name == name else previous_snapshot_name
-        )
-        if config.AUTH_ENABLED and session.get('current_snapshot_name') == name:
-            session.pop('current_snapshot_name', None)
+        result = batfish_service.initialize_network(str(snapshot_path), name)
+    except Exception as e:
+        if previous_snapshot_name == name:
+            batfish_service.current_snapshot_name = name
+            clear_current_snapshot_after_failure(name)
+        else:
+            batfish_service.current_snapshot_name = previous_snapshot_name
+            if config.AUTH_ENABLED and session.get('current_snapshot_name') == name:
+                session.pop('current_snapshot_name', None)
+        record_activation_failure(snapshot_path, name, e, batfish_service.last_upload_hash)
         raise
+    note_activation_success(snapshot_path, name)
+    return result
 
 
 def snapshot_activation_error_response(name: str, error: Exception) -> tuple:
@@ -851,11 +1058,7 @@ def snapshot_activation_error_response(name: str, error: Exception) -> tuple:
 
 
 def snapshot_load_error_response(error: BatfishSnapshotLoadError, role: str | None = None) -> tuple:
-    """Create a sanitized 422 response for a snapshot Batfish rejected while loading it for queries by name.
-
-    role names the side of a comparison ('base', 'comparison', 'reference' or 'snapshot') that failed;
-    the message names every role except 'snapshot', which would only repeat the word.
-    """
+    """Create a sanitized 422 response for a snapshot Batfish rejected while loading it for queries by name."""
     name = error.snapshot_name
     reason = extract_batfish_failure_reason(str(error))
     role_label = f"{role} " if role and role != "snapshot" else ""
@@ -902,12 +1105,574 @@ def require_snapshot_access(snapshot_name: str | None) -> Path | None:
     return snapshot_service.get_snapshot_path(snapshot_name, **get_snapshot_request_context())
 
 
-def normalize_batfish_specifier(value: Any, separator: str = ",") -> str | None:
-    """Normalize UI list or comma text into a Batfish specifier.
+SNAPSHOT_ID_HEADER, CONTENT_HASH_HEADER, CACHE_STATUS_HEADER = RESULT_IDENTITY_HEADERS
+LEGACY_CACHE_HEADERS = ('ETag', 'Expires', 'Last-Modified')
+CACHED_QUERY_REPLANS = 2
+STALE_SELECTION = object()
+CACHE_BYPASSED = "the request is answered without the result cache"
+_cache_degradations_logged: set[tuple[str, str]] = set()
+_kept_selections_logged: set[tuple[str, str]] = set()
 
-    List items are joined with ',' (the specifier grammar's union operator);
-    pass separator='|' for regex-typed parameters such as vrfs.
-    """
+
+def log_cache_degradation(failure: str, consequence: str, error: Exception) -> None:
+    """Log what failed, its exception type and what the request does instead: one WARNING per failure and
+    consequence, DEBUG afterwards."""
+    key = (failure, consequence)
+    level = logging.DEBUG if key in _cache_degradations_logged else logging.WARNING
+    _cache_degradations_logged.add(key)
+    logger.log(level, "%s failed (%s); %s", failure, type(error).__name__, consequence)
+
+
+def log_kept_selection(name: str, problem: str) -> None:
+    """Log that the AUTH OFF active snapshot stays selected: one WARNING per snapshot name and problem, DEBUG
+    afterwards."""
+    key = (name, problem)
+    level = logging.DEBUG if key in _kept_selections_logged else logging.WARNING
+    _kept_selections_logged.add(key)
+    logger.log(level, "Active snapshot %s %s; it stays selected", name, problem)
+
+
+@dataclass
+class LoadOutcome:
+    """Result of making Batfish hold the requester's current snapshot"""
+    error: Any = None
+    parsed: bool = False
+    consumed_reparse: bool = False
+    stale_selection: bool = False
+
+
+@dataclass
+class CachePlan:
+    """Everything a cached request needs before it looks the cache up"""
+    snapshot_id: str
+    working_hash: str
+    clear_seq: int | None
+    owner_scope: str
+    db_id: str
+    batfish_version: str
+    reparse: bool
+    state: Any = field(repr=False)
+
+
+@dataclass
+class Computation:
+    """A cache miss computed under the Batfish lock"""
+    response: Any = None
+    hit: Any = None
+    loaded_hash: str | None = None
+    clear_counter: int | None = None
+    batfish_version: str | None = None
+    storable: bool = False
+    stale_selection: bool = False
+
+
+class CurrentSnapshotError(Exception):
+    """The requester has no usable current snapshot; carries the error response"""
+
+    def __init__(self, response):
+        super().__init__("No usable current snapshot")
+        self.response = response
+
+
+def resolve_current_snapshot() -> tuple[str, Path]:
+    """Return the requester's authorized current snapshot (session under AUTH ON, process name under AUTH OFF), or
+    raise CurrentSnapshotError carrying the error response when there is no usable one."""
+    name = session.get('current_snapshot_name') if config.AUTH_ENABLED else batfish_service.current_snapshot_name
+    if not name:
+        raise CurrentSnapshotError(error_response(BATFISH_NOT_INITIALIZED_MESSAGE, 400, code="no_active_snapshot"))
+    try:
+        return name, snapshot_service.get_snapshot_path(name, **get_snapshot_request_context())
+    except PermissionError:
+        if config.AUTH_ENABLED:
+            session.pop('current_snapshot_name', None)
+            logger.warning(
+                "Cleared unauthorized active snapshot for user=%s snapshot=%s",
+                getattr(request, 'username', 'unknown'),
+                name,
+            )
+        else:
+            log_kept_selection(name, "cannot be accessed")
+        raise CurrentSnapshotError(error_response("Active snapshot access denied", 403))
+    except FileNotFoundError:
+        if config.AUTH_ENABLED:
+            session.pop('current_snapshot_name', None)
+            logger.warning(
+                "Cleared missing active snapshot for user=%s snapshot=%s",
+                getattr(request, 'username', 'unknown'),
+                name,
+            )
+        else:
+            log_kept_selection(name, "is missing")
+        raise CurrentSnapshotError(error_response("Active snapshot not found", 404))
+    except ValueError as e:
+        raise CurrentSnapshotError(error_response(str(e), 400))
+
+
+def request_owner_scope() -> str | None:
+    """Owner scope of the requester's cache entries: '' under AUTH OFF, <db_id>:<user id> under AUTH ON, else None."""
+    if not config.AUTH_ENABLED:
+        return ''
+    try:
+        owner = snapshot_service._normalize_owner_user_id(getattr(request, 'user_id', None))
+    except ValueError:
+        return None
+    if owner is None:
+        return None
+    return owner_scope_for(True, snapshot_history_service.db_id, owner)
+
+
+def is_lazy_load_request() -> bool:
+    return request.path.startswith(SNAPSHOT_QUERY_PREFIXES) and request.path != '/api/network/initialize'
+
+
+def live_marker_matches(name: str, working_hash: str | None) -> bool:
+    marker = batfish_service.live_loaded
+    return bool(
+        batfish_service._initialized
+        and marker is not None
+        and working_hash is not None
+        and tuple(marker[:3]) == (batfish_service.network_name, name, working_hash)
+    )
+
+
+def staging_recovered(snapshot_path: Path) -> bool:
+    """Retry staging alone for a live-loaded snapshot and return whether it succeeded."""
+    try:
+        staged_dir, _ = snapshot_state_service.stage_for_upload(snapshot_path)
+    except Exception as e:
+        marker = batfish_service.live_loaded
+        if marker is not None:
+            batfish_service.live_loaded = (marker[0], marker[1], marker[2], time.monotonic())
+        logger.info("Staging of snapshot %s is still unavailable (%s)", snapshot_path.name, type(e).__name__)
+        return False
+    try:
+        snapshot_state_service.cleanup_staging(staged_dir)
+    except Exception:
+        pass
+    return True
+
+
+def loaded_hash_equals_disk(snapshot_path: Path) -> bool:
+    loaded = batfish_service.loaded_content_hash
+    if loaded is None:
+        return False
+    try:
+        return snapshot_state_service.compute_manifest(snapshot_path).content_hash == loaded
+    except Exception:
+        return False
+
+
+def activate_lazily(name: str, snapshot_path: Path, failure_key: tuple, snapshot_id: str | None,
+                    reparse: bool) -> LoadOutcome:
+    """Parse a snapshot on demand; a failure keeps the name, session and stored name and is negative-cached
+    (except a snapshot that changed while it was staged or whose staging directory disappeared)."""
+    batfish_service.last_upload_hash = None
+    try:
+        batfish_service.initialize_network(str(snapshot_path), name)
+    except Exception as e:
+        logger.error("Failed to load snapshot %s into Batfish on demand (%s)", name, type(e).__name__)
+        batfish_service._initialized = False
+        batfish_service.loaded_content_hash = None
+        if not isinstance(e, StagingVanishedError):
+            batfish_service.activation_failures.record(failure_key, e, snapshot_id, name)
+        return LoadOutcome(error=snapshot_activation_error_response(name, e))
+    note_activation_success(snapshot_path, name)
+    logger.info("Loaded snapshot %s into Batfish on demand", name)
+    consumed = reparse and not snapshot_state_service.reparse_requested(snapshot_id)
+    return LoadOutcome(parsed=True, consumed_reparse=consumed)
+
+
+def ensure_loaded(name: str, snapshot_path: Path, state) -> LoadOutcome:
+    """Under the Batfish lock, parse the requester's current snapshot when Batfish does not hold its working content
+    or a re-parse is due."""
+    working_hash = state.content_hash
+    snapshot_id = state.snapshot_id
+    reparse = snapshot_state_service.reparse_requested(snapshot_id)
+    probe = batfish_service.version_probe
+    current_version = probe.current() if probe is not None else None
+    version_changed = current_version is not None and batfish_service.loaded_batfish_version != current_version
+    clear_pending = state.clear_seq is not None and (
+        batfish_service.loaded_clear_counter is None or batfish_service.loaded_clear_counter < state.clear_seq
+    )
+    is_current = batfish_service._initialized and batfish_service.current_snapshot_name == name
+
+    if not (reparse or version_changed or clear_pending):
+        if is_current and batfish_service.loaded_content_hash is not None:
+            if batfish_service.loaded_content_hash == working_hash:
+                return LoadOutcome()
+            if loaded_hash_equals_disk(snapshot_path):
+                return LoadOutcome()
+        if live_marker_matches(name, working_hash):
+            marker_age = time.monotonic() - batfish_service.live_loaded[3]
+            if marker_age < LIVE_RETRY_SECONDS or not staging_recovered(snapshot_path):
+                return LoadOutcome()
+
+    if version_changed and is_current:
+        logger.info("Batfish version changed since snapshot %s was parsed; re-parsing it", name)
+        batfish_service._drop_loaded_state()
+
+    failure_key = activation_failure_key(snapshot_id, name, working_hash)
+    failure = batfish_service.activation_failures.get(failure_key)
+    if failure is not None:
+        return LoadOutcome(error=snapshot_activation_error_response(name, failure))
+    if not snapshot_has_config_files(snapshot_path):
+        return LoadOutcome(error=snapshot_empty_response(name))
+    return activate_lazily(name, snapshot_path, failure_key, snapshot_id, reparse)
+
+
+def ensure_loaded_by_name(name: str, snapshot_path: Path) -> LoadOutcome:
+    """Load the requester's current snapshot by name only, without comparing its content."""
+    if config.AUTH_ENABLED and batfish_service.current_snapshot_name != name:
+        try:
+            activate_batfish_snapshot(snapshot_path, name)
+        except Exception as e:
+            logger.error(
+                "Failed to synchronize Batfish snapshot for user=%s snapshot=%s: %s",
+                getattr(request, 'username', 'unknown'),
+                name,
+                type(e).__name__,
+            )
+            return LoadOutcome(error=snapshot_activation_error_response(name, e))
+        logger.info(
+            "Synchronized Batfish snapshot for user=%s snapshot=%s", getattr(request, 'username', 'unknown'), name,
+        )
+        return LoadOutcome(parsed=True)
+    if batfish_service.current_snapshot_name == name and not batfish_service._initialized:
+        snapshot_id = activation_snapshot_id(snapshot_path)
+        failure_key = activation_failure_key(snapshot_id, name)
+        failure = batfish_service.activation_failures.get(failure_key)
+        if failure is not None:
+            return LoadOutcome(error=snapshot_activation_error_response(name, failure))
+        return activate_lazily(name, snapshot_path, failure_key, snapshot_id, reparse=False)
+    return LoadOutcome()
+
+
+def ensure_request_snapshot_loaded(name: str, snapshot_path: Path) -> LoadOutcome:
+    """Hook path of non-cached snapshot queries, under the Batfish lock."""
+    if not snapshot_state_service.result_cache_enabled:
+        return ensure_loaded_by_name(name, snapshot_path)
+    try:
+        state = snapshot_state_service.evaluate_snapshot(snapshot_path)
+    except VersioningUnavailableError:
+        return ensure_loaded_by_name(name, snapshot_path)
+    except Exception as e:
+        log_cache_degradation(
+            "Snapshot state evaluation before a non-cached query",
+            "the loaded snapshot is matched by name only, not by content",
+            e,
+        )
+        return ensure_loaded_by_name(name, snapshot_path)
+    if state.content_hash is None:
+        return ensure_loaded_by_name(name, snapshot_path)
+    return ensure_loaded(name, snapshot_path, state)
+
+
+@contextmanager
+def batfish_request_scope(name: str, snapshot_path: Path, state=None, bypass: bool = False):
+    """Batfish lock, the requester's network context and a loaded snapshot for the enclosed computation; an AUTH
+    OFF selection that changed while the request waited yields stale_selection without loading."""
+    with batfish_request_lock:
+        batfish_service.set_network_context(get_batfish_request_network_name())
+        if not config.AUTH_ENABLED and batfish_service.current_snapshot_name != name:
+            yield LoadOutcome(stale_selection=True)
+        elif bypass or state is None or state.content_hash is None:
+            yield ensure_loaded_by_name(name, snapshot_path)
+        else:
+            yield ensure_loaded(name, snapshot_path, state)
+
+
+def without_legacy_cache_headers(response):
+    for header in LEGACY_CACHE_HEADERS:
+        response.headers.remove(header)
+    response.headers['Cache-Control'] = 'no-store'
+    return response
+
+
+def with_identity_headers(response, snapshot_id: str | None, content_hash: str | None, status: str):
+    response.headers[SNAPSHOT_ID_HEADER] = snapshot_id or ''
+    response.headers[CONTENT_HASH_HEADER] = content_hash or ''
+    response.headers[CACHE_STATUS_HEADER] = status
+    return response
+
+
+def if_none_match_matches(etag: str) -> bool:
+    """Match If-None-Match (weak tags, lists, * and Flask-Compress :<algorithm> suffixes) against an ETag."""
+    if not request.headers.get('If-None-Match'):
+        return False
+    tags = request.if_none_match
+    if tags.star_tag:
+        return True
+    return any(tag.split(':', 1)[0] == etag for tag in tags.as_set(include_weak=True))
+
+
+def cached_entry_response(entry, snapshot_id: str, status: str, allow_not_modified: bool = True):
+    """Serve a stored body: 304 on a matching ETag (AUTH OFF), else the gzip or plain body."""
+    etag = f"{snapshot_id[:8]}-{entry.content_hash[:16]}-{entry.key_hash[:8]}-{entry.body_sha256[:8]}"
+    if allow_not_modified and not config.AUTH_ENABLED and if_none_match_matches(etag):
+        response = app.response_class(status=304)
+        response.headers['ETag'] = f'"{etag}"'
+        response.headers['Cache-Control'] = 'private, no-cache'
+        return with_identity_headers(response, snapshot_id, entry.content_hash, status)
+    if request.accept_encodings.quality('gzip') > 0:
+        response = app.response_class(entry.body, status=200, mimetype='application/json')
+        response.headers['Content-Encoding'] = 'gzip'
+    else:
+        response = app.response_class(entry.plain_body(), status=200, mimetype='application/json')
+    response.headers['Vary'] = 'Accept-Encoding'
+    if config.AUTH_ENABLED:
+        response.headers['Cache-Control'] = 'no-store'
+    else:
+        response.headers['ETag'] = f'"{etag}"'
+        response.headers['Cache-Control'] = 'private, no-cache'
+    return with_identity_headers(response, snapshot_id, entry.content_hash, status)
+
+
+def is_storable_body(response) -> bool:
+    if response.status_code != 200:
+        return False
+    payload = response.get_json(silent=True)
+    if not isinstance(payload, dict) or payload.get('status') != 'success':
+        return False
+    data = payload.get('data')
+    return not (isinstance(data, dict) and data.get('query_errors'))
+
+
+def plan_cached_query(snapshot_path: Path) -> CachePlan | None:
+    """Return the cache plan, or None when the request must bypass the cache."""
+    try:
+        state = snapshot_state_service.evaluate_snapshot(snapshot_path)
+    except VersioningUnavailableError:
+        return None
+    except Exception as e:
+        log_cache_degradation("Snapshot state evaluation of a cached endpoint", CACHE_BYPASSED, e)
+        return None
+    if state.content_hash is None:
+        return None
+    db_id = snapshot_history_service.db_id
+    owner_scope = request_owner_scope()
+    if not db_id or owner_scope is None:
+        return None
+    probe = batfish_service.version_probe
+    batfish_version = probe.current() if probe is not None else None
+    if batfish_version is None:
+        return None
+    return CachePlan(
+        snapshot_id=state.snapshot_id,
+        working_hash=state.content_hash,
+        clear_seq=state.clear_seq,
+        owner_scope=owner_scope,
+        db_id=db_id,
+        batfish_version=batfish_version,
+        reparse=snapshot_state_service.reparse_requested(state.snapshot_id),
+        state=state,
+    )
+
+
+def cache_lookup(plan: CachePlan, content_hash: str, endpoint_key: str):
+    return result_cache.lookup(
+        content_hash, endpoint_key, plan.owner_scope, plan.db_id, plan.clear_seq,
+        batfish_version=plan.batfish_version,
+    )
+
+
+def serve_hit(plan: CachePlan, content_hash: str, endpoint_key: str):
+    """Return the response for a valid stored entry, or None; a body that cannot be decoded is discarded."""
+    entry = cache_lookup(plan, content_hash, endpoint_key)
+    if entry is None:
+        return None
+    try:
+        response = cached_entry_response(entry, plan.snapshot_id, 'hit')
+    except CacheEntryError:
+        result_cache.discard(entry)
+        return None
+    logger.debug("Result cache hit: %s", endpoint_key)
+    return response
+
+
+def serve_bypass(view, args, kwargs, name: str, snapshot_path: Path):
+    snapshot_id = activation_snapshot_id(snapshot_path)
+    with batfish_request_scope(name, snapshot_path, bypass=True) as outcome:
+        if outcome.stale_selection:
+            return STALE_SELECTION
+        if outcome.error is not None:
+            response = app.make_response(outcome.error)
+        else:
+            response = app.make_response(view(*args, **kwargs))
+    return with_identity_headers(without_legacy_cache_headers(response), snapshot_id, '', 'bypass')
+
+
+def serve_current_bypass(view, args, kwargs):
+    """Bypass for the snapshot that is current while the Batfish lock is held."""
+    with batfish_request_lock:
+        batfish_service.set_network_context(get_batfish_request_network_name())
+        try:
+            name, snapshot_path = resolve_current_snapshot()
+        except CurrentSnapshotError as e:
+            return with_identity_headers(without_legacy_cache_headers(app.make_response(e.response)), '', '', 'bypass')
+        outcome = ensure_loaded_by_name(name, snapshot_path)
+        if outcome.error is not None:
+            response = app.make_response(outcome.error)
+        else:
+            response = app.make_response(view(*args, **kwargs))
+    return with_identity_headers(
+        without_legacy_cache_headers(response), activation_snapshot_id(snapshot_path), '', 'bypass',
+    )
+
+
+def compute_cache_miss(view, args, kwargs, name: str, snapshot_path: Path, plan: CachePlan,
+                       endpoint_key: str) -> Computation:
+    """Compute a cache miss under the Batfish lock with the snapshot loaded, re-running the view once after a lost
+    Batfish state."""
+    with batfish_request_scope(name, snapshot_path, state=plan.state) as outcome:
+        if outcome.stale_selection:
+            return Computation(stale_selection=True)
+        if outcome.error is not None:
+            return Computation(response=app.make_response(outcome.error))
+        loaded = batfish_service.loaded_content_hash
+        if loaded and not outcome.consumed_reparse and not (
+            plan.reparse and snapshot_state_service.reparse_requested(plan.snapshot_id)
+        ):
+            try:
+                hit = serve_hit(plan, loaded, endpoint_key)
+            except Exception as e:
+                log_cache_degradation(
+                    "Result cache lookup of the loaded content", "the result is computed and stored if possible", e,
+                )
+                hit = None
+            if hit is not None:
+                return Computation(hit=hit)
+        for attempt in (1, 2):
+            drops = batfish_service.state_drop_count
+            loaded = batfish_service.loaded_content_hash
+            clear_counter = batfish_service.loaded_clear_counter
+            batfish_version = batfish_service.loaded_batfish_version
+            batfish_service.reset_query_failure_count()
+            response = app.make_response(view(*args, **kwargs))
+            failures = batfish_service.query_failure_count()
+            if batfish_service.state_drop_count == drops:
+                unchanged = (
+                    batfish_service._initialized
+                    and batfish_service.current_snapshot_name == name
+                    and batfish_service.loaded_content_hash == loaded
+                )
+                return Computation(
+                    response=response,
+                    loaded_hash=loaded,
+                    clear_counter=clear_counter,
+                    batfish_version=batfish_version,
+                    storable=bool(loaded and batfish_version and unchanged and failures == 0),
+                )
+            if attempt == 2:
+                return Computation(
+                    response=app.make_response(
+                        batfish_query_error_response(batfish_service._state_lost_failure(endpoint_key))
+                    ),
+                )
+            logger.warning("Batfish lost snapshot %s while computing %s; re-parsing once", name, endpoint_key)
+            retry = ensure_loaded(name, snapshot_path, plan.state)
+            if retry.error is not None:
+                return Computation(response=app.make_response(retry.error))
+
+
+def serve_cached_query(endpoint_key: str, view, args, kwargs):
+    """Serve a cached endpoint, planning it again when the AUTH OFF selection changed while the request waited."""
+    for _ in range(CACHED_QUERY_REPLANS + 1):
+        response = serve_cached_query_once(endpoint_key, view, args, kwargs)
+        if response is not STALE_SELECTION:
+            return response
+    logger.info("Snapshot selection kept changing while %s waited for Batfish; answering uncached", endpoint_key)
+    return serve_current_bypass(view, args, kwargs)
+
+
+def serve_cached_query_once(endpoint_key: str, view, args, kwargs):
+    try:
+        name, snapshot_path = resolve_current_snapshot()
+    except CurrentSnapshotError as e:
+        return with_identity_headers(without_legacy_cache_headers(app.make_response(e.response)), '', '', 'bypass')
+
+    plan = plan_cached_query(snapshot_path)
+    if plan is None:
+        return serve_bypass(view, args, kwargs, name, snapshot_path)
+
+    if not plan.reparse:
+        try:
+            hit = serve_hit(plan, plan.working_hash, endpoint_key)
+        except Exception as e:
+            log_cache_degradation("Result cache lookup", CACHE_BYPASSED, e)
+            return serve_bypass(view, args, kwargs, name, snapshot_path)
+        if hit is not None:
+            return hit
+
+    try:
+        key_lock = result_cache.key_lock((plan.working_hash, endpoint_key, plan.owner_scope))
+        computing = result_cache.computing((plan.working_hash, plan.owner_scope))
+    except Exception as e:
+        log_cache_degradation("Result cache key lock", CACHE_BYPASSED, e)
+        return serve_bypass(view, args, kwargs, name, snapshot_path)
+
+    with key_lock, computing:
+        if not plan.reparse:
+            try:
+                hit = serve_hit(plan, plan.working_hash, endpoint_key)
+            except Exception as e:
+                log_cache_degradation(
+                    "Result cache lookup under the key lock", "the result is computed and stored if possible", e,
+                )
+                hit = None
+            if hit is not None:
+                return hit
+        computation = compute_cache_miss(view, args, kwargs, name, snapshot_path, plan, endpoint_key)
+        if computation.stale_selection:
+            return STALE_SELECTION
+        if computation.hit is not None:
+            return computation.hit
+        response = computation.response
+        if computation.storable and is_storable_body(response):
+            try:
+                with result_cache.computing((computation.loaded_hash, plan.owner_scope)):
+                    entry = result_cache.store(
+                        computation.loaded_hash,
+                        endpoint_key,
+                        plan.owner_scope,
+                        response.get_data(),
+                        plan.db_id,
+                        computation.clear_counter,
+                        batfish_version=computation.batfish_version,
+                    )
+            except Exception as e:
+                log_cache_degradation("Result cache store", "the result is served without being stored", e)
+                entry = None
+            if entry is not None:
+                try:
+                    result_cache.evict_if_needed()
+                except Exception as e:
+                    log_cache_degradation(
+                        "Result cache eviction", "size limits are not enforced until it succeeds", e,
+                    )
+                return cached_entry_response(entry, plan.snapshot_id, 'stored', allow_not_modified=False)
+        return with_identity_headers(
+            without_legacy_cache_headers(response),
+            plan.snapshot_id,
+            computation.loaded_hash,
+            'unstored' if computation.loaded_hash else 'bypass',
+        )
+
+
+def cached_query(endpoint_key: str):
+    """Serve a parameterless snapshot query from the result cache; pass through with no-store when it is off."""
+    def decorator(view):
+        @functools.wraps(view)
+        def wrapper(*args, **kwargs):
+            if not snapshot_state_service.result_cache_enabled:
+                return without_legacy_cache_headers(app.make_response(view(*args, **kwargs)))
+            return serve_cached_query(endpoint_key, view, args, kwargs)
+        wrapper.cached_endpoint_key = endpoint_key
+        return wrapper
+    return decorator
+
+
+def normalize_batfish_specifier(value: Any, separator: str = ",") -> str | None:
+    """Normalize UI list or comma text into a Batfish specifier."""
     if value is None:
         return None
     if isinstance(value, str):
@@ -1072,16 +1837,8 @@ def reload_active_snapshot_after_layer1_change(name: str) -> tuple | None:
     return None
 
 
-# ========== User Management Validation Functions ==========
 def validate_password(password: str) -> tuple[bool, str]:
-    """Validate password against security policy
-
-    Args:
-        password: Password to validate
-
-    Returns:
-        Tuple of (is_valid, error_message)
-    """
+    """Validate password against security policy"""
     if not password:
         return False, "Password is required"
 
@@ -1104,14 +1861,7 @@ def validate_password(password: str) -> tuple[bool, str]:
 
 
 def validate_email(email: str) -> tuple[bool, str]:
-    """Validate email format
-
-    Args:
-        email: Email address to validate
-
-    Returns:
-        Tuple of (is_valid, error_message)
-    """
+    """Validate email format"""
     import re
 
     if not email:
@@ -1130,14 +1880,7 @@ def validate_email(email: str) -> tuple[bool, str]:
 
 
 def validate_username(username: str) -> tuple[bool, str]:
-    """Validate username format
-
-    Args:
-        username: Username to validate
-
-    Returns:
-        Tuple of (is_valid, error_message)
-    """
+    """Validate username format"""
     import re
 
     if not username:
@@ -1149,25 +1892,23 @@ def validate_username(username: str) -> tuple[bool, str]:
     if len(username) > 50:
         return False, "Username must be at most 50 characters"
 
-    # Only allow alphanumeric characters and underscores
     if not re.match(r'^[a-zA-Z0-9_]+$', username):
         return False, "Username can only contain letters, numbers, and underscores"
 
     return True, ""
 
 
-# ========== Health Check ==========
 @app.route('/api/health', methods=['GET'])
 def health_check():
     return success_response({
         "service": "topologix-backend",
         "status": "healthy",
         "auth_enabled": config.AUTH_ENABLED,
-        "batfish": batfish_service.get_batfish_version_info()
+        "batfish": batfish_service.get_batfish_version_info(),
+        "result_cache": {"enabled": snapshot_state_service.result_cache_enabled},
     })
 
 
-# ========== Authentication Endpoints (only if AUTH_ENABLED) ==========
 if config.AUTH_ENABLED:
     def set_token_cookies(response, tokens: dict) -> None:
         """Set a login session's access and refresh tokens as HTTP-only cookies"""
@@ -1215,15 +1956,12 @@ if config.AUTH_ENABLED:
                 user['id'], user['username'], user['roles']
             )
 
-            # Generate CSRF token (mode-dependent)
             if config.CSRF_MODE == 'double-submit':
-                # Generate token with user binding for double-submit pattern
                 csrf_token = csrf_protect.generate_csrf_token(
                     user_id=user['id'],
                     session_id=request.headers.get('X-Session-ID')
                 )
             else:
-                # Session-based mode
                 csrf_token = csrf_protect.generate_csrf_token()
 
             logger.info(f"Successful login for {username} from {request.remote_addr}")
@@ -1243,11 +1981,9 @@ if config.AUTH_ENABLED:
                 }
             })
 
-            # Set CSRF cookie for double-submit pattern
             if config.CSRF_MODE == 'double-submit':
                 csrf_protect.set_csrf_cookie(response, csrf_token)
 
-            # Set tokens as HTTP-only cookies (not returned in JSON body)
             set_token_cookies(response, tokens)
 
             return response, 200
@@ -1269,7 +2005,6 @@ if config.AUTH_ENABLED:
         signature verifies is revoked.
         """
         try:
-            # Revoke the access token and its login session before clearing session
             token = jwt_manager._extract_token()
             payload = jwt_manager.revoke_token(token) if token else None
             username = payload.get('username') if payload else None
@@ -1281,15 +2016,12 @@ if config.AUTH_ENABLED:
 
             response = make_response(success_response({}, "Logout successful"))
 
-            # Clear cookies
             response.set_cookie('access_token', '', expires=0)
             response.set_cookie('refresh_token', '', expires=0, path='/api/auth/refresh')
 
-            # Clear CSRF cookie (mode-dependent)
             if config.CSRF_MODE == 'double-submit':
                 csrf_protect.clear_csrf_cookie(response)
             else:
-                # Session-based mode uses generic cookie clear
                 response.set_cookie('csrf_token', '', expires=0)
 
             return response
@@ -1313,9 +2045,7 @@ if config.AUTH_ENABLED:
 
             user_id = payload.get('user_id')
 
-            # Get user based on AUTH_ENABLED mode
             if config.AUTH_ENABLED:
-                # Database mode
                 from database.models import User
                 from database.session import get_db
 
@@ -1330,7 +2060,6 @@ if config.AUTH_ENABLED:
                         'roles': [role.name for role in user_obj.roles]
                     }
             else:
-                # In-memory mode
                 from security.auth import USERS_DB
                 user = None
                 for u in USERS_DB.values():
@@ -1341,7 +2070,6 @@ if config.AUTH_ENABLED:
                 if not user:
                     return error_response("User not found", 401)
 
-            # Generate new access token within the refresh token's login session
             tokens = jwt_manager.generate_tokens(
                 user['id'], user['username'], user['roles'],
                 session_id=payload.get('sid') or payload.get('jti')
@@ -1376,29 +2104,20 @@ if config.AUTH_ENABLED:
     def get_csrf_token():
         """Get CSRF token for authenticated user"""
         if config.CSRF_MODE == 'double-submit':
-            # Generate token with user binding for double-submit pattern
             csrf_token = csrf_protect.generate_csrf_token(
                 user_id=request.user_id,
                 session_id=request.headers.get('X-Session-ID')
             )
-            # Create response and set cookie
             response = make_response(success_response({'csrf_token': csrf_token}))
             csrf_protect.set_csrf_cookie(response, csrf_token)
             return response
         else:
-            # Session-based mode (no cookie needed)
             csrf_token = csrf_protect.generate_csrf_token()
             return success_response({'csrf_token': csrf_token})
 
-    # ========== User Management Endpoints ==========
-
     @app.route('/api/users', methods=['POST'])
     def create_user():
-        """Create new user (self-registration or admin creation)
-
-        Self-registration: Allowed when ALLOW_REGISTRATION=true, no authentication required
-        Admin creation: Requires user:write permission
-        """
+        """Create new user (self-registration or admin creation)"""
         try:
             data = validate_json_input(
                 request.get_json(),
@@ -1406,8 +2125,6 @@ if config.AUTH_ENABLED:
                 optional_fields=['full_name', 'roles']
             )
 
-            # Check if request is from an authenticated admin or unauthenticated self-registration
-            # POST /api/users is skipped by before_request (line 170-171), so we manually parse JWT
             is_self_registration = True
             auth_header = request.headers.get('Authorization')
             if auth_header and auth_header.startswith('Bearer '):
@@ -1425,12 +2142,9 @@ if config.AUTH_ENABLED:
             if is_self_registration:
                 if not config.ALLOW_REGISTRATION:
                     return error_response("Self-registration is disabled", 403)
-                # Self-registration always assigns 'viewer' role
                 roles_to_assign = ['viewer']
             else:
-                # Admin creation - check permission
                 from database.rbac import require_permission
-                # This will be checked by decorator if auth is enabled
                 if not hasattr(request, 'user_id'):
                     return error_response("Authentication required", 401)
 
@@ -1441,10 +2155,8 @@ if config.AUTH_ENABLED:
                     if not admin_user or not admin_user.has_permission('user:write'):
                         return error_response("Permission denied: user:write required", 403)
 
-                # Admin can specify roles
                 roles_to_assign = data.get('roles', ['viewer'])
 
-            # Validate input
             is_valid, error_msg = validate_username(data['username'])
             if not is_valid:
                 return error_response(error_msg, 400)
@@ -1457,23 +2169,19 @@ if config.AUTH_ENABLED:
             if not is_valid:
                 return error_response(error_msg, 400)
 
-            # Create user in database
             from database.models import User, Role
             from database.session import get_db
             from sqlalchemy import select
 
             with next(get_db()) as db:
-                # Check if username already exists
                 stmt = select(User).where(User.username == data['username'])
                 if db.scalar(stmt):
                     return error_response("Username already exists", 409)
 
-                # Check if email already exists
                 stmt = select(User).where(User.email == data['email'])
                 if db.scalar(stmt):
                     return error_response("Email already exists", 409)
 
-                # Create new user
                 new_user = User(
                     username=data['username'],
                     email=data['email'],
@@ -1483,7 +2191,6 @@ if config.AUTH_ENABLED:
                 )
                 new_user.set_password(data['password'])
 
-                # Assign roles
                 for role_name in roles_to_assign:
                     stmt = select(Role).where(Role.name == role_name)
                     role = db.scalar(stmt)
@@ -1516,13 +2223,11 @@ if config.AUTH_ENABLED:
             from database.session import get_db
             from sqlalchemy import select
 
-            # Check permission
             with next(get_db()) as db:
                 admin_user = db.get(User, request.user_id)
                 if not admin_user or not admin_user.has_permission('user:read'):
                     return error_response("Permission denied: user:read required", 403)
 
-                # Get all users
                 stmt = select(User).order_by(User.created_at.desc())
                 users = db.scalars(stmt).all()
 
@@ -1564,7 +2269,6 @@ if config.AUTH_ENABLED:
             from database.session import get_db
 
             with next(get_db()) as db:
-                # Check if requesting own profile or has permission
                 is_own_profile = request.user_id == user_id
 
                 if not is_own_profile:
@@ -1572,7 +2276,6 @@ if config.AUTH_ENABLED:
                     if not admin_user or not admin_user.has_permission('user:read'):
                         return error_response("Permission denied", 403)
 
-                # Get user
                 user = db.get(User, user_id)
                 if not user:
                     return error_response("User not found", 404)
@@ -1586,11 +2289,7 @@ if config.AUTH_ENABLED:
     @app.route('/api/users/<int:user_id>', methods=['PUT'])
     @require_auth
     def update_user(user_id: int):
-        """Update user information
-
-        Own profile: Can update email, full_name
-        Admin (user:write): Can update all fields including roles
-        """
+        """Update user information"""
         try:
             data = validate_json_input(
                 request.get_json(),
@@ -1603,7 +2302,6 @@ if config.AUTH_ENABLED:
             from sqlalchemy import select
 
             with next(get_db()) as db:
-                # Get current user and target user
                 current_user = db.get(User, request.user_id)
                 target_user = db.get(User, user_id)
 
@@ -1613,29 +2311,25 @@ if config.AUTH_ENABLED:
                 is_own_profile = request.user_id == user_id
                 has_admin_permission = current_user and current_user.has_permission('user:write')
 
-                # Own profile: can update basic info only
                 if is_own_profile:
                     if 'email' in data:
                         is_valid, error_msg = validate_email(data['email'])
                         if not is_valid:
                             return error_response(error_msg, 400)
 
-                        # Check email uniqueness
                         stmt = select(User).where(User.email == data['email'], User.id != user_id)
                         if db.scalar(stmt):
                             return error_response("Email already exists", 409)
 
                         target_user.email = data['email']
-                        target_user.email_verified = False  # Require re-verification
+                        target_user.email_verified = False
 
                     if 'full_name' in data:
                         target_user.full_name = data['full_name']
 
-                    # Deny role/status changes on own profile
                     if 'roles' in data or 'is_active' in data:
                         return error_response("Cannot change roles or status on own profile", 403)
 
-                # Admin: can update all fields
                 elif has_admin_permission:
                     if 'email' in data:
                         is_valid, error_msg = validate_email(data['email'])
@@ -1658,7 +2352,6 @@ if config.AUTH_ENABLED:
                         target_user.is_active = is_active
 
                     if 'roles' in data:
-                        # Update roles
                         target_user.roles.clear()
                         for role_name in data['roles']:
                             stmt = select(Role).where(Role.name == role_name)
@@ -1684,13 +2377,8 @@ if config.AUTH_ENABLED:
     @app.route('/api/users/<int:user_id>/password', methods=['PUT'])
     @require_auth
     def change_password(user_id: int):
-        """Change user password
-
-        Only the user themselves can change their password
-        Requires current password for verification
-        """
+        """Change user password"""
         try:
-            # Only allow changing own password
             if request.user_id != user_id:
                 return error_response("Can only change own password", 403)
 
@@ -1708,20 +2396,16 @@ if config.AUTH_ENABLED:
                 if not user:
                     return error_response("User not found", 404)
 
-                # Verify current password
                 if not user.check_password(data['current_password']):
                     return error_response("Current password is incorrect", 401)
 
-                # Validate new password
                 is_valid, error_msg = validate_password(data['new_password'])
                 if not is_valid:
                     return error_response(error_msg, 400)
 
-                # Set new password
                 user.set_password(data['new_password'])
                 db.commit()
 
-                # New login session for the client that changed the password
                 tokens = jwt_manager.generate_tokens(user.id, user.username, [role.name for role in user.roles])
                 response = make_response(success_response(None, "Password changed successfully"))
                 set_token_cookies(response, tokens)
@@ -1738,13 +2422,8 @@ if config.AUTH_ENABLED:
     @app.route('/api/users/<int:user_id>', methods=['DELETE'])
     @require_auth
     def delete_user(user_id: int):
-        """Delete user (admin only)
-
-        Requires user:delete permission
-        Cannot delete own account
-        """
+        """Delete user (admin only)"""
         try:
-            # Prevent self-deletion
             if request.user_id == user_id:
                 return error_response("Cannot delete own account", 403)
 
@@ -1752,12 +2431,10 @@ if config.AUTH_ENABLED:
             from database.session import get_db
 
             with next(get_db()) as db:
-                # Check permission
                 admin_user = db.get(User, request.user_id)
                 if not admin_user or not admin_user.has_permission('user:delete'):
                     return error_response("Permission denied: user:delete required", 403)
 
-                # Get target user
                 target_user = db.get(User, user_id)
                 if not target_user:
                     return error_response("User not found", 404)
@@ -1773,33 +2450,16 @@ if config.AUTH_ENABLED:
             logger.error(f"Delete user error: {e}")
             return error_response(f"Failed to delete user: {str(e)}", 500)
 
-    # ========== Admin Security Logs Endpoints ==========
-
     @app.route('/api/admin/security-logs', methods=['GET'])
     @require_role('admin')
     def get_security_logs():
-        """Get security logs (login attempts) - Admin only
-
-        Query parameters:
-            page (int): Page number (default: 1)
-            per_page (int): Items per page (default: 50, max: 200)
-            ip_address (str): Filter by IP address
-            username (str): Filter by username
-            success (bool): Filter by success status (true/false)
-            start_date (str): Filter by start date (ISO format)
-            end_date (str): Filter by end date (ISO format)
-            sort (str): Sort order - 'asc' or 'desc' (default: 'desc')
-
-        Returns:
-            JSON response with paginated login attempts
-        """
+        """Get security logs (login attempts) - Admin only"""
         try:
             from database.models import LoginAttempt
             from database.session import get_db
             from sqlalchemy import select, func, and_
             from datetime import datetime, timezone
 
-            # Parse query parameters with validation
             page = max(1, int(request.args.get('page', 1)))
             per_page = min(200, max(1, int(request.args.get('per_page', 50))))
             ip_address = request.args.get('ip_address')
@@ -1810,11 +2470,9 @@ if config.AUTH_ENABLED:
             sort_order = request.args.get('sort', 'desc')
 
             with next(get_db()) as db:
-                # Build base query
                 query = select(LoginAttempt)
                 filters = []
 
-                # Apply filters
                 if ip_address:
                     filters.append(LoginAttempt.ip_address == ip_address)
 
@@ -1842,26 +2500,21 @@ if config.AUTH_ENABLED:
                 if filters:
                     query = query.where(and_(*filters))
 
-                # Apply sorting
                 if sort_order == 'asc':
                     query = query.order_by(LoginAttempt.attempt_time.asc())
                 else:
                     query = query.order_by(LoginAttempt.attempt_time.desc())
 
-                # Get total count
                 count_query = select(func.count()).select_from(LoginAttempt)
                 if filters:
                     count_query = count_query.where(and_(*filters))
                 total = db.scalar(count_query)
 
-                # Apply pagination
                 offset = (page - 1) * per_page
                 query = query.offset(offset).limit(per_page)
 
-                # Execute query
                 attempts = db.scalars(query).all()
 
-                # Convert to dict
                 logs = []
                 for attempt in attempts:
                     logs.append({
@@ -1873,7 +2526,6 @@ if config.AUTH_ENABLED:
                         'user_agent': attempt.user_agent
                     })
 
-                # Calculate pagination info
                 total_pages = (total + per_page - 1) // per_page
 
                 logger.info(f"Security logs retrieved: page={page}, total={total}, user={request.username}")
@@ -1895,11 +2547,7 @@ if config.AUTH_ENABLED:
     @app.route('/api/admin/security-logs/stats', methods=['GET'])
     @require_role('admin')
     def get_security_stats():
-        """Get security statistics - Admin only
-
-        Returns:
-            JSON response with security statistics
-        """
+        """Get security statistics - Admin only"""
         try:
             from database.models import LoginAttempt
             from database.session import get_db
@@ -1909,25 +2557,20 @@ if config.AUTH_ENABLED:
             with next(get_db()) as db:
                 now = datetime.now(timezone.utc)
 
-                # Total attempts
                 total_attempts = db.scalar(select(func.count()).select_from(LoginAttempt))
 
-                # Failed attempts
                 failed_attempts = db.scalar(
                     select(func.count()).select_from(LoginAttempt).where(
                         LoginAttempt.success == False
                     )
                 )
 
-                # Success rate
                 success_rate = ((total_attempts - failed_attempts) / total_attempts * 100) if total_attempts > 0 else 0
 
-                # Unique IPs
                 unique_ips = db.scalar(
                     select(func.count(func.distinct(LoginAttempt.ip_address))).select_from(LoginAttempt)
                 )
 
-                # Blocked IPs (IPs with failed attempts in last 15 minutes)
                 rate_limit_window = now - timedelta(minutes=15)
                 blocked_ips_query = select(func.count(func.distinct(LoginAttempt.ip_address))).select_from(LoginAttempt).where(
                     and_(
@@ -1939,7 +2582,6 @@ if config.AUTH_ENABLED:
                 )
                 blocked_ips = len(list(db.execute(blocked_ips_query)))
 
-                # Most targeted accounts (top 5)
                 most_targeted = db.execute(
                     select(
                         LoginAttempt.username,
@@ -1956,7 +2598,6 @@ if config.AUTH_ENABLED:
                     {'username': row[0], 'count': row[1]} for row in most_targeted
                 ]
 
-                # Recent 24 hours stats
                 recent_24h_start = now - timedelta(hours=24)
                 recent_24h_total = db.scalar(
                     select(func.count()).select_from(LoginAttempt).where(
@@ -1972,7 +2613,6 @@ if config.AUTH_ENABLED:
                     )
                 )
 
-                # Recent 7 days stats
                 recent_7d_start = now - timedelta(days=7)
                 recent_7d_total = db.scalar(
                     select(func.count()).select_from(LoginAttempt).where(
@@ -2010,8 +2650,6 @@ if config.AUTH_ENABLED:
         except Exception as e:
             logger.error(f"Get security stats error: {e}")
             return error_response(f"Failed to retrieve security statistics: {str(e)}", 500)
-
-    # ========== Admin Snapshot Owner Migration Endpoints ==========
 
     @app.route('/api/admin/snapshot-migrations/unowned', methods=['GET'])
     @require_role('admin')
@@ -2091,20 +2729,9 @@ if config.AUTH_ENABLED:
             logger.error(f"Failed to assign snapshot owner: {e}")
             return error_response("Failed to assign snapshot owner", 500)
 
-    # ========== Password Reset Endpoints ==========
-
     @app.route('/api/auth/password-reset-request', methods=['POST'])
     def password_reset_request():
-        """Request password reset link
-
-        Public endpoint - no authentication required
-        Always returns success to prevent email enumeration attacks
-
-        Request body:
-        {
-            "email": "user@example.com"
-        }
-        """
+        """Request password reset link"""
         try:
             data = validate_json_input(
                 request.get_json(),
@@ -2114,7 +2741,6 @@ if config.AUTH_ENABLED:
 
             email = data['email'].strip().lower()
 
-            # Basic email validation
             is_valid, error_msg = validate_email(email)
             if not is_valid:
                 # Still return success to prevent enumeration
@@ -2130,12 +2756,10 @@ if config.AUTH_ENABLED:
             import secrets
 
             with next(get_db()) as db:
-                # Find user by email
                 stmt = select(User).where(User.email == email)
                 user = db.scalar(stmt)
 
                 if user and user.is_active:
-                    # Create reset token (plaintext token returned, hash stored in DB)
                     reset_token, token = PasswordResetToken.create_for_user(
                         user_id=user.id,
                         expiry_seconds=config.PASSWORD_RESET_TOKEN_EXPIRY
@@ -2144,7 +2768,6 @@ if config.AUTH_ENABLED:
                     db.add(reset_token)
                     db.commit()
 
-                    # Send email with plaintext token
                     from utils.email import send_password_reset_email
                     send_password_reset_email(user.email, user.username, token)
 
@@ -2166,16 +2789,7 @@ if config.AUTH_ENABLED:
 
     @app.route('/api/auth/password-reset', methods=['POST'])
     def password_reset():
-        """Reset password using valid token
-
-        Public endpoint - no authentication required
-
-        Request body:
-        {
-            "token": "secure-token-string",
-            "new_password": "NewPassword123!"
-        }
-        """
+        """Reset password using valid token"""
         try:
             data = validate_json_input(
                 request.get_json(),
@@ -2194,7 +2808,6 @@ if config.AUTH_ENABLED:
             from sqlalchemy import select
 
             with next(get_db()) as db:
-                # Find token by hash (plaintext never stored)
                 token_hash = PasswordResetToken.hash_token(token)
                 stmt = select(PasswordResetToken).where(PasswordResetToken.token_hash == token_hash)
                 reset_token = db.scalar(stmt)
@@ -2202,18 +2815,14 @@ if config.AUTH_ENABLED:
                 if not reset_token or not reset_token.is_valid():
                     return error_response("Invalid or expired reset token", 400)
 
-                # Validate new password
                 is_valid, error_msg = validate_password(new_password)
                 if not is_valid:
                     return error_response(error_msg, 400)
 
-                # Get user
                 user = reset_token.user
 
-                # Update password
                 user.set_password(new_password)
 
-                # Mark token as used
                 reset_token.mark_used()
 
                 db.commit()
@@ -2229,18 +2838,9 @@ if config.AUTH_ENABLED:
             return error_response("Failed to reset password", 500)
 
 
-# ========== Network Initialization ==========
 @app.route('/api/network/initialize', methods=['POST'])
 def initialize_network():
-    """
-    Initialize Batfish network with configuration snapshot
-
-    Request body:
-    {
-        "snapshot_dir": "/path/to/snapshot",
-        "snapshot_name": "optional-name"
-    }
-    """
+    """Initialize Batfish network with configuration snapshot"""
     try:
         data = request.get_json()
         if not data or ('snapshot_dir' not in data and 'snapshot_name' not in data):
@@ -2256,15 +2856,23 @@ def initialize_network():
                 **get_snapshot_request_context(),
             )
         else:
-            # Validate snapshot directory path against allowed base path
-            try:
-                safe_path = validate_path(config.ALLOWED_SNAPSHOT_PATH, snapshot_dir)
-            except ValueError as e:
-                return error_response(f"Invalid snapshot directory: {e}", 400)
+            snapshot_name = snapshot_name or os.path.basename(str(snapshot_dir or ''))
+            expected_path = snapshot_service.get_snapshot_path(snapshot_name, **get_snapshot_request_context())
+            if snapshot_dir:
+                requested_path = Path(str(snapshot_dir))
+                if not requested_path.is_absolute():
+                    requested_path = Path(snapshot_service.snapshots_dir) / requested_path
+                if requested_path.resolve() != expected_path.resolve():
+                    return error_response(
+                        "Invalid snapshot directory: it must be the store directory of the named snapshot", 400,
+                    )
+            safe_path = expected_path.resolve()
+            if not snapshot_has_config_files(safe_path):
+                return snapshot_empty_response(snapshot_name)
 
-        # Initialize network
         snapshot_name = snapshot_name or safe_path.name
         result = activate_batfish_snapshot(safe_path, snapshot_name)
+        result['parsed'] = True
 
         if config.AUTH_ENABLED:
             session['current_snapshot_name'] = result.get('snapshot')
@@ -2275,20 +2883,19 @@ def initialize_network():
         return error_response(str(e), 403)
     except FileNotFoundError as e:
         return error_response(str(e), 404)
+    except ValueError as e:
+        return error_response(str(e), 400)
     except Exception as e:
         logger.error(f"Failed to initialize network: {e}")
         return snapshot_activation_error_response(snapshot_name, e)
 
-
-# ========== Query Endpoints (22 types) ==========
 
 @app.route('/api/network/nodes', methods=['GET'])
 def get_nodes():
     """Get all node properties"""
     try:
         nodes = batfish_service.get_node_properties()
-        # Cache for 5 minutes with ETag support
-        return success_response(nodes, cache_time=300, use_etag=True)
+        return success_response(nodes)
     except RuntimeError as e:
         return error_response(str(e), 400)
     except Exception as e:
@@ -2301,8 +2908,7 @@ def get_interfaces():
     """Get all interface properties"""
     try:
         interfaces = batfish_service.get_interface_properties()
-        # Cache for 5 minutes with ETag support
-        return success_response(interfaces, cache_time=300, use_etag=True)
+        return success_response(interfaces)
     except RuntimeError as e:
         return error_response(str(e), 400)
     except Exception as e:
@@ -2315,8 +2921,7 @@ def get_routes():
     """Get all routing table entries"""
     try:
         routes = batfish_service.get_routes()
-        # Cache for 5 minutes with ETag support
-        return success_response(routes, cache_time=300, use_etag=True)
+        return success_response(routes)
     except RuntimeError as e:
         return error_response(str(e), 400)
     except Exception as e:
@@ -2534,17 +3139,7 @@ def get_vi_conversion_status():
 
 @app.route('/api/analysis/reachability', methods=['POST'])
 def get_reachability():
-    """
-    Get reachability analysis results
-
-    Optional request body:
-    {
-        "headers": {
-            "srcIps": "192.0.2.1",
-            "dstIps": "192.0.2.2"
-        }
-    }
-    """
+    """Get reachability analysis results"""
     try:
         data = request.get_json(silent=True) or {}
         headers = data.get('headers') if data else None
@@ -2562,13 +3157,7 @@ def get_reachability():
 
 @app.route('/api/analysis/route-policies', methods=['GET'])
 def get_route_policies():
-    """
-    Search route policies
-
-    Query parameters:
-    - nodes: Node regex pattern (default: ".*")
-    - action: Action to search for (default: "permit")
-    """
+    """Search route policies"""
     try:
         nodes = get_query_specifier('nodes') or '.*'
         action = request.args.get('action') or 'permit'
@@ -2610,7 +3199,6 @@ def get_snmp_communities():
         return error_response(str(e), 500)
 
 
-# ========== BGP Analysis Endpoints ==========
 @app.route('/api/bgp/edges', methods=['GET'])
 def get_bgp_edges():
     """Get BGP adjacencies/neighbors topology"""
@@ -2701,20 +3289,9 @@ def get_bgp_rib():
         return error_response(str(e), 500)
 
 
-# ========== ACL/Firewall Analysis Endpoints ==========
 @app.route('/api/acl/test-filters', methods=['POST'])
 def test_filters():
-    """
-    Test flows against ACLs/firewall rules
-
-    Request body:
-    {
-        "headers": {"srcIps": "192.0.2.1", "dstIps": "198.51.100.1", "dstPorts": "22"},
-        "nodes": "router1",
-        "filters": "ACL_NAME",
-        "startLocation": "router1[GigabitEthernet0/1]"
-    }
-    """
+    """Test flows against ACLs/firewall rules"""
     try:
         data = request.get_json() or {}
         headers = data.get('headers')
@@ -2759,17 +3336,7 @@ def get_filter_line_reachability():
 
 @app.route('/api/acl/search-filters', methods=['POST'])
 def search_filters():
-    """
-    Search for flows matching conditions (permit/deny)
-
-    Request body:
-    {
-        "headers": {"srcIps": "192.0.2.1", "dstIps": "198.51.100.1"},
-        "action": "PERMIT",
-        "filters": "ACL_NAME",
-        "nodes": "router1"
-    }
-    """
+    """Search for flows matching conditions (permit/deny)"""
     try:
         data = request.get_json() or {}
         headers = data.get('headers')
@@ -2790,16 +3357,7 @@ def search_filters():
 
 @app.route('/api/acl/find-matching-lines', methods=['POST'])
 def find_matching_filter_lines():
-    """
-    Find ACL lines matching specific flows
-
-    Request body:
-    {
-        "headers": {"srcIps": "192.0.2.1", "dstIps": "198.51.100.1"},
-        "filters": "ACL_NAME",
-        "nodes": "router1"
-    }
-    """
+    """Find ACL lines matching specific flows"""
     try:
         data = request.get_json() or {}
         headers = data.get('headers')
@@ -2817,36 +3375,9 @@ def find_matching_filter_lines():
         return error_response(str(e), 500)
 
 
-# ========== Path Analysis Endpoints ==========
 @app.route('/api/path/traceroute', methods=['POST'])
 def traceroute():
-    """
-    Virtual traceroute through network
-
-    Request body:
-    {
-        "headers": {
-            "srcIps": "192.0.2.1",
-            "dstIps": "198.51.100.1",
-            "ipProtocols": ["TCP", "UDP"],
-            "srcPorts": "1000-2000",
-            "dstPorts": "80,443",
-            "applications": ["DNS", "SSH"],
-            "icmpTypes": "0,8",
-            "icmpCodes": "0",
-            "dscps": "0",
-            "ecns": "0"
-        },
-        "startLocation": "router1[GigabitEthernet0/1]",
-        "maxTraces": 10,
-        "ignoreFilters": false
-    }
-
-    Integer header fields (srcPorts, dstPorts, icmpTypes, icmpCodes, dscps,
-    ecns, packetLengths, fragmentOffsets) take comma-separated values and
-    ranges such as "0,8" or "0-8"; an integer or a list of integers is
-    converted to that form.
-    """
+    """Virtual traceroute through network"""
     try:
         data = request.get_json() or {}
         headers = data.get('headers')
@@ -2872,31 +3403,7 @@ def traceroute():
 
 @app.route('/api/path/bidirectional-traceroute', methods=['POST'])
 def bidirectional_traceroute():
-    """
-    Bidirectional traceroute validation
-
-    Tests reachability in both directions with detailed configuration options.
-
-    Request body supports:
-    - headers: detailed packet specifications (srcIps, dstIps, ipProtocols, ports, ICMP, DSCP, ECN);
-      integer fields take comma-separated values and ranges such as "0,8" or "0-8"
-    - startLocation: starting device/interface
-    - maxTraces: limit result count
-    - ignoreFilters: bypass ACLs
-
-    Example:
-    {
-        "headers": {
-            "srcIps": "192.0.2.1",
-            "dstIps": "198.51.100.1",
-            "ipProtocols": ["TCP"],
-            "dstPorts": "80"
-        },
-        "startLocation": "router1",
-        "maxTraces": 5,
-        "ignoreFilters": false
-    }
-    """
+    """Bidirectional traceroute validation"""
     try:
         data = request.get_json() or {}
         headers = data.get('headers')
@@ -2920,19 +3427,13 @@ def bidirectional_traceroute():
         return error_response(str(e), 500)
 
 
-# ========== Aggregate Data Endpoint ==========
 @app.route('/api/network/all-data', methods=['GET'])
 def get_all_data():
-    """
-    Fetch all 22 types of Batfish data in one request
-
-    This is useful for initial data loading or full refresh
-    """
+    """Fetch all types of Batfish data in one request"""
     try:
         all_data = batfish_service.fetch_all_data()
-        # Cache for 5 minutes with ETag support - this is the main data endpoint
-        return success_response(all_data, "All network data fetched successfully",
-                              cache_time=300, use_etag=True)
+        all_data['snapshot_version'] = batfish_service.snapshot_version_info()
+        return success_response(all_data, "All network data fetched successfully")
     except RuntimeError as e:
         return error_response(str(e), 400)
     except Exception as e:
@@ -2940,7 +3441,6 @@ def get_all_data():
         return error_response(str(e), 500)
 
 
-# ========== Phase 1: Network Validation Endpoints ==========
 @app.route('/api/validation/unused-structures', methods=['GET'])
 def get_unused_structures():
     """Get unused configuration structures (defined but not referenced)"""
@@ -2969,15 +3469,7 @@ def get_undefined_references():
 
 @app.route('/api/validation/resolve-filter-specifier', methods=['POST'])
 def resolve_filter_specifier():
-    """
-    Resolve filter specifier to actual filters
-
-    Request body:
-    {
-        "filters": "ACL.*",
-        "nodes": "router1"
-    }
-    """
+    """Resolve filter specifier to actual filters"""
     try:
         data = request.get_json() or {}
         filters = normalize_batfish_specifier(data.get('filters'))
@@ -3000,14 +3492,7 @@ def resolve_filter_specifier():
 
 @app.route('/api/validation/resolve-node-specifier', methods=['POST'])
 def resolve_node_specifier():
-    """
-    Resolve node specifier to actual nodes
-
-    Request body:
-    {
-        "nodes": "/router.*/"
-    }
-    """
+    """Resolve node specifier to actual nodes"""
     try:
         data = request.get_json() or {}
         nodes = normalize_batfish_specifier(data.get('nodes'))
@@ -3026,15 +3511,7 @@ def resolve_node_specifier():
 
 @app.route('/api/validation/resolve-interface-specifier', methods=['POST'])
 def resolve_interface_specifier():
-    """
-    Resolve interface specifier to actual interfaces
-
-    Request body:
-    {
-        "interfaces": "GigabitEthernet.*",
-        "nodes": "router1"
-    }
-    """
+    """Resolve interface specifier to actual interfaces"""
     try:
         data = request.get_json() or {}
         interfaces = normalize_batfish_specifier(data.get('interfaces'))
@@ -3111,15 +3588,7 @@ def get_subnet_multipath_consistency():
 
 @app.route('/api/validation/compare-filters', methods=['POST'])
 def compare_filters():
-    """
-    Compare filters/ACLs for equivalence
-
-    Request body:
-    {
-        "filters": "ACL1,ACL2",
-        "nodes": "router1,router2"
-    }
-    """
+    """Compare filters/ACLs for equivalence"""
     try:
         data = request.get_json() or {}
         filters = normalize_batfish_specifier(data.get('filters'))
@@ -3142,6 +3611,8 @@ def compare_filters():
             snapshot=snapshot,
         )
         return success_response(results)
+    except BatfishQueryError as e:
+        return batfish_query_error_response(e)
     except RuntimeError as e:
         return error_response(str(e), 400)
     except PermissionError:
@@ -3153,7 +3624,6 @@ def compare_filters():
         return error_response(str(e), 500)
 
 
-# ========== High Availability Endpoints ==========
 @app.route('/api/ha/vrrp-properties', methods=['GET'])
 def get_vrrp_properties():
     """Get VRRP (Virtual Router Redundancy Protocol) properties"""
@@ -3221,7 +3691,6 @@ def get_switching_properties():
         return error_response(str(e), 500)
 
 
-# ========== Phase 2: EVPN/VXLAN Endpoints ==========
 @app.route('/api/protocols/evpn/rib', methods=['GET'])
 def get_evpn_rib():
     """Get EVPN Routing Information Base"""
@@ -3261,7 +3730,6 @@ def get_vxlan_vni_properties():
         return error_response(str(e), 500)
 
 
-# ========== EIGRP Protocol Endpoints ==========
 @app.route('/api/protocols/eigrp/edges', methods=['GET'])
 def get_eigrp_edges():
     """Get EIGRP neighbor relationships/topology"""
@@ -3288,7 +3756,6 @@ def get_eigrp_interface_configuration():
         return error_response(str(e), 500)
 
 
-# ========== IS-IS Protocol Endpoints ==========
 @app.route('/api/protocols/isis/edges', methods=['GET'])
 def get_isis_edges():
     """Get IS-IS neighbor relationships/topology"""
@@ -3325,7 +3792,6 @@ def get_isis_loopback_interfaces():
         return error_response(str(e), 500)
 
 
-# ========== BFD Protocol Endpoints ==========
 @app.route('/api/protocols/bfd-session-status', methods=['GET'])
 def get_bfd_session_status():
     """Get BFD session status"""
@@ -3339,7 +3805,6 @@ def get_bfd_session_status():
         return error_response(str(e), 500)
 
 
-# ========== Topology Endpoints ==========
 @app.route('/api/topology/layer1-edges', methods=['GET'])
 def get_layer1_edges():
     """Get Layer 1 physical topology edges"""
@@ -3476,14 +3941,7 @@ def get_ip_space_assignment():
 
 @app.route('/api/topology/lpm-routes', methods=['POST'])
 def get_lpm_routes():
-    """
-    Get Longest Prefix Match routes for an IP
-
-    Request body:
-    {
-        "ip": "192.0.2.1"
-    }
-    """
+    """Get Longest Prefix Match routes for an IP"""
     try:
         data = request.get_json() or {}
         ip = data.get('ip')
@@ -3504,15 +3962,7 @@ def get_lpm_routes():
 
 @app.route('/api/topology/prefix-tracer', methods=['POST'])
 def get_prefix_tracer():
-    """
-    Trace prefix propagation through network
-
-    Request body:
-    {
-        "prefix": "192.0.2.0/24",
-        "nodes": "router1"
-    }
-    """
+    """Trace prefix propagation through network"""
     try:
         data = request.get_json() or {}
         prefix = data.get('prefix')
@@ -3530,25 +3980,9 @@ def get_prefix_tracer():
         return error_response(str(e), 500)
 
 
-# ========== Phase 3: Advanced Features Endpoints ==========
 @app.route('/api/advanced/differential-reachability', methods=['POST'])
 def get_differential_reachability():
-    """
-    Get differential reachability analysis
-
-    Request body:
-    {
-        "reference_snapshot": "baseline-snapshot",
-        "snapshot": "candidate-snapshot",
-        "headers": {
-            "srcIps": "192.0.2.1",
-            "dstIps": "198.51.100.1"
-        },
-        "pathConstraints": {
-            "transitLocations": "router1"
-        }
-    }
-    """
+    """Get differential reachability analysis"""
     try:
         data = request.get_json() or {}
         headers = data.get('headers')
@@ -3564,7 +3998,7 @@ def get_differential_reachability():
             return error_response("Missing required 'reference_snapshot' for differential reachability", 400)
 
         reference_snapshot_path = require_snapshot_access(reference_snapshot)
-        snapshot_path = require_snapshot_access(snapshot)
+        snapshot_path = require_snapshot_access(snapshot or batfish_service.current_snapshot_name)
 
         results = batfish_service.get_differential_reachability(
             reference_snapshot=reference_snapshot,
@@ -3598,17 +4032,7 @@ def get_differential_reachability():
 
 @app.route('/api/advanced/bidirectional-reachability', methods=['POST'])
 def get_bidirectional_reachability():
-    """
-    Get bidirectional reachability analysis
-
-    Request body:
-    {
-        "headers": {
-            "srcIps": "192.0.2.1",
-            "dstIps": "198.51.100.1"
-        }
-    }
-    """
+    """Get bidirectional reachability analysis"""
     try:
         data = request.get_json() or {}
         headers = data.get('headers')
@@ -3635,14 +4059,7 @@ def get_bidirectional_reachability():
 
 @app.route('/api/advanced/resolve-location-specifier', methods=['POST'])
 def resolve_location_specifier():
-    """
-    Resolve location specifier to actual locations
-
-    Request body:
-    {
-        "locations": "router1[GigabitEthernet0/1]"
-    }
-    """
+    """Resolve location specifier to actual locations"""
     try:
         data = request.get_json() or {}
         locations = data.get('locations')
@@ -3661,14 +4078,7 @@ def resolve_location_specifier():
 
 @app.route('/api/advanced/resolve-ip-specifier', methods=['POST'])
 def resolve_ip_specifier():
-    """
-    Resolve IP specifier to actual IPs
-
-    Request body:
-    {
-        "ips": "192.0.2.0/24"
-    }
-    """
+    """Resolve IP specifier to actual IPs"""
     try:
         data = request.get_json() or {}
         ips = data.get('ips')
@@ -3687,14 +4097,7 @@ def resolve_ip_specifier():
 
 @app.route('/api/advanced/resolve-ips-of-location-specifier', methods=['POST'])
 def resolve_ips_of_location_specifier():
-    """
-    Resolve location specifier to source IP spaces.
-
-    Request body:
-    {
-        "locations": "@enter(router1[GigabitEthernet0/1])"
-    }
-    """
+    """Resolve location specifier to source IP spaces."""
     try:
         data = request.get_json() or {}
         locations = data.get('locations')
@@ -3749,12 +4152,7 @@ def get_a10_virtual_server_configuration():
 
 @app.route('/api/advanced/route-policies', methods=['GET'])
 def get_route_policies_advanced():
-    """
-    Get route policies/maps configuration
-
-    Query parameters:
-    - nodes: Node regex pattern (optional)
-    """
+    """Get route policies/maps configuration"""
     try:
         nodes = request.args.get('nodes')
 
@@ -3769,28 +4167,7 @@ def get_route_policies_advanced():
 
 @app.route('/api/advanced/test-route-policies', methods=['POST'])
 def test_route_policies():
-    """
-    Test route policies against input routes
-
-    Request body:
-    {
-        "direction": "in",
-        "inputRoutes": [{
-            "network": "192.0.2.0/24",
-            "originatorIp": "0.0.0.0",
-            "originType": "igp",
-            "protocol": "bgp",
-            "nextHopIp": "198.51.100.1"
-        }],
-        "nodes": "router1",
-        "policies": "POLICY_NAME"
-    }
-
-    direction is "in" or "out" (case-insensitive). inputRoutes is one route
-    object or a list of them; network, originatorIp, originType and protocol
-    are required, and asPath, communities, localPreference, metric,
-    nextHopIp, sourceProtocol, tag and weight are optional.
-    """
+    """Test route policies against input routes"""
     try:
         data = request.get_json() or {}
         direction = data.get('direction')
@@ -3987,12 +4364,7 @@ def get_vi_model():
 
 @app.route('/api/advanced/search-route-policies', methods=['POST'])
 def advanced_search_route_policies():
-    """Search route policies
-
-    pathOption is SINGLE, PER_PATH or NON_OVERLAP (case-insensitive). perPath
-    is the deprecated boolean form of PER_PATH; perPath true together with a
-    pathOption is rejected, and perPath false is dropped when pathOption is set.
-    """
+    """Search route policies"""
     try:
         data = request.get_json() or {}
         nodes = normalize_batfish_specifier(data.get('nodes', '.*'))
@@ -4061,7 +4433,6 @@ def reduce_reachability():
         return error_response(str(e), 500)
 
 
-# ========== Snapshot Management Endpoints ==========
 @app.route('/api/snapshots', methods=['GET'])
 def list_snapshots():
     """List all available snapshots"""
@@ -4082,14 +4453,7 @@ def list_snapshots():
 
 @app.route('/api/snapshots', methods=['POST'])
 def create_snapshot():
-    """
-    Create a new empty snapshot
-
-    Request body:
-    {
-        "name": "snapshot-name"
-    }
-    """
+    """Create a new empty snapshot"""
     try:
         data = request.get_json()
         if not data or 'name' not in data:
@@ -4148,7 +4512,13 @@ def delete_snapshot(name: str):
         # Serialized with Batfish requests so that an activation in progress
         # cannot leave the deleted snapshot active.
         with batfish_request_lock:
+            snapshot_path = snapshot_service.get_snapshot_path(name, **get_snapshot_request_context())
+            purged_snapshot_id = resolve_snapshot_id_for_history_purge(snapshot_path)
+            owner_scope = request_owner_scope()
             snapshot_service.delete_snapshot(name, **get_snapshot_request_context())
+            snapshot_state_service.drop_name_marks(name)
+            if purged_snapshot_id is not None:
+                snapshot_history_service.remove_staging_copy(purged_snapshot_id, snapshot_path.name)
 
             if config.AUTH_ENABLED and session.get('current_snapshot_name') == name:
                 session.pop('current_snapshot_name', None)
@@ -4159,6 +4529,16 @@ def delete_snapshot(name: str):
             ):
                 batfish_service.clear_active_snapshot()
                 logger.info("Cleared the active Batfish snapshot after deletion: snapshot=%s", name)
+                if not config.AUTH_ENABLED:
+                    snapshot_state_service.clear_active_snapshot_file()
+
+            if not config.AUTH_ENABLED:
+                snapshot_state_service.clear_active_snapshot_file(snapshot_path.name)
+
+        if purged_snapshot_id is not None and snapshot_history_service.delete_all_for_snapshot(
+            purged_snapshot_id, snapshot_path.name, owner_scope, False,
+        ):
+            snapshot_state_service.clear_versioning_unavailable(snapshot_state_service.id_key(purged_snapshot_id))
 
         return success_response({"name": name}, "Snapshot deleted successfully")
 
@@ -4533,23 +4913,60 @@ def validate_snapshot_artifacts(name: str):
         return error_response(str(e), 500)
 
 
+def activate_if_stale(name: str, snapshot_path: Path) -> tuple | None:
+    """Answer an if_stale activation without parsing when Batfish holds the working content, or answer a
+    negative-cached failure of that content after deselecting the snapshot; None parses."""
+    try:
+        state = snapshot_state_service.evaluate_snapshot(snapshot_path)
+        working_hash = state.content_hash
+        snapshot_id = state.snapshot_id
+    except Exception:
+        working_hash = None
+        snapshot_id = None
+    if working_hash is None:
+        return None
+
+    holds_working_content = (
+        batfish_service._initialized
+        and batfish_service.current_snapshot_name == name
+        and batfish_service.loaded_content_hash == working_hash
+    ) or live_marker_matches(name, working_hash)
+    if holds_working_content and batfish_service.activation_payload is not None:
+        if config.AUTH_ENABLED:
+            session['current_snapshot_name'] = name
+        return success_response(
+            {**batfish_service.activation_payload, 'parsed': False}, f"Snapshot '{name}' activated successfully",
+        )
+
+    failure = batfish_service.activation_failures.get(activation_failure_key(snapshot_id, name, working_hash))
+    if failure is not None:
+        clear_current_snapshot_after_failure(name)
+        return snapshot_activation_error_response(name, failure)
+    return None
+
+
 @app.route('/api/snapshots/<name>/activate', methods=['POST'])
 def activate_snapshot(name: str):
-    """
-    Activate a snapshot (initialize Batfish with this snapshot)
-    """
+    """Activate a snapshot (initialize Batfish with this snapshot)"""
+    data = read_json_object_body(required=False)
+    if data is None:
+        return invalid_json_body_response()
+    if_stale = data.get('if_stale', False)
+    if not isinstance(if_stale, bool):
+        return validation_error_response(RequestValidationError("'if_stale' must be a boolean", field="if_stale"))
+
     try:
         snapshot_path = snapshot_service.get_snapshot_path(name, **get_snapshot_request_context())
         if not snapshot_has_config_files(snapshot_path):
-            return error_response(
-                f"Snapshot '{name}' has no configuration files to analyze",
-                400,
-                code="snapshot_empty",
-                details={"snapshot": name},
-                hints=["Upload at least one device configuration file to the snapshot, then activate it again."],
-            )
+            return snapshot_empty_response(name)
+
+        if if_stale:
+            stale_response = activate_if_stale(name, snapshot_path)
+            if stale_response is not None:
+                return stale_response
 
         result = activate_batfish_snapshot(snapshot_path, name)
+        result['parsed'] = True
 
         if config.AUTH_ENABLED:
             session['current_snapshot_name'] = name
@@ -4569,21 +4986,570 @@ def activate_snapshot(name: str):
         return snapshot_activation_error_response(name, e)
 
 
-# ========== Snapshot Comparison Endpoint ==========
+VERSION_LIST_DEFAULT_LIMIT = 50
+VERSION_LIST_MAX_LIMIT = 200
+VERSION_LIST_MAX_OFFSET = 2 ** 63 - 1
+VERSION_MESSAGE_MAX_LENGTH = 500
+VERSION_DELETE_MODES = ('all', 'oldest', 'newest')
+_DECIMAL_DIGITS_PATTERN = re.compile(r'[0-9]+')
+
+
+def versioning_unavailable_response(reason: str) -> tuple:
+    return error_response(
+        "Snapshot versioning is unavailable",
+        503,
+        code="versioning_unavailable",
+        details={"reason": reason},
+    )
+
+
+def snapshot_authorization_error_response(error: Exception) -> tuple:
+    """Map the authorization step of a version route to 403, 404 snapshot_not_found or 400."""
+    if isinstance(error, PermissionError):
+        return error_response(str(error), 403)
+    if isinstance(error, FileNotFoundError):
+        return error_response(str(error), 404, code="snapshot_not_found")
+    return error_response(str(error), 400)
+
+
+def versioning_error_response(error: Exception, action: str) -> tuple:
+    """Map a failure after the authorization step of a version route to its response."""
+    if isinstance(error, VersioningUnavailableError):
+        return versioning_unavailable_response(error.reason)
+    if isinstance(error, VersionNotFoundError):
+        return error_response("Version not found for this snapshot", 404, code="version_not_found")
+    if isinstance(error, NamespaceNotFoundError):
+        return error_response("Namespace not found", 404, code="namespace_not_found")
+    if isinstance(error, VersionUnchangedError):
+        return error_response(str(error), 409, code="version_unchanged")
+    if isinstance(error, VersionConflictError):
+        return error_response(str(error), 409, code="version_conflict")
+    if is_database_error(error, db_manager):
+        return versioning_unavailable_response('database')
+    log_failure_cause(f"Failed to {action}", error.__cause__ or error)
+    return error_response(f"Failed to {action}", 500)
+
+
+def log_failure_cause(failure: str, cause: BaseException) -> None:
+    """Log a failure with its cause's type, and with the cause's text unless it is a database error."""
+    if is_database_error(cause, db_manager):
+        logger.error("%s: %s", failure, type(cause).__name__)
+    else:
+        logger.error("%s: %s: %s", failure, type(cause).__name__, cause)
+
+
+def restore_error_response(error: Exception) -> tuple:
+    """Map a failure of the restore route after its authorization step; unmapped failures are restore_failed."""
+    if isinstance(error, PathClashError):
+        return error_response(
+            str(error),
+            409,
+            code="version_conflict",
+            details={"reason": "path_clash", "path": error.path},
+        )
+    if isinstance(error, (VersioningUnavailableError, VersionNotFoundError, VersionConflictError)) or (
+        is_database_error(error, db_manager)
+    ):
+        return versioning_error_response(error, "restore snapshot version")
+    log_failure_cause("Failed to restore snapshot version", error.__cause__ or error)
+    return error_response("Failed to restore snapshot version", 500, code="restore_failed")
+
+
+def batfish_loaded_state(snapshot_name: str, working_hash: str | None) -> dict[str, Any]:
+    """Report what Batfish has loaded for the snapshot in the requester's network context."""
+    network_name = get_batfish_request_network_name()
+    context_matches = (
+        batfish_service._initialized
+        and batfish_service.current_snapshot_name == snapshot_name
+        and batfish_service.network_name == network_name
+    )
+    live_marker = getattr(batfish_service, 'live_loaded', None)
+    loaded_live = bool(
+        batfish_service._initialized
+        and live_marker is not None
+        and working_hash is not None
+        and tuple(live_marker[:3]) == (network_name, snapshot_name, working_hash)
+    )
+    return {
+        'loaded_content_hash': getattr(batfish_service, 'loaded_content_hash', None) if context_matches else None,
+        'loaded_batfish_version': (
+            getattr(batfish_service, 'loaded_batfish_version', None) if context_matches else None
+        ),
+        'loaded_live': loaded_live,
+    }
+
+
+def parse_version_list_parameter(name: str, default: int, minimum: int, maximum: int | None = None) -> int:
+    raw_value = request.args.get(name)
+    if raw_value is None:
+        return default
+    if not _DECIMAL_DIGITS_PATTERN.fullmatch(raw_value):
+        raise RequestValidationError(f"'{name}' must be a non-negative integer", field=name)
+    digits = raw_value.lstrip('0') or '0'
+    if len(digits) > len(str(VERSION_LIST_MAX_OFFSET)):
+        value = VERSION_LIST_MAX_OFFSET + 1
+    else:
+        value = int(digits)
+    if value < minimum or (maximum is not None and value > maximum):
+        bounds = f"between {minimum} and {maximum}" if maximum is not None else f"at least {minimum}"
+        raise RequestValidationError(f"'{name}' must be {bounds}", field=name)
+    return value
+
+
+def parse_version_message(value: Any) -> str:
+    if not isinstance(value, str):
+        raise RequestValidationError("'message' must be a string", field="message")
+    message = value.strip()
+    if not message:
+        raise RequestValidationError("'message' must not be empty", field="message")
+    if len(message) > VERSION_MESSAGE_MAX_LENGTH:
+        raise RequestValidationError(
+            f"'message' must be at most {VERSION_MESSAGE_MAX_LENGTH} characters", field="message"
+        )
+    return message
+
+
+def parse_expected_head(data: dict[str, Any]) -> Any:
+    if 'expected_head' not in data:
+        return EXPECTED_HEAD_UNSET
+    value = data['expected_head']
+    if value is None or isinstance(value, str):
+        return value
+    raise RequestValidationError("'expected_head' must be a string or null", field="expected_head")
+
+
+def read_json_object_body(required: bool) -> dict[str, Any] | None:
+    """Return the request body as a JSON object ({} for an optional empty body), or None when it is not one."""
+    if not request.get_data(cache=True).strip():
+        return None if required else {}
+    data = request.get_json(silent=True)
+    return data if isinstance(data, dict) else None
+
+
+def invalid_json_body_response() -> tuple:
+    return error_response(
+        "Request body must be a JSON object",
+        400,
+        code="invalid_json",
+        hints=["Send a JSON object with Content-Type: application/json."],
+    )
+
+
+def parse_json_integer(data: dict[str, Any], name: str, minimum: int) -> int | None:
+    """Return an optional JSON integer field of at least minimum; booleans, null and other types are rejected."""
+    if name not in data:
+        return None
+    value = data[name]
+    if isinstance(value, bool) or not isinstance(value, int) or value < minimum:
+        kind = "a positive" if minimum > 0 else "a non-negative"
+        raise RequestValidationError(f"'{name}' must be {kind} integer", field=name)
+    return value
+
+
+def parse_required_query_string(name: str) -> str:
+    value = request.args.get(name)
+    if not value:
+        raise RequestValidationError(f"'{name}' is required", field=name)
+    return value
+
+
+def parse_json_string(data: dict[str, Any], name: str) -> str | None:
+    if name not in data:
+        return None
+    value = data[name]
+    if not isinstance(value, str):
+        raise RequestValidationError(f"'{name}' must be a string", field=name)
+    return value
+
+
+def current_namespace_refusal_response() -> tuple:
+    return validation_error_response(
+        RequestValidationError("The current namespace cannot be purged", field="namespace")
+    )
+
+
+def resolve_snapshot_id_for_history_purge(snapshot_path: Path) -> str | None:
+    """Resolve the snapshot_id whose history a snapshot deletion purges, or None when the purge is skipped."""
+    try:
+        return snapshot_state_service.resolve_available_snapshot(snapshot_path, allowed_reason='missing_objects')
+    except VersioningUnavailableError as e:
+        cause = f"snapshot versioning is unavailable ({e.reason})"
+    except Exception as e:
+        cause = f"its identity could not be resolved ({type(e).__name__})"
+    logger.warning(
+        "Snapshot %s: its history is not purged with the snapshot because %s; the orphan scan and the admin "
+        "purge handle the rows",
+        snapshot_path.name,
+        cause,
+    )
+    return None
+
+
+def current_version_author() -> dict[str, Any] | None:
+    if not config.AUTH_ENABLED:
+        return None
+    try:
+        user_id = snapshot_service._normalize_owner_user_id(getattr(request, 'user_id', None))
+    except ValueError:
+        user_id = None
+    return {'user_id': user_id, 'username': getattr(request, 'username', None)}
+
+
+@app.route('/api/snapshots/<name>/version-state', methods=['GET'])
+def get_snapshot_version_state(name: str):
+    """Report the snapshot's working content hash, head version and loaded Batfish state."""
+    try:
+        state = snapshot_state_service.get_state(name, get_snapshot_request_context())
+    except (PermissionError, FileNotFoundError, ValueError) as e:
+        return snapshot_authorization_error_response(e)
+    except Exception as e:
+        return versioning_error_response(e, "evaluate snapshot version state")
+
+    return success_response({
+        'snapshot_id': state.snapshot_id,
+        'content_hash': state.content_hash,
+        **batfish_loaded_state(state.snapshot_name, state.content_hash),
+        'result_cache_enabled': snapshot_state_service.result_cache_enabled,
+        'head': state.head,
+        'uncommitted': state.uncommitted,
+        'pending_external': state.pending_external,
+        'external_settling': state.external_settling,
+        'restored_from': state.restored_from,
+    })
+
+
+@app.route('/api/snapshots/<name>/versions', methods=['GET'])
+def list_snapshot_versions(name: str):
+    """List a snapshot's versions, newest first."""
+    try:
+        limit = parse_version_list_parameter('limit', VERSION_LIST_DEFAULT_LIMIT, 1, VERSION_LIST_MAX_LIMIT)
+        offset = min(parse_version_list_parameter('offset', 0, 0), VERSION_LIST_MAX_OFFSET)
+    except RequestValidationError as e:
+        return validation_error_response(e)
+
+    try:
+        snapshot_path = snapshot_service.get_snapshot_path(name, **get_snapshot_request_context())
+    except (PermissionError, FileNotFoundError, ValueError) as e:
+        return snapshot_authorization_error_response(e)
+
+    try:
+        snapshot_id = snapshot_state_service.resolve_available_snapshot(snapshot_path)
+        versions = snapshot_history_service.list_versions(snapshot_id, limit=limit, offset=offset)
+    except Exception as e:
+        return versioning_error_response(e, "list snapshot versions")
+    return success_response(versions)
+
+
+@app.route('/api/snapshots/<name>/versions', methods=['POST'])
+def commit_snapshot_version(name: str):
+    """Commit the snapshot's working tree as a new version."""
+    data = read_json_object_body(required=True)
+    if data is None:
+        return invalid_json_body_response()
+    try:
+        message = parse_version_message(data.get('message'))
+        expected_head = parse_expected_head(data)
+    except RequestValidationError as e:
+        return validation_error_response(e)
+
+    try:
+        snapshot_path = snapshot_service.get_snapshot_path(name, **get_snapshot_request_context())
+    except (PermissionError, FileNotFoundError, ValueError) as e:
+        return snapshot_authorization_error_response(e)
+
+    try:
+        snapshot_id = snapshot_state_service.resolve_available_snapshot(snapshot_path)
+        version = snapshot_history_service.commit(
+            snapshot_id,
+            snapshot_path,
+            message,
+            author=current_version_author(),
+            expected_head=expected_head,
+        )
+    except Exception as e:
+        return versioning_error_response(e, "commit snapshot version")
+
+    logger.info("Committed snapshot version: snapshot=%s seq=%s files=%s", name, version['seq'], version['file_count'])
+    return success_response(version, "Snapshot version created", status_code=201)
+
+
+@app.route('/api/snapshots/<name>/versions/<version_id>', methods=['GET'])
+def get_snapshot_version(name: str, version_id: str):
+    """Get one version of a snapshot with its file manifest."""
+    try:
+        snapshot_path = snapshot_service.get_snapshot_path(name, **get_snapshot_request_context())
+    except (PermissionError, FileNotFoundError, ValueError) as e:
+        return snapshot_authorization_error_response(e)
+
+    try:
+        snapshot_id = snapshot_state_service.resolve_available_snapshot(snapshot_path)
+        version = snapshot_history_service.get_version(snapshot_id, version_id)
+    except Exception as e:
+        return versioning_error_response(e, "get snapshot version")
+    return success_response(version)
+
+
+@app.route('/api/snapshots/<name>/versions/<version_id>/diff', methods=['GET'])
+def get_snapshot_version_diff(name: str, version_id: str):
+    """List the files changed from a version to another version of the snapshot or to the working tree."""
+    try:
+        against = parse_required_query_string('against')
+    except RequestValidationError as e:
+        return validation_error_response(e)
+
+    try:
+        snapshot_path = snapshot_service.get_snapshot_path(name, **get_snapshot_request_context())
+    except (PermissionError, FileNotFoundError, ValueError) as e:
+        return snapshot_authorization_error_response(e)
+
+    try:
+        snapshot_id = snapshot_state_service.resolve_available_snapshot(snapshot_path)
+        diff = snapshot_history_service.diff_summary(snapshot_id, snapshot_path, version_id, against)
+    except Exception as e:
+        return versioning_error_response(e, "diff snapshot version")
+    return success_response(diff)
+
+
+@app.route('/api/snapshots/<name>/versions/<version_id>/diff/file', methods=['GET'])
+def get_snapshot_version_file_diff(name: str, version_id: str):
+    """Return one file's unified diff hunks from a version to another version or to the working tree."""
+    try:
+        against = parse_required_query_string('against')
+        path = parse_required_query_string('path')
+    except RequestValidationError as e:
+        return validation_error_response(e)
+
+    try:
+        snapshot_path = snapshot_service.get_snapshot_path(name, **get_snapshot_request_context())
+    except (PermissionError, FileNotFoundError, ValueError) as e:
+        return snapshot_authorization_error_response(e)
+
+    try:
+        snapshot_id = snapshot_state_service.resolve_available_snapshot(snapshot_path)
+        diff = snapshot_history_service.diff_file(snapshot_id, snapshot_path, version_id, against, path)
+    except InvalidDiffPathError as e:
+        return validation_error_response(RequestValidationError(str(e), field='path'))
+    except Exception as e:
+        return versioning_error_response(e, "diff snapshot version file")
+    return success_response(diff)
+
+
+@app.route('/api/snapshots/<name>/versions/<version_id>/restore', methods=['POST'])
+def restore_snapshot_version(name: str, version_id: str):
+    """Write a version's files into the snapshot's working tree, leaving the change uncommitted."""
+    data = read_json_object_body(required=False)
+    if data is None:
+        return invalid_json_body_response()
+    try:
+        expected_working_hash = parse_json_string(data, 'expected_working_hash')
+    except RequestValidationError as e:
+        return validation_error_response(e)
+
+    try:
+        snapshot_path = snapshot_service.get_snapshot_path(name, **get_snapshot_request_context())
+    except (PermissionError, FileNotFoundError, ValueError) as e:
+        return snapshot_authorization_error_response(e)
+
+    try:
+        snapshot_id = snapshot_state_service.resolve_available_snapshot(snapshot_path)
+        result = snapshot_history_service.restore(snapshot_id, snapshot_path, version_id, expected_working_hash)
+    except Exception as e:
+        return restore_error_response(e)
+
+    logger.info("Restored snapshot version: snapshot=%s seq=%s", name, result['restored_from']['seq'])
+    return success_response(result, "Snapshot version restored")
+
+
+@app.route('/api/snapshots/<name>/versions/<version_id>', methods=['DELETE'])
+def delete_snapshot_version(name: str, version_id: str):
+    """Delete one version of a snapshot."""
+    data = read_json_object_body(required=False)
+    if data is None:
+        return invalid_json_body_response()
+    try:
+        expected_head = parse_expected_head(data)
+    except RequestValidationError as e:
+        return validation_error_response(e)
+
+    try:
+        snapshot_path = snapshot_service.get_snapshot_path(name, **get_snapshot_request_context())
+    except (PermissionError, FileNotFoundError, ValueError) as e:
+        return snapshot_authorization_error_response(e)
+
+    try:
+        snapshot_id = snapshot_state_service.resolve_available_snapshot(snapshot_path)
+        result = snapshot_history_service.delete_versions(
+            snapshot_id, snapshot_path, 'single', version_id=version_id, expected_head=expected_head,
+            owner_scope=request_owner_scope(),
+        )
+    except Exception as e:
+        return versioning_error_response(e, "delete snapshot version")
+
+    logger.info("Deleted snapshot version: snapshot=%s deleted=%s", name, result['deleted'])
+    return success_response(result, "Snapshot version deleted")
+
+
+@app.route('/api/snapshots/<name>/versions', methods=['DELETE'])
+def delete_snapshot_versions(name: str):
+    """Delete all, the oldest or the newest versions of a snapshot."""
+    data = read_json_object_body(required=True)
+    if data is None:
+        return invalid_json_body_response()
+    try:
+        mode = data.get('mode')
+        if not isinstance(mode, str) or mode not in VERSION_DELETE_MODES:
+            raise RequestValidationError("'mode' must be one of all, oldest, newest", field="mode")
+        count = parse_json_integer(data, 'count', 1)
+        expected_total = parse_json_integer(data, 'expected_total', 0)
+        expected_head = parse_expected_head(data)
+        expected_unavailable = parse_json_string(data, 'expected_unavailable')
+        if mode != 'all' and count is None:
+            raise RequestValidationError("'count' is required for the oldest and newest modes", field="count")
+    except RequestValidationError as e:
+        return validation_error_response(e)
+
+    try:
+        snapshot_path = snapshot_service.get_snapshot_path(name, **get_snapshot_request_context())
+    except (PermissionError, FileNotFoundError, ValueError) as e:
+        return snapshot_authorization_error_response(e)
+
+    try:
+        snapshot_id = snapshot_state_service.resolve_available_snapshot(
+            snapshot_path, allowed_reason='missing_objects' if mode == 'all' else None,
+        )
+        result = snapshot_history_service.delete_versions(
+            snapshot_id,
+            snapshot_path,
+            mode,
+            count=None if mode == 'all' else count,
+            expected_head=expected_head,
+            expected_total=None if mode == 'all' else expected_total,
+            expected_unavailable=expected_unavailable,
+            owner_scope=request_owner_scope(),
+        )
+    except Exception as e:
+        return versioning_error_response(e, "delete snapshot versions")
+
+    logger.info("Deleted snapshot versions: snapshot=%s mode=%s deleted=%s", name, mode, result['deleted'])
+    return success_response(result, "Snapshot versions deleted")
+
+
+@app.route('/api/snapshots/<name>/cache/clear', methods=['POST'])
+def clear_snapshot_result_cache(name: str):
+    """Invalidate the snapshot's cached results of its working content, removing them unless another snapshot
+    shares that content, and request a re-parse."""
+    data = read_json_object_body(required=False)
+    if data is None:
+        return invalid_json_body_response()
+
+    try:
+        snapshot_path = snapshot_service.get_snapshot_path(name, **get_snapshot_request_context())
+    except (PermissionError, FileNotFoundError, ValueError) as e:
+        return snapshot_authorization_error_response(e)
+
+    try:
+        snapshot_state_service.resolve_available_snapshot(snapshot_path)
+    except Exception as e:
+        return versioning_error_response(e, "clear cached results")
+    if not snapshot_state_service.result_cache_enabled:
+        return success_response({'cleared': False}, "The result cache is disabled")
+
+    try:
+        state = snapshot_state_service.evaluate_snapshot(snapshot_path)
+        if state.content_hash is None:
+            snapshot_state_service.request_reparse(state.snapshot_id)
+            return success_response({'cleared': False}, "Snapshot content is not settled yet; it is re-parsed")
+        owner_scope = request_owner_scope()
+        if owner_scope is None:
+            raise VersioningUnavailableError('database')
+        shared = snapshot_history_service.working_hash_shared(state.snapshot_id, state.content_hash, owner_scope)
+        snapshot_state_service.record_cache_clear(state.snapshot_id)
+        result_cache.clear_snapshot_cache(state.content_hash, owner_scope, keep_if_shared=shared)
+    except Exception as e:
+        return versioning_error_response(e, "clear cached results")
+
+    logger.info("Cleared cached results: snapshot=%s", name)
+    return success_response({'cleared': True}, "Cached results cleared")
+
+
+@app.route('/api/cache/stats', methods=['GET'])
+@require_role('admin')
+def get_result_cache_stats():
+    """Report result cache entry and byte counts."""
+    try:
+        return success_response(result_cache.stats())
+    except Exception as e:
+        logger.warning("Result cache statistics are unavailable (%s)", type(e).__name__)
+        return error_response("Result cache statistics are unavailable", 500)
+
+
+@app.route('/api/admin/snapshot-history/orphans', methods=['DELETE'])
+@require_role('admin')
+def purge_snapshot_history_orphans():
+    """Purge orphaned history of the current namespace, or every row of a detached namespace."""
+    data = read_json_object_body(required=True)
+    if data is None:
+        return invalid_json_body_response()
+    try:
+        older_than_days = parse_json_integer(data, 'older_than_days', 0)
+        namespace = parse_json_string(data, 'namespace')
+        confirm = parse_json_string(data, 'confirm')
+        if namespace is None:
+            if older_than_days is None:
+                raise RequestValidationError(
+                    "'older_than_days' is required without 'namespace'", field="older_than_days",
+                )
+        else:
+            if not NAMESPACE_PATTERN.fullmatch(namespace):
+                raise RequestValidationError("'namespace' must match ^[A-Za-z0-9_-]{1,64}$", field="namespace")
+            if confirm != namespace:
+                raise RequestValidationError("'confirm' must repeat 'namespace'", field="confirm")
+    except RequestValidationError as e:
+        return validation_error_response(e)
+
+    reason = snapshot_state_service.global_unavailable_reason()
+    if reason:
+        return versioning_unavailable_response(reason)
+    if namespace is not None and namespace == snapshot_state_service.namespace:
+        return current_namespace_refusal_response()
+
+    try:
+        if namespace is None:
+            result = snapshot_history_service.purge_orphans(older_than_days)
+        else:
+            purged, last_seen_at = snapshot_history_service.purge_namespace(namespace)
+            result = {'purged': purged, 'last_seen_at': last_seen_at}
+    except CurrentNamespaceError:
+        return current_namespace_refusal_response()
+    except Exception as e:
+        return versioning_error_response(e, "purge snapshot history")
+
+    logger.info(
+        "Purged snapshot history: namespace=%s mode=%s purged=%s",
+        namespace or snapshot_state_service.namespace,
+        'namespace' if namespace is not None else 'orphans',
+        result['purged'],
+    )
+    return success_response(result, "Snapshot history purged")
+
+
+@app.route('/api/admin/snapshot-history/namespaces', methods=['GET'])
+@require_role('admin')
+def list_snapshot_history_namespaces():
+    """List every namespace that holds snapshot history in this database."""
+    reason = snapshot_state_service.global_unavailable_reason()
+    if reason:
+        return versioning_unavailable_response(reason)
+    try:
+        result = snapshot_history_service.list_namespaces()
+    except Exception as e:
+        return versioning_error_response(e, "list snapshot history namespaces")
+    return success_response(result)
+
+
 @app.route('/api/snapshots/compare', methods=['POST'])
 def compare_snapshots():
-    """
-    Compare two network snapshots
-
-    Request body:
-        {
-            "base_snapshot": "snapshot1",
-            "comparison_snapshot": "snapshot2"
-        }
-
-    Returns:
-        Comparison results with nodes, edges, routes, and reachability changes
-    """
+    """Compare two network snapshots"""
     try:
         data = request.get_json()
 
@@ -4600,7 +5566,6 @@ def compare_snapshots():
         base_snapshot_path = snapshot_service.get_snapshot_path(base_snapshot, **snapshot_context)
         comparison_snapshot_path = snapshot_service.get_snapshot_path(comparison_snapshot, **snapshot_context)
 
-        # Use existing compare_snapshots method from batfish_service
         result = batfish_service.compare_snapshots(
             base_snapshot,
             comparison_snapshot,
@@ -4610,6 +5575,8 @@ def compare_snapshots():
 
         return success_response(result, "Snapshots compared successfully")
 
+    except BatfishQueryError as e:
+        return batfish_query_error_response(e)
     except BatfishSnapshotLoadError as e:
         role = "base" if e.snapshot_name == base_snapshot else "comparison"
         logger.error(f"Failed to load {role} snapshot '{e.snapshot_name}' for comparison: {e}")
@@ -4627,15 +5594,9 @@ def compare_snapshots():
         return error_response(str(e), 500)
 
 
-# ========== Layer1 Topology Management Endpoints ==========
 @app.route('/api/snapshots/<name>/layer1-topology', methods=['GET'])
 def get_snapshot_layer1_topology(name: str):
-    """
-    Get Layer1 topology configuration for a snapshot
-
-    Returns:
-        Layer1 topology data with edges array
-    """
+    """Get Layer1 topology configuration for a snapshot"""
     try:
         topology = snapshot_service.get_layer1_topology(name, **get_snapshot_request_context())
         return success_response(topology, "Layer1 topology retrieved successfully")
@@ -4652,22 +5613,7 @@ def get_snapshot_layer1_topology(name: str):
 
 @app.route('/api/snapshots/<name>/layer1-topology', methods=['PUT'])
 def save_snapshot_layer1_topology(name: str):
-    """
-    Save Layer1 topology configuration for a snapshot
-
-    Request body:
-        {
-            "edges": [
-                {
-                    "node1": {"hostname": "router1", "interfaceName": "GigabitEthernet0/0"},
-                    "node2": {"hostname": "router2", "interfaceName": "GigabitEthernet0/1"}
-                }
-            ]
-        }
-
-    Returns:
-        Save result with metadata
-    """
+    """Save Layer1 topology configuration for a snapshot"""
     try:
         topology_data = request.get_json()
 
@@ -4704,12 +5650,7 @@ def save_snapshot_layer1_topology(name: str):
 
 @app.route('/api/snapshots/<name>/layer1-topology', methods=['DELETE'])
 def delete_snapshot_layer1_topology(name: str):
-    """
-    Delete Layer1 topology configuration for a snapshot
-
-    Returns:
-        Success message
-    """
+    """Delete Layer1 topology configuration for a snapshot"""
     try:
         snapshot_service.delete_layer1_topology(name, **get_snapshot_request_context())
         reload_error = reload_active_snapshot_after_layer1_change(name)
@@ -4729,12 +5670,7 @@ def delete_snapshot_layer1_topology(name: str):
 
 @app.route('/api/snapshots/<name>/interfaces', methods=['GET'])
 def get_snapshot_interfaces(name: str):
-    """
-    Get all interfaces for devices in a snapshot
-
-    Returns:
-        Dictionary mapping hostnames to interface lists
-    """
+    """Get all interfaces for devices in a snapshot"""
     try:
         interfaces = snapshot_service.get_snapshot_interfaces(
             name,
@@ -4742,6 +5678,8 @@ def get_snapshot_interfaces(name: str):
             **get_snapshot_request_context(),
         )
         return success_response(interfaces, "Snapshot interfaces retrieved successfully")
+    except BatfishQueryError as e:
+        return batfish_query_error_response(e)
     except BatfishSnapshotLoadError as e:
         logger.error(f"Failed to load snapshot '{e.snapshot_name}' for interface lookup: {e}")
         return snapshot_load_error_response(e)
@@ -4758,7 +5696,6 @@ def get_snapshot_interfaces(name: str):
         return error_response(str(e), 500)
 
 
-# ========== API Documentation Endpoint ==========
 @app.route('/api/endpoints', methods=['GET'])
 def list_endpoints():
     """List all available API endpoints"""
@@ -4774,16 +5711,10 @@ def list_endpoints():
     return success_response(sorted(endpoints, key=lambda x: x['path']))
 
 
-# ========== Security Headers ==========
 if config.AUTH_ENABLED and config.CSRF_MODE == 'double-submit':
     @app.after_request
     def set_enhanced_security_headers(response):
-        """
-        Enhanced security headers for Double-Submit Cookie Pattern
-        Critical for mitigating XSS risks when HttpOnly=False for CSRF tokens
-        """
-        # Strict Content Security Policy to mitigate XSS
-        # Note: Adjust 'unsafe-inline' and 'unsafe-eval' based on your frontend requirements
+        """Enhanced security headers for Double-Submit Cookie Pattern"""
         response.headers['Content-Security-Policy'] = (
             "default-src 'self'; "
             "script-src 'self' 'unsafe-inline' 'unsafe-eval'; "
@@ -4796,25 +5727,19 @@ if config.AUTH_ENABLED and config.CSRF_MODE == 'double-submit':
             "form-action 'self';"
         )
 
-        # Prevent clickjacking attacks
         response.headers['X-Frame-Options'] = 'DENY'
 
-        # Prevent MIME type sniffing
         response.headers['X-Content-Type-Options'] = 'nosniff'
 
-        # Enable browser XSS protection
         response.headers['X-XSS-Protection'] = '1; mode=block'
 
-        # Enforce HTTPS (only in production)
         if config.ENV == 'production':
             response.headers['Strict-Transport-Security'] = (
                 'max-age=31536000; includeSubDomains; preload'
             )
 
-        # Control referrer information
         response.headers['Referrer-Policy'] = 'strict-origin-when-cross-origin'
 
-        # Permissions Policy (formerly Feature-Policy)
         response.headers['Permissions-Policy'] = (
             'geolocation=(), '
             'microphone=(), '
@@ -4828,7 +5753,14 @@ if config.AUTH_ENABLED and config.CSRF_MODE == 'double-submit':
 
         return response
 
-# ========== Main ==========
+def install_cached_query_views() -> None:
+    """Wrap every allowlisted view with the result cache decorator."""
+    for _, endpoint in CACHED_QUERY_ROUTES:
+        app.view_functions[endpoint] = cached_query(endpoint)(app.view_functions[endpoint])
+
+
+install_cached_query_views()
+
 if __name__ == '__main__':
     logger.info(f"Starting Topologix Backend on {config.HOST}:{config.PORT}")
     logger.info(f"Debug mode: {config.DEBUG}")

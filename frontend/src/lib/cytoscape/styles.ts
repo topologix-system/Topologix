@@ -1,9 +1,5 @@
 /**
  * Cytoscape.js visual styles for network topology elements
- * - Node styles by device type (router, switch, firewall, host, etc.)
- * - Edge styles by protocol layer (physical, layer3, OSPF, BGP, VXLAN, EIGRP, IS-IS)
- * - Selection, hover, and highlighting states with visual feedback
- * - Color-coded edges and nodes for easy protocol identification
  */
 import type { CytoscapeStylesheet } from './types'
 

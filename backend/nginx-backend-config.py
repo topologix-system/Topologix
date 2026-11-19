@@ -1,14 +1,4 @@
-"""
-Nginx reverse proxy configuration helper for Flask applications
-- ProxyFix middleware for X-Forwarded-* headers
-- Real client IP extraction from proxy headers
-- HTTPS detection through X-Forwarded-Proto
-- Security headers configuration
-- Request ID tracking for distributed tracing
-- CORS configuration for proxied applications
-- Logging configuration compatible with nginx logs
-- Gunicorn production server configuration
-"""
+"""Nginx reverse proxy configuration helper for Flask applications"""
 import os
 
 from flask import Flask
@@ -20,15 +10,8 @@ class NginxProxyConfig:
 
     @staticmethod
     def configure_app(app: Flask, trusted_proxies: int = 1):
-        """
-        Configure Flask app to work correctly behind Nginx reverse proxy
+        """Configure Flask app to work correctly behind Nginx reverse proxy"""
 
-        Args:
-            app: Flask application instance
-            trusted_proxies: Number of trusted proxy servers (default 1 for single nginx)
-        """
-
-        # ProxyFix middleware to handle X-Forwarded headers correctly
         app.wsgi_app = ProxyFix(
             app.wsgi_app,
             x_for=trusted_proxies,      # X-Forwarded-For
@@ -38,19 +21,15 @@ class NginxProxyConfig:
             x_prefix=trusted_proxies     # X-Forwarded-Prefix
         )
 
-        # Flask configuration for proxy
         app.config.update(
-            # Trust proxy headers
             TRUSTED_PROXIES=['127.0.0.1', 'localhost', '::1'],
 
-            # Session cookie security (when using HTTPS via proxy)
             SESSION_COOKIE_SECURE=True,  # Only send cookie over HTTPS
-            SESSION_COOKIE_HTTPONLY=True,  # Prevent XSS access
-            SESSION_COOKIE_SAMESITE='Lax',  # CSRF protection
+            SESSION_COOKIE_HTTPONLY=True,
+            SESSION_COOKIE_SAMESITE='Lax',
 
-            # Other security settings
             PERMANENT_SESSION_LIFETIME=3600,  # 1 hour
-            SEND_FILE_MAX_AGE_DEFAULT=0,  # Disable caching in dev
+            SEND_FILE_MAX_AGE_DEFAULT=0,
 
             # Request limits (should match nginx settings)
             MAX_CONTENT_LENGTH=10 * 1024 * 1024,  # 10MB max request
@@ -60,65 +39,35 @@ class NginxProxyConfig:
 
     @staticmethod
     def get_real_ip(request):
-        """
-        Get the real client IP address from proxy headers
-
-        Args:
-            request: Flask request object
-
-        Returns:
-            str: Real client IP address
-        """
-        # Check X-Forwarded-For first (added by nginx)
+        """Get the real client IP address from proxy headers"""
         if request.headers.get('X-Forwarded-For'):
             # X-Forwarded-For can contain multiple IPs
             # Format: client, proxy1, proxy2
             ips = request.headers.get('X-Forwarded-For').split(',')
             return ips[0].strip()
 
-        # Fallback to X-Real-IP (also added by nginx)
         if request.headers.get('X-Real-IP'):
             return request.headers.get('X-Real-IP')
 
-        # Final fallback to remote_addr
         return request.remote_addr
 
     @staticmethod
     def is_secure_request(request):
-        """
-        Check if request came through HTTPS (even if proxied)
-
-        Args:
-            request: Flask request object
-
-        Returns:
-            bool: True if request is secure
-        """
-        # Check X-Forwarded-Proto header from nginx
+        """Check if request came through HTTPS (even if proxied)"""
         proto = request.headers.get('X-Forwarded-Proto', '')
         if proto == 'https':
             return True
 
-        # Fallback to direct check
         return request.is_secure
 
     @staticmethod
     def configure_cors(app: Flask, allowed_origins=None):
-        """
-        Configure CORS for API when served through same origin via proxy
-
-        Args:
-            app: Flask application instance
-            allowed_origins: List of allowed origins (None = same origin only)
-        """
+        """Configure CORS for API when served through same origin via proxy"""
         from flask_cors import CORS
 
         if allowed_origins is None:
-            # Same origin through proxy - no CORS headers needed
-            # Nginx serves both frontend and proxies to backend
             pass
         else:
-            # Cross-origin requests allowed
             CORS(app,
                  origins=allowed_origins,
                  supports_credentials=True,
@@ -128,18 +77,12 @@ class NginxProxyConfig:
 
     @staticmethod
     def configure_logging(app: Flask):
-        """
-        Configure logging to work well with nginx logs
-
-        Args:
-            app: Flask application instance
-        """
+        """Configure logging to work well with nginx logs"""
         import logging
         from logging.handlers import RotatingFileHandler
         import os
 
         if not app.debug:
-            # Log to file
             if not os.path.exists('logs'):
                 os.mkdir('logs')
 
@@ -149,7 +92,6 @@ class NginxProxyConfig:
                 backupCount=10
             )
 
-            # Format to complement nginx logs
             file_handler.setFormatter(logging.Formatter(
                 '%(asctime)s %(levelname)s: %(message)s '
                 '[in %(pathname)s:%(lineno)d] '
@@ -163,16 +105,7 @@ class NginxProxyConfig:
 
     @staticmethod
     def add_security_headers(response):
-        """
-        Add security headers to response (if not handled by nginx)
-
-        Args:
-            response: Flask response object
-
-        Returns:
-            response: Modified response with security headers
-        """
-        # Only add if not already set by nginx
+        """Add security headers that the response does not already carry"""
         headers = {
             'X-Content-Type-Options': 'nosniff',
             'X-Frame-Options': 'DENY',
@@ -189,18 +122,12 @@ class NginxProxyConfig:
 
     @staticmethod
     def handle_request_id(app: Flask):
-        """
-        Handle X-Request-ID header for request tracing
-
-        Args:
-            app: Flask application instance
-        """
+        """Handle X-Request-ID header for request tracing"""
         import uuid
         from flask import g, request
 
         @app.before_request
         def before_request():
-            # Get request ID from nginx or generate new one
             request_id = request.headers.get('X-Request-ID')
             if not request_id:
                 request_id = str(uuid.uuid4())
@@ -208,22 +135,18 @@ class NginxProxyConfig:
 
         @app.after_request
         def after_request(response):
-            # Add request ID to response
             response.headers['X-Request-ID'] = g.get('request_id', '')
             return response
 
 
-# Example usage
 def create_app():
     """Example Flask app creation with nginx proxy configuration"""
     app = Flask(__name__)
 
-    # Apply nginx proxy configuration
     NginxProxyConfig.configure_app(app, trusted_proxies=1)
     NginxProxyConfig.configure_logging(app)
     NginxProxyConfig.handle_request_id(app)
 
-    # Add security headers middleware
     @app.after_request
     def add_security_headers(response):
         return NginxProxyConfig.add_security_headers(response)
@@ -249,8 +172,8 @@ def create_app():
 # Gunicorn configuration for production
 GUNICORN_CONFIG = {
     'bind': '0.0.0.0:5000',
-    'workers': 4,  # 2-4 x CPU cores
-    'worker_class': 'sync',  # or 'gevent' for async
+    'workers': 4,
+    'worker_class': 'sync',
     'worker_connections': 1000,
     'timeout': 300,  # Match nginx proxy_read_timeout
     'keepalive': 5,

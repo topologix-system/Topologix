@@ -6,8 +6,6 @@ import type cytoscape from 'cytoscape'
 
 /**
  * Cytoscape node data structure for network devices
- * Represents routers, switches, firewalls, and other network elements
- * Used by TopologyViewer to render device nodes in the graph
  */
 export interface CytoscapeNode {
   data: {
@@ -30,8 +28,6 @@ export interface CytoscapeNode {
 
 /**
  * Cytoscape edge data structure for network connections
- * Represents physical cables, layer 3 links, and protocol adjacencies (OSPF, BGP, etc.)
- * Supports multiple protocols and connection types with source/target port information
  */
 export interface CytoscapeEdge {
   data: {
@@ -60,15 +56,6 @@ export interface CytoscapeElements {
 
 /**
  * Supported Cytoscape layout algorithms
- * - cola: Force-directed with constraints (default, best for most networks)
- * - cola-spaced: Force-directed with increased node spacing for better visibility
- * - cose: Compound Spring Embedder (good for clustered networks)
- * - cose-bilkent: Advanced force-directed (best for large graphs)
- * - dagre: Hierarchical directed acyclic graph layout
- * - circle: Circular layout
- * - grid: Grid-based layout
- * - random: Random positioning
- * - breadthfirst: Tree-based hierarchical layout
  */
 export type LayoutName = 'cola' | 'cola-spaced' | 'cose' | 'cose-bilkent' | 'dagre' | 'circle' | 'grid' | 'random' | 'breadthfirst'
 

@@ -27,7 +27,12 @@
     "myProfile": "マイプロフィール",
     "userManagement": "ユーザー管理",
     "snapshotOwnerMigration": "スナップショット所有者移行",
-    "securityLogs": "セキュリティログ"
+    "securityLogs": "セキュリティログ",
+    "version": {
+      "suffix": " v{{seq}}{{mark}}",
+      "uncommittedOnlySuffix": " *",
+      "uncommittedMark": "*"
+    }
   },
   "sidebar": {
     "title": "サイドバー",
@@ -98,6 +103,43 @@
         "passed": "成功",
         "failed": "失敗"
       }
+    },
+    "version": {
+      "title": "スナップショットのバージョン",
+      "lastKnown": "最後に取得した状態",
+      "versionLabel": "v{{seq}}",
+      "noVersions": "バージョンはまだありません",
+      "kind": {
+        "baseline": "初期",
+        "manual": "手動",
+        "external": "外部",
+        "restore": "復元"
+      },
+      "systemMessage": {
+        "baseline": "初期状態",
+        "external": "外部での変更を検出"
+      },
+      "systemAuthor": "システム",
+      "noAuthor": "—",
+      "deletedVersionLabel": "v{{seq}}（削除済み）",
+      "separator": "・",
+      "shortHash": "（{{hash}}）",
+      "headMeta": "{{author}}・{{time}}",
+      "unavailableWithReason": "バージョン状態を取得できません（{{reason}}）",
+      "basedOn": "{{version}} から作成",
+      "headRestoredFrom": "{{version}} から復元",
+      "workingRestoredFrom": "作業ファイルは {{version}} から復元されています",
+      "uncommitted": "未コミットの変更あり",
+      "pendingExternal": "外部での変更が未記録です。「スナップショット管理」の「履歴」でコミットして記録してください",
+      "settling": "外部での変更を確認中",
+      "workingStateLabel": "作業ファイルの状態",
+      "unavailable": "バージョン状態を取得できません",
+      "updating": "更新中…",
+      "stagingUnavailable": "ステージングを利用できないため、結果はキャッシュされません",
+      "staleTopology": "表示中のトポロジーは現在のファイルより古い内容です。",
+      "reload": "スナップショットを再読み込み",
+      "snapshotMismatch": "サーバーは別のスナップショットを提供しています。このスナップショットを再読み込みするとデータが表示されます。",
+      "contentMismatch": "データの読み込み中にスナップショットの内容が変わりました。このスナップショットを再読み込みすると現在のデータが表示されます。"
     }
   },
   "ipSearch": {
@@ -1310,6 +1352,7 @@
     "createToStart": "開始するには作成してください",
     "fileCount": "{{count}} ファイル",
     "filesIn": "{{name}} のファイル",
+    "fileList": "ファイル一覧",
     "ungroupedFolder": "未分類",
     "folderLabel": "フォルダー",
     "folderPlaceholder": "customer-a/site-01",
@@ -1374,6 +1417,7 @@
       "loadingContent": "ファイル内容を読み込み中...",
       "saving": "保存中...",
       "discardChanges": "保存されていない設定変更を破棄しますか？",
+      "unsavedChanges": "未保存の変更あり",
       "saveFailed": "ファイル内容の保存に失敗しました",
       "loadFailed": "ファイル内容の読み込みに失敗しました",
       "conflict": "このファイルは開いた後に変更されています。最新を再読み込みすると現在のエディター内容は破棄されます。新規ファイルとして保存すると、保存しようとした編集内容を別ファイルに保持できます。",
@@ -1541,7 +1585,168 @@
       }
     },
     "createFailed": "スナップショットの作成に失敗しました",
-    "folderUpdateFailed": "スナップショットのフォルダーの更新に失敗しました"
+    "folderUpdateFailed": "スナップショットのフォルダーの更新に失敗しました",
+    "history": {
+      "title": "履歴",
+      "loading": "バージョン履歴を読み込んでいます...",
+      "headLine": "ヘッド {{version}}",
+      "pendingExternal": "外部での変更が未記録です。コミットして記録してください",
+      "workingHash": "作業ファイル {{hash}}",
+      "headBadge": "ヘッド",
+      "listCaption_one": "バージョン履歴（{{count}} 件）",
+      "listCaption_other": "バージョン履歴（{{count}} 件）",
+      "shownCount_one": "{{count}} 件中 {{shown}} 件を表示",
+      "shownCount_other": "{{count}} 件中 {{shown}} 件を表示",
+      "loadMore": "さらに読み込む",
+      "details": "詳細",
+      "detailsAria": "{{version}} の詳細と差分を表示",
+      "detailTitle": "{{version}} の詳細",
+      "detailSummary_one": "{{count}} ファイル、{{size}}",
+      "detailSummary_other": "{{count}} ファイル、{{size}}",
+      "compareWith": "比較対象",
+      "workingTree": "作業ファイル",
+      "unknownVersion": "不明なバージョン",
+      "parent": "{{version}} から作成",
+      "missingObjects": "このスナップショットの履歴オブジェクトが見つかりません。使用できるのは、履歴をリセットする「履歴を削除（すべて）」のみです。",
+      "unavailable": "バージョン管理を利用できません（{{reason}}）。復旧するまで、コミット、復元、削除、キャッシュ結果のクリアは使用できません。",
+      "columns": {
+        "seq": "バージョン",
+        "kind": "種類",
+        "message": "メッセージ",
+        "author": "作成者",
+        "time": "日時",
+        "files": "ファイル数",
+        "lineage": "派生元",
+        "actions": "操作"
+      },
+      "reasons": {
+        "database": "データベース障害",
+        "namespace": "デプロイメント名前空間の利用不可",
+        "storage": "履歴の保存領域の問題",
+        "sidecar": "識別情報の書き込み不可",
+        "missing_objects": "履歴オブジェクトの欠落",
+        "unknown": "原因不明"
+      },
+      "commitDisabled": {
+        "busy": "実行中のファイル変更または有効化が終わるまでお待ちください。",
+        "loading": "バージョン状態を確認しています...",
+        "unavailable": "バージョン状態を取得できないため、コミットできません。",
+        "notSettled": "作業ファイルを確認しています。確認が終わるまでコミットできません。",
+        "noChanges": "コミットできる変更はありません。"
+      },
+      "commit": {
+        "open": "コミット",
+        "title": "作業ファイルをコミット",
+        "messageLabel": "コミットメッセージ",
+        "messageHelp": "{{length}} / {{max}} 文字",
+        "messageRequired": "コミットメッセージを入力してください。",
+        "messageTooLong": "コミットメッセージは {{max}} 文字以内で入力してください。",
+        "submit": "コミット",
+        "created": "{{version}} を作成しました。"
+      },
+      "clearCache": {
+        "open": "キャッシュ結果をクリア",
+        "cleared": "キャッシュされた結果をクリアしました。次に必要になったときに再計算されます。",
+        "notSettled": "まだ何もクリアしていません。作業ファイルを確認中のため、スナップショットは次回の利用時に再解析されます。",
+        "disabled": "何もクリアしていません。サーバーで結果キャッシュが無効になっています。スナップショットを再解析するには、トポロジーに戻り、そのヘッダーの「現在のスナップショットを再読込」ボタンを使用してください。",
+        "disabledNotCurrent": "何もクリアしていません。サーバーで結果キャッシュが無効になっています。スナップショットは次に有効化されたときに解析されます。"
+      },
+      "restore": {
+        "open": "復元",
+        "openAria": "{{version}} を復元",
+        "title": "{{version}} を復元",
+        "description": "作業ファイルを {{version}} のファイルで置き換えます。",
+        "uncommittedWarning": "作業ファイルに未コミットの変更があります。この変更はバージョンとして保存されていないため、完全に失われます。",
+        "commitFirst": "先にコミット",
+        "loadingSummary": "{{version}} と作業ファイルを比較しています...",
+        "overwriteTitle": "上書きされるファイル（{{count}}）",
+        "deleteTitle": "削除されるファイル（{{count}}）",
+        "none": "なし",
+        "uncommittedResult": "復元後の作業ファイルは、ヘッドのバージョンと同じ内容でない限り、コミットするまで未コミットのままです。",
+        "changedReview": "作業ファイルが変更されました。更新された一覧を確認して、もう一度実行してください。",
+        "pathClash": "復元できません。「{{path}}」が作業ファイル内の既存のファイルまたはフォルダーと競合しています。競合を解消してから再度お試しください。",
+        "confirm": "復元",
+        "done": "{{version}} を作業ファイルに復元しました。バージョンとして記録するにはコミットしてください。",
+        "doneEqualsHead": "{{version}} を復元しました。作業ファイルはヘッドのバージョンと同じ内容です。",
+        "doneUnknownState": "{{version}} を作業ファイルに復元しました。",
+        "reactivateFailed": "ファイルは復元されましたが、スナップショットの再読み込みに失敗しました。トポロジーに戻り、そのヘッダーの「現在のスナップショットを再読込」ボタンを使用してください。"
+      },
+      "delete": {
+        "historyOpen": "履歴を削除",
+        "allOpen": "履歴を削除（すべて）",
+        "version": "バージョンを削除",
+        "versionAria": "{{version}} を削除",
+        "versionTitle": "{{version}} を削除",
+        "versionMessage": "{{version}}（1 件のバージョン）を履歴から削除しますか？",
+        "irreversible": "この操作は取り消せません。残ったどのバージョンからも参照されなくなった保存済みのファイル内容は、ガベージコレクションで削除されます。",
+        "headWhileUncommitted": "未コミットの変更がある状態でヘッドのバージョンを削除します。ヘッドは {{version}} に移動し、作業ファイルは未コミットのままになります。",
+        "headWhileUncommittedPrevious": "未コミットの変更がある状態でヘッドのバージョンを削除します。ヘッドは残っている最新のバージョンに移動し、作業ファイルは未コミットのままになります。",
+        "headWhileUncommittedNone": "未コミットの変更がある状態ですべてのバージョンを削除します。ヘッドのバージョンはなくなり、作業ファイルは未コミットのままになります。",
+        "changedReview": "履歴が変更されたか、ファイルの変更が実行中です。内容を確認して、もう一度実行してください。",
+        "changedRetry": "履歴が変更されたか、ファイルの変更が実行中です。もう一度実行してください。",
+        "done_one": "{{count}} 件のバージョンを削除しました。",
+        "done_other": "{{count}} 件のバージョンを削除しました。",
+        "confirm": "削除",
+        "historyTitle": "履歴を削除",
+        "modeLabel": "削除するバージョン",
+        "modes": {
+          "oldest": "古いものから N 件",
+          "newest": "新しいものから N 件",
+          "all": "すべてのバージョン"
+        },
+        "countLabel": "バージョン数（N）",
+        "historyCount_one": "{{count}} 件中 {{deleted}} 件のバージョンが削除されます。",
+        "historyCount_other": "{{count}} 件中 {{deleted}} 件のバージョンが削除されます。",
+        "missingTitle": "履歴を削除（すべて）",
+        "missingMessage": "このスナップショットの履歴に保存されたファイルが見つかりません。このスナップショットのすべてのバージョンを削除します。作業ファイルはそのまま残ります。"
+      },
+      "errors": {
+        "unavailable": "バージョン管理を利用できません（{{reason}}）。",
+        "versionNotFound": "このバージョンはすでに存在しません。履歴を再読み込みしました。",
+        "unchanged": "ヘッドのバージョンから変更されていません。",
+        "conflict": "その間に履歴または作業ファイルが変更されました。内容を確認してから再度お試しください。",
+        "restoreFailed": "復元に失敗しました。書き込み中に失敗した場合、一部のファイルはすでに変更されている可能性があります。ファイルと履歴を確認してください。",
+        "snapshotUnavailable": "このスナップショットは利用できなくなりました。",
+        "invalidRequest": "リクエストが無効なため受け付けられませんでした。",
+        "busy": "実行中のファイル変更または有効化が終わるまでお待ちください。",
+        "commitAction": "コミットに失敗しました。",
+        "restoreAction": "復元に失敗しました。",
+        "summaryAction": "作業ファイルとの比較に失敗しました。",
+        "deleteAction": "履歴の削除に失敗しました。",
+        "clearAction": "キャッシュ結果のクリアに失敗しました。",
+        "listAction": "履歴の読み込みに失敗しました。",
+        "detailAction": "バージョンの読み込みに失敗しました。"
+      },
+      "diff": {
+        "region": "{{from}} から {{against}} への差分",
+        "heading": "{{from}} → {{against}}",
+        "loading": "差分を読み込んでいます...",
+        "loadFailed": "差分の読み込みに失敗しました。",
+        "summary_one": "{{count}} ファイル中 {{changed}} ファイルが変更されています",
+        "summary_other": "{{count}} ファイル中 {{changed}} ファイルが変更されています",
+        "showUnchanged": "変更のないファイルも表示",
+        "noChanges": "変更されたファイルはありません。",
+        "fileList": "ファイル",
+        "fileRegion": "{{path}} の差分",
+        "loadingFile": "ファイルの差分を読み込んでいます...",
+        "fileLoadFailed": "ファイルの差分の読み込みに失敗しました。",
+        "binary": "バイナリファイルまたは UTF-8 ではないテキストのため、テキストの差分は表示されません。",
+        "tooLarge": "このファイルは大きすぎるか複雑すぎるため、差分を表示できません。",
+        "truncated": "差分は行数の上限で打ち切られました。上限を超える行は表示されていません。",
+        "noTextChanges": "テキストの差分はありません。",
+        "emptyFile": "ファイルは空です。",
+        "sizes": "{{from}} → {{against}}",
+        "bytes": "{{size}} B",
+        "noSize": "—",
+        "workingNote": "作業ファイルは現在の内容で比較しています。",
+        "status": {
+          "added": "追加",
+          "removed": "削除",
+          "modified": "変更",
+          "unchanged": "変更なし"
+        }
+      }
+    }
   },
   "layer1Editor": {
     "title": "レイヤー1トポロジーエディタ",

@@ -19,7 +19,9 @@ import type { EventObject } from 'cytoscape'
 
 import { logger } from '../utils/logger'
 import { useCytoscapeLazy } from '../hooks/useCytoscapeLazy'
-import { useAllNetworkData } from '../hooks'
+import { isSnapshotMismatchError, useAllNetworkData } from '../hooks'
+import { SnapshotMismatchNotice } from './SnapshotMismatchNotice'
+import { hashKeyedErrorText } from './snapshotVersionLabels'
 import { useUIStore, usePositionStore, useSnapshotStore } from '../store'
 import {
   applyPositionsToElements,
@@ -34,7 +36,6 @@ import type { LayoutName } from '../lib/cytoscape/types'
 /**
  * Main network topology visualization component using Cytoscape.js
  * Handles graph rendering, user interactions, and position persistence
- * Uses React Query for data fetching (NO useEffect for data)
  */
 export const TopologyViewer = memo(function TopologyViewer() {
   const { t } = useTranslation()
@@ -45,7 +46,7 @@ export const TopologyViewer = memo(function TopologyViewer() {
 
   // Refs for managing Cytoscape lifecycle and preventing race conditions
   const cytoscapeInitializedRef = useRef(false) // Tracks if Cytoscape is fully initialized
-  const containerRef = useRef<HTMLDivElement | null>(null) // DOM container reference
+  const containerRef = useRef<HTMLDivElement | null>(null)
   const isUpdatingRef = useRef(false) // Prevents concurrent initialization
   const savePositionTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null) // Debounce timer for position saving
   const fitTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null) // Timeout for delayed fit operation
@@ -63,7 +64,6 @@ export const TopologyViewer = memo(function TopologyViewer() {
   const savePositions = usePositionStore((state) => state.savePositions)
   const getPositions = usePositionStore((state) => state.getPositions)
 
-  // Fetch network data using React Query (NO useEffect for data fetching!)
   const { data: networkData, isLoading, isFetching, error, refetch } = useAllNetworkData()
   const aggregateQueryErrors = networkData?.query_errors ?? []
   const topologyQueryErrors = aggregateQueryErrors.filter((queryError) =>
@@ -87,7 +87,6 @@ export const TopologyViewer = memo(function TopologyViewer() {
     }, delayMs)
   }, [cy])
 
-  // Filter nodes based on search query
   const filteredNodes = useMemo(() => {
     if (!searchQuery.trim() || !networkData?.node_properties) return []
     const query = searchQuery.toLowerCase()
@@ -96,11 +95,10 @@ export const TopologyViewer = memo(function TopologyViewer() {
         node.node?.toLowerCase().includes(query) ||
         node.hostname?.toLowerCase().includes(query)
       )
-      .slice(0, 10) // Limit to 10 results for performance
+      .slice(0, 10)
   }, [searchQuery, networkData?.node_properties])
 
   // Memoized graph elements built from network data and visible layers
-  // Eliminates duplicate buildGraphElements calls across handlers
   const graphElements = useMemo(() => {
     if (!networkData) return null
     return buildGraphElements(networkData.node_properties, {
@@ -124,7 +122,6 @@ export const TopologyViewer = memo(function TopologyViewer() {
     setSearchQuery('')
     setSearchDropdownOpen(false)
 
-    // Center and zoom on the selected node
     if (cy.cyRef.current) {
       const node = cy.cyRef.current.getElementById(nodeId)
       if (node.length > 0) {
@@ -231,7 +228,6 @@ export const TopologyViewer = memo(function TopologyViewer() {
 
   /**
    * Refreshes network data and updates graph elements
-   * Preserves current layout and zoom level
    */
   const handleRefresh = useCallback(() => {
     logger.log('[TopologyViewer] Refresh button clicked')
@@ -241,8 +237,6 @@ export const TopologyViewer = memo(function TopologyViewer() {
 
   /**
    * Main effect: Updates graph when network data or layers change
-   * Handles position restoration for snapshot switching
-   * IMPORTANT: Data fetching is done via React Query, not useEffect
    */
   useEffect(() => {
     logger.log('[TopologyViewer] useEffect triggered for networkData update')
@@ -263,7 +257,6 @@ export const TopologyViewer = memo(function TopologyViewer() {
       if (containerRef.current && !isUpdatingRef.current) {
         logger.log('[TopologyViewer] Container exists, triggering initialization')
         cytoscapeInitializedRef.current = false
-        // Intentionally not awaiting - initialization state is managed via isUpdatingRef
         void handleContainerRef(containerRef.current)
       }
       return
@@ -274,7 +267,6 @@ export const TopologyViewer = memo(function TopologyViewer() {
       return
     }
 
-    // Use memoized graph elements
     if (!graphElements) {
       logger.log('[TopologyViewer] Graph elements not available')
       return
@@ -301,7 +293,6 @@ export const TopologyViewer = memo(function TopologyViewer() {
 
     const graphElementList = [...graphElements.nodes, ...graphElements.edges]
 
-    // Check and validate saved node positions from previous snapshot view
     const savedPositions = currentSnapshotName ? getPositions(currentSnapshotName) : null
     const positionValidation = validateSavedPositions(nodeIds, savedPositions)
     logger.log(
@@ -354,7 +345,6 @@ export const TopologyViewer = memo(function TopologyViewer() {
 
     lastRenderSignatureRef.current = renderSignature
 
-    // Cleanup fit timeout on effect re-run or unmount
     return () => {
       if (fitTimeoutRef.current) {
         clearTimeout(fitTimeoutRef.current)
@@ -395,8 +385,7 @@ export const TopologyViewer = memo(function TopologyViewer() {
   }, [currentSnapshotName, cy, handleContainerRef])
 
   /**
-   * Cleanup effect: Destroys Cytoscape instance on component unmount
-   * IMPORTANT: Empty dependency array prevents premature cleanup in React Strict Mode
+   * Unmount-only cleanup that destroys the Cytoscape instance
    */
   useEffect(() => {
     return () => {
@@ -414,7 +403,6 @@ export const TopologyViewer = memo(function TopologyViewer() {
   /**
    * Event listeners effect: Manages graph interaction handlers
    * Handles node/edge selection, background clicks, and position saving
-   * Includes proper cleanup to prevent memory leaks
    */
   useEffect(() => {
     logger.log('[TopologyViewer] Setting up event listeners, isLoaded:', cy.isLoaded)
@@ -495,12 +483,10 @@ export const TopologyViewer = memo(function TopologyViewer() {
      */
     const handleNodeFree = () => {
       try {
-        // Clear existing debounce timer
         if (savePositionTimeoutRef.current) {
           clearTimeout(savePositionTimeoutRef.current)
         }
 
-        // Save positions after 500ms delay (debounce)
         savePositionTimeoutRef.current = setTimeout(() => {
           if (!currentSnapshotName) {
             logger.log('[TopologyViewer] Cannot save positions: no snapshot selected')
@@ -618,12 +604,18 @@ export const TopologyViewer = memo(function TopologyViewer() {
     )
   }
 
+  if (isSnapshotMismatchError(error)) {
+    return <SnapshotMismatchNotice />
+  }
+
   if (error) {
     return (
       <div className="flex items-center justify-center h-full" role="alert" aria-live="assertive">
         <div className="text-center">
           <p className="text-red-600 font-semibold">{t('topologyViewer.errors.loadFailed')}</p>
-          <p className="text-sm text-gray-600 mt-2">{t('topologyViewer.errors.connectionIssue')}</p>
+          <p className="text-sm text-gray-600 mt-2">
+            {hashKeyedErrorText(t, error) ?? t('topologyViewer.errors.connectionIssue')}
+          </p>
           <button
             onClick={handleRefresh}
             className="mt-4 px-4 py-2 bg-primary-600 text-white rounded-lg hover:bg-primary-700 focus:outline-none focus:ring-2 focus:ring-primary-600 focus:ring-offset-2 transition-colors"

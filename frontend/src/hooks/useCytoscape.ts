@@ -1,9 +1,5 @@
 /**
  * React hook for synchronous Cytoscape.js graph instance management
- * - Provides immediate initialization with pre-loaded Cytoscape modules
- * - Graph manipulation API: zoom, fit, center, highlight, selection, export
- * - Handles instance lifecycle (initialize, destroy, updateElements)
- * - Used when Cytoscape is already in the bundle (not lazy loaded)
  */
 import { useRef, useCallback } from 'react'
 import cytoscape, { type Core, type ElementDefinition } from 'cytoscape'
@@ -40,21 +36,15 @@ export interface UseCytoscapeReturn {
 
 /**
  * Custom hook for managing Cytoscape.js graph instance (synchronous version)
- * Provides complete graph manipulation API with lifecycle management
- * Used when Cytoscape is already bundled (not lazy loaded)
- * @param config - Optional Cytoscape configuration overrides
- * @returns Object with graph ref and manipulation methods
  */
 export function useCytoscape(config?: CytoscapeConfig): UseCytoscapeReturn {
   const cyRef = useRef<Core | null>(null)
 
   const initialize = useCallback((container: HTMLElement, elements?: ElementDefinition[]) => {
-    // Destroy existing instance
     if (cyRef.current) {
       cyRef.current.destroy()
     }
 
-    // Create new instance
     cyRef.current = cytoscape({
       container,
       elements: elements || config?.elements || [],
@@ -137,10 +127,8 @@ export function useCytoscape(config?: CytoscapeConfig): UseCytoscapeReturn {
     const node = cyRef.current.$(`#${nodeId}`)
     if (node.length === 0) return
 
-    // Dim all elements
     cyRef.current.elements().addClass('dimmed')
 
-    // Highlight selected node and neighbors
     node.removeClass('dimmed').addClass('highlighted')
     node.neighborhood().removeClass('dimmed').addClass('highlighted')
   }, [])

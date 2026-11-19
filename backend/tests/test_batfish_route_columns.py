@@ -1,3 +1,4 @@
+import test_00_environment  # noqa: F401
 import inspect
 import unittest
 
@@ -106,7 +107,6 @@ class BatfishRouteColumnContractTest(unittest.TestCase):
 
         self.assertIsNone(result["local_preference"])
         self.assertIsNone(result["med"])
-        # The existing public contract uses an empty string for a missing Originator_Id.
         self.assertEqual(result["originator_id"], "")
 
     def test_lpm_uses_frame_ip_and_route_count_with_legacy_empty_compatibility_fields(self):

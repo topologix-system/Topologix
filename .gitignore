@@ -30,7 +30,11 @@ backend/security/*credential*
 # ===== データベース・永続化データ =====
 postgres-data/
 redis-data/
+backend/data/
 *.db
+*.db-wal
+*.db-shm
+*.db-journal
 *.sqlite
 *.sqlite3
 
@@ -177,6 +181,10 @@ frontend/src/__tests__/*
 !frontend/src/__tests__/setup.ts
 # Imported by UserTable.test.tsx and SnapshotComparison.test.tsx.
 !frontend/src/__tests__/translateEn.ts
+# Imported by the component tests that render in Japanese.
+!frontend/src/__tests__/translateJa.ts
+# Imported by useSnapshotVersions.test.tsx, SnapshotHistoryPanel.test.tsx and the other versioning tests.
+!frontend/src/__tests__/versioning.ts
 
 # ===== Docker =====
 # 不完全なDocker Compose設定（batfishサービス欠如）

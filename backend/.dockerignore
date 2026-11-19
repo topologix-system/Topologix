@@ -21,7 +21,7 @@ __pycache__/
 *.pyo
 *.pyd
 
-# Runtime data (volume-mounted in production)
+# Runtime data
 flask_session/
 data/
 logs/

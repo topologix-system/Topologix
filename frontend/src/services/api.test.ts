@@ -16,7 +16,7 @@ const clientModules: Record<string, () => Promise<AuthClient>> = {
   api_secure: () => import('./api_secure'),
 }
 
-// Answers after which a looping client is let through so the test ends
+// Answers after which a looping client is let through
 const LOOP_GUARD = 5
 
 function reply(config: InternalAxiosRequestConfig, status: number, data: unknown): Promise<AxiosResponse> {

@@ -1,3 +1,4 @@
+import test_00_environment  # noqa: F401
 import tempfile
 import unittest
 from pathlib import Path
@@ -6,8 +7,8 @@ from unittest import mock
 import app as app_module
 from services.batfish_service import BatfishQueryError, BatfishService, BatfishSnapshotLoadError
 
-# Sanitized reproduction of the work log Batfish returns when differential
-# reachability finds no start location shared by both snapshots (synthetic ids).
+# Work log Batfish returns when differential reachability finds no start location
+# shared by both snapshots.
 SANITIZED_NO_COMMON_START_LOCATION = (
     "Work terminated abnormally\n"
     'work_item: {"containerName": "example_network", "id": "00000000-0000-0000-0000-000000000000"}\n'
@@ -21,8 +22,7 @@ SANITIZED_NO_COMMON_START_LOCATION = (
     "DifferentialReachabilityAnswerer.java:61)\n"
 )
 
-# Sanitized reproduction of the work log Batfish returns when a snapshot
-# without device configurations is loaded (synthetic ids and names).
+# Work log Batfish returns when a snapshot without device configurations is loaded.
 SANITIZED_EMPTY_SNAPSHOT_LOAD_FAILURE = (
     "Work terminated abnormally\n"
     'work_item: {"containerName": "example_network", "id": "00000000-0000-0000-0000-000000000000", '

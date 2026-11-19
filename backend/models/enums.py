@@ -1,9 +1,4 @@
-"""
-Enumeration types for network topology and protocols
-- NodeType: Network device types (router, switch, firewall, load_balancer, unknown)
-- ProtocolType: Routing protocol types (OSPF, BGP, EIGRP, IS-IS, RIP, static, connected)
-- Used throughout the application for type-safe categorization
-"""
+"""Enumeration types for network topology and protocols"""
 from enum import Enum
 
 

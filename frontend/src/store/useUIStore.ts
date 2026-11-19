@@ -1,10 +1,5 @@
 /**
  * Main UI state management with Zustand
- * - Manages sidebar visibility, active tab, node selections, filters, layout preferences
- * - Persists user preferences to localStorage with custom serialization
- * - Custom Set serialization/deserialization for layer visibility filters (Set<LayerType>)
- * - Integrated with Redux DevTools for state debugging in development
- * - Handles filter toggles, node selection, and graph interaction state
  */
 import { create } from 'zustand'
 import { devtools, persist } from 'zustand/middleware'
@@ -12,9 +7,6 @@ import type { LayoutName, LayerType } from '../lib/cytoscape/types'
 
 /**
  * View mode for topology display
- * - topology: Full screen graph visualization
- * - table: Data table view (future feature)
- * - split: Split screen graph and table
  */
 export type ViewMode = 'topology' | 'table' | 'split'
 
@@ -26,7 +18,6 @@ export type Theme = 'light' | 'dark' | 'system'
 
 /**
  * Sidebar tab identifiers for different analysis panels
- * Used to switch between overview, node details, validation, etc.
  */
 export type SidebarTab = 'overview' | 'node-details' | 'edge-details' | 'ospf' | 'validation' | 'analysis' | 'traceroute'
 
@@ -82,8 +73,6 @@ interface UIState {
 /**
  * Zustand UI store with Redux DevTools and localStorage persistence
  * Persists user preferences (layout, labels, theme) across sessions
- * Custom Set serialization for layer visibility filters
- * Integrated with DevTools for state debugging
  */
 export const useUIStore = create<UIState>()(
   devtools(

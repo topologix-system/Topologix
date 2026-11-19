@@ -1,7 +1,6 @@
 /**
  * Configuration validation type definitions
  * File parsing status, initialization issues, warnings, conversion status
- * Critical for identifying config errors before deployment
  */
 export interface FileParseStatus {
   file_name: string

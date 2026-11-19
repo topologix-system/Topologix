@@ -20,8 +20,6 @@ export const snmpSecurityKeys = {
 /**
  * Query SNMP community configurations
  * Returns SNMP community strings and their allowed client IPs
- * Critical for security auditing of SNMP access control
- * @param enabled - Optional flag to conditionally enable query (default: true)
  */
 export function useSNMPCommunities(enabled = true) {
   const currentSnapshotName = useSnapshotStore((state) => state.currentSnapshotName)

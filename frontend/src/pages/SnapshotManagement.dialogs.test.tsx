@@ -84,6 +84,7 @@ Element.prototype.getAnimations = () => []
 
 vi.mock('../components/ConfigFileEditor', () => ({ ConfigFileEditor: () => null }))
 vi.mock('../components/AdvancedArtifactPanel', () => ({ AdvancedArtifactPanel: () => null }))
+vi.mock('../components/SnapshotHistoryPanel', () => ({ SnapshotHistoryPanel: () => null }))
 vi.mock('../components/validation/ParseResultDetails', () => ({ ParseResultSummaryCard: () => null }))
 
 function renderPage() {

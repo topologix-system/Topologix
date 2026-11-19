@@ -86,13 +86,13 @@ export function Layer1ConnectionForm({
 
   const handleHostname1Change = (value: string | null) => {
     setHostname1(value || '')
-    setInterfaceName1('') // Clear interface when hostname changes
+    setInterfaceName1('')
     interface1Filter.setQuery('')
   }
 
   const handleHostname2Change = (value: string | null) => {
     setHostname2(value || '')
-    setInterfaceName2('') // Clear interface when hostname changes
+    setInterfaceName2('')
     interface2Filter.setQuery('')
   }
 
@@ -115,7 +115,6 @@ export function Layer1ConnectionForm({
         <div className="space-y-4">
           <h4 className="font-medium text-gray-700">{t('layer1Editor.node1')}</h4>
 
-          {/* Hostname 1 Combobox */}
           <Combobox value={hostname1} onChange={handleHostname1Change}>
             <div className="relative">
               <Combobox.Label className="block text-sm font-medium text-gray-700 mb-1">
@@ -172,7 +171,6 @@ export function Layer1ConnectionForm({
             </div>
           </Combobox>
 
-          {/* Interface 1 Combobox */}
           <Combobox value={interfaceName1} onChange={handleInterfaceName1Change} disabled={!hostname1}>
             <div className="relative">
               <Combobox.Label className="block text-sm font-medium text-gray-700 mb-1">
@@ -234,7 +232,6 @@ export function Layer1ConnectionForm({
         <div className="space-y-4">
           <h4 className="font-medium text-gray-700">{t('layer1Editor.node2')}</h4>
 
-          {/* Hostname 2 Combobox */}
           <Combobox value={hostname2} onChange={handleHostname2Change}>
             <div className="relative">
               <Combobox.Label className="block text-sm font-medium text-gray-700 mb-1">
@@ -291,7 +288,6 @@ export function Layer1ConnectionForm({
             </div>
           </Combobox>
 
-          {/* Interface 2 Combobox */}
           <Combobox value={interfaceName2} onChange={handleInterfaceName2Change} disabled={!hostname2}>
             <div className="relative">
               <Combobox.Label className="block text-sm font-medium text-gray-700 mb-1">

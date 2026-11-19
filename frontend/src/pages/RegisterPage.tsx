@@ -1,10 +1,5 @@
 /**
- * New user registration page with password policy enforcement
- * - Form validation with username, email, password, and full name fields
- * - Integrated PasswordPolicyHelper component for real-time password strength feedback
- * - React Query mutation with success message and auto-redirect to login (2s delay)
- * - Error handling with user-friendly messages from API responses
- * - Links back to login page for existing users
+ * New user registration page
  */
 import { useState } from 'react'
 import { useNavigate, Link } from 'react-router-dom'
@@ -29,8 +24,6 @@ export function RegisterPage() {
 
   /**
    * Handle registration form submission
-   * Creates new user account via React Query mutation
-   * Shows success message and redirects to login after 2s
    */
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
@@ -44,22 +37,18 @@ export function RegisterPage() {
         full_name: fullName || undefined,
       })
 
-      // Show success message
       setSuccessMessage(t('register.success'))
 
-      // Redirect to login after 2 seconds
       setTimeout(() => {
         navigate('/login')
       }, 2000)
     } catch (err: unknown) {
-      // Error is stored in mutation.error
       logger.error('Registration failed:', err)
     }
   }
 
   /**
    * Extract error message from registration mutation error
-   * Uses type-safe helper to avoid unsafe type casts
    */
   const errorMessage = registerMutation.error
     ? extractErrorMessage(registerMutation.error, t('register.failed'))
@@ -75,7 +64,6 @@ export function RegisterPage() {
           {!IS_PRODUCTION && <p className="text-sm text-gray-600 mt-1">v{APP_VERSION}</p>}
         </div>
 
-        {/* Registration Form */}
         <form onSubmit={handleSubmit} className="space-y-6">
           {errorMessage && (
             <div

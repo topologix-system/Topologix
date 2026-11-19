@@ -1,10 +1,4 @@
-"""
-Network configuration snapshot data models (dataclasses)
-- Snapshot: Snapshot metadata (name, path, file count, size, created timestamp)
-- SnapshotFile: Individual configuration file metadata
-- Used by SnapshotService for snapshot management
-- Simple DTOs for API responses
-"""
+"""Network configuration snapshot data models (dataclasses)"""
 from dataclasses import dataclass
 
 

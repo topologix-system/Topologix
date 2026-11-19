@@ -1,11 +1,5 @@
 /**
  * Draggable sidebar resize handle component
- * - Mouse event handling: tracks drag with mousedown/mousemove/mouseup listeners
- * - Width constraints: MIN_WIDTH (280px) to MAX_WIDTH (800px) enforced during drag
- * - Zustand store integration: persists sidebar width preference to localStorage
- * - Visual feedback: hover state, active drag state, grip icon indicator
- * - Global cursor override during drag: prevents text selection and shows resize cursor
- * - Used in Sidebar component for user-adjustable sidebar width
  */
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { GripVertical } from 'lucide-react'
@@ -14,8 +8,6 @@ import { logger } from '../utils/logger'
 
 /**
  * Sidebar width constraints (pixels)
- * MIN_WIDTH: Minimum readable width for sidebar content
- * MAX_WIDTH: Maximum width to prevent sidebar from dominating viewport
  */
 const MIN_WIDTH = 280
 const MAX_WIDTH = 800
@@ -41,11 +33,6 @@ export function SidebarResizeHandle() {
 
   /**
    * Handle resize drag operation and cleanup
-   * - Attaches global mousemove/mouseup listeners when dragging starts
-   * - Calculates new width based on mouse delta, clamped to MIN/MAX constraints
-   * - Overrides body cursor and disables text selection during drag
-   * - Cleans up listeners and resets styles when drag ends
-   * Note: useEffect is appropriate here for DOM event listener management (not data fetching)
    */
   useEffect(() => {
     if (!isResizing) return

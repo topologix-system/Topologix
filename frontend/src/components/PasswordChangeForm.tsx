@@ -1,10 +1,5 @@
 /**
  * Password change form component for user profile page
- * - Three-field validation: current password, new password, confirm password
- * - Client-side validation: password mismatch detection, minimum 12 characters
- * - Integrated PasswordPolicyHelper for real-time password strength feedback
- * - React Query mutation with success message and field clearing on success
- * - Used in ProfilePage for authenticated users to change their own password
  */
 import { useState } from 'react'
 import { useTranslation } from 'react-i18next'
@@ -30,8 +25,6 @@ export function PasswordChangeForm({ userId }: PasswordChangeFormProps) {
 
   /**
    * Handle password change form submission
-   * Validates password match and minimum length before submitting
-   * Clears form fields on success
    */
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()

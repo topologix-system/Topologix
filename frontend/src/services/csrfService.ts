@@ -1,14 +1,5 @@
 /**
  * CSRF Token Management for Double-Submit Cookie Pattern
- *
- * Handles cookie reading and validation for stateless CSRF protection.
- * Follows OWASP 2024 best practices for client-side token management.
- *
- * Key Features:
- * - Cookie-based token storage (HttpOnly=false for JS access)
- * - Token expiration validation
- * - Automatic token refresh
- * - Integration with backend double-submit pattern
  */
 
 import { logger } from '../utils/logger';
@@ -29,9 +20,6 @@ export class CSRFService {
 
   /**
    * Store CSRF token in memory for immediate availability
-   * Used after login to prevent race condition with cookie propagation
-   *
-   * @param token CSRF token to store
    */
   static setMemoryToken(token: string): void {
     this.memoryToken = token;
@@ -41,8 +29,6 @@ export class CSRFService {
   /**
    * Read CSRF token from cookie
    * Note: Cookie must have HttpOnly=false for JavaScript access
-   *
-   * @returns CSRF token or null if not found
    */
   static getTokenFromCookie(): string | null {
     const cookies = document.cookie.split(';');
@@ -69,8 +55,6 @@ export class CSRFService {
 
   /**
    * Check if CSRF token exists and is not expired
-   *
-   * @returns true if token is valid and not expired
    */
   static hasValidToken(): boolean {
     const token = this.getTokenFromCookie();
@@ -87,11 +71,9 @@ export class CSRFService {
         return false;
       }
 
-      // Decode base64 payload
       const payloadJson = atob(payloadB64);
       const payload = JSON.parse(payloadJson);
 
-      // Check expiration
       const expires = new Date(payload.expires);
       const now = new Date();
 
@@ -110,15 +92,11 @@ export class CSRFService {
 
   /**
    * Request new CSRF token from server
-   *
-   * @returns Promise resolving to new CSRF token
-   * @throws Error if token refresh fails
    */
   static async refreshToken(): Promise<string> {
     try {
       logger.info('[CSRFService] Refreshing CSRF token from server');
 
-      // Auth via HTTP-only cookie (sent automatically with withCredentials)
       const response = await axios.get(`${API_BASE_URL}/api/auth/csrf-token`, {
         withCredentials: true,
         headers: {
@@ -143,27 +121,15 @@ export class CSRFService {
 
   /**
    * Get CSRF token asynchronously with automatic refresh and retry
-   * This is the PRIMARY method for token retrieval in async contexts
-   *
-   * Uses multi-tier strategy:
-   * 1. Check memory cache (immediate, post-login)
-   * 2. Check cookie (valid existing token)
-   * 3. Refresh from server with retry logic
-   *
-   * @param retryCount - Internal retry counter (default: 0)
-   * @returns Promise resolving to valid CSRF token
-   * @throws Error if token cannot be obtained after retries
    */
   static async getToken(retryCount = 0): Promise<string> {
     const MAX_RETRIES = 2;
 
-    // Priority 1: Check memory token (immediate availability after login)
     if (this.memoryToken) {
       logger.debug('[CSRFService] Using memory token (async)');
       return this.memoryToken;
     }
 
-    // Priority 2: Check cookie token (valid existing token)
     if (this.hasValidToken()) {
       const token = this.getTokenFromCookie();
       if (token) {
@@ -172,12 +138,10 @@ export class CSRFService {
       }
     }
 
-    // Priority 3: Refresh from server with retry logic
     try {
       logger.info('[CSRFService] Token invalid or missing, requesting new token');
       const newToken = await this.refreshToken();
 
-      // Store in memory for immediate subsequent requests
       this.memoryToken = newToken;
       logger.debug('[CSRFService] New token stored in memory cache');
 
@@ -203,30 +167,13 @@ export class CSRFService {
    * @deprecated Use async getToken() instead for better reliability
    *
    * Get CSRF token synchronously (returns null if not available)
-   *
-   * **DEPRECATED:** This method is deprecated and will be removed in a future version.
-   * Use the async `getToken()` method in request interceptors instead for:
-   * - Automatic token refresh on expiration
-   * - Built-in retry logic with exponential backoff
-   * - Better error handling
-   *
-   * This synchronous method is kept for backward compatibility during migration
-   * but may return null in scenarios where async refresh would succeed.
-   *
-   * Uses memory-first strategy:
-   * 1. Check memory cache (immediate availability after login)
-   * 2. Check cookie (fallback for page reload)
-   *
-   * @returns CSRF token or null if not immediately available
    */
   static getTokenSync(): string | null {
-    // Priority 1: Memory cache (immediate availability, no race condition)
     if (this.memoryToken) {
       logger.debug('[CSRFService] Token retrieved from memory (DEPRECATED METHOD - use async getToken())');
       return this.memoryToken;
     }
 
-    // Priority 2: Cookie (fallback for page reload)
     if (this.hasValidToken()) {
       const token = this.getTokenFromCookie();
       if (token) {
@@ -241,9 +188,6 @@ export class CSRFService {
 
   /**
    * Check if a token is immediately available without network request
-   * Useful for deciding whether to make async refresh call
-   *
-   * @returns true if token is available in memory or valid cookie exists
    */
   static hasTokenAvailable(): boolean {
     return !!this.memoryToken || this.hasValidToken();
@@ -251,10 +195,6 @@ export class CSRFService {
 
   /**
    * Force-refresh CSRF token from server, bypassing memory and cookie cache.
-   * Use after a CSRF 403 to ensure a stale cached token is not reused.
-   *
-   * @returns Promise resolving to fresh CSRF token
-   * @throws Error if token refresh fails
    */
   static async forceRefresh(retryCount = 0): Promise<string> {
     const MAX_RETRIES = 2;
@@ -278,13 +218,10 @@ export class CSRFService {
   }
 
   /**
-   * Clear CSRF token (typically on logout)
-   * Clears memory cache. Cookie clearing is handled by server.
+   * Clear the in-memory CSRF token
    */
   static clearToken(): void {
-    // Clear memory token
     this.memoryToken = null;
-    // Cookie clearing is done by server (HttpOnly=false allows JS access but server manages lifecycle)
     logger.debug('[CSRFService] Memory token cleared');
   }
 }

@@ -18,9 +18,6 @@ export const comparisonKeys = {
 
 /**
  * Mutation to compare two snapshots
- * Analyzes differences in nodes, edges, routes, and reachability
- * Returns comprehensive comparison results showing additions, removals, and modifications
- * Used in SnapshotComparison page to display differential analysis
  */
 export function useCompareSnapshots() {
   const queryClient = useQueryClient()
@@ -29,7 +26,6 @@ export function useCompareSnapshots() {
     mutationFn: (request: CompareSnapshotsRequest) =>
       snapshotAPI.compare(request),
     onSuccess: (data, variables) => {
-      // Cache comparison result for potential future use
       queryClient.setQueryData(
         comparisonKeys.compare(variables.base_snapshot, variables.comparison_snapshot),
         data

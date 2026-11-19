@@ -1,3 +1,4 @@
+import test_00_environment  # noqa: F401
 import io
 import json
 import os
@@ -15,8 +16,7 @@ from services.batfish_service import BatfishSnapshotLoadError
 BACKEND_DIR = Path(__file__).resolve().parents[1]
 STACK_MARKERS = ("work_item", "\tat ", "   at org.", "Exception in container", "answerElements")
 
-# Sanitized reproduction of the work log pybatfish raises when Batfish rejects
-# a snapshot (synthetic ids and names, no real environment data).
+# Work log pybatfish raises when Batfish rejects a snapshot.
 SANITIZED_INIT_FAILURE = (
     "Work terminated abnormally\n"
     'work_item: {"containerName": "example_network", '
@@ -37,7 +37,7 @@ SANITIZED_INIT_FAILURE = (
     '"status":"FAILURE"}'
 )
 
-# Synthetic work log whose failure reason carries a password-like token (no real credential).
+# Work log whose failure reason carries a password-like token.
 SECRET_IN_REASON_FAILURE = (
     "Work terminated abnormally\n"
     "log: \n"

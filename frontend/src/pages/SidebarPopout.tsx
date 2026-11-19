@@ -1,11 +1,5 @@
 /**
  * Standalone sidebar window for multi-monitor setups
- * - Opened via popout button in main Sidebar component (window.open)
- * - Initializes tab and selection state from URL query parameters when opened
- * - Lazy-loaded panels (all 6 tabs) with Suspense fallback for performance
- * - Dynamic window title updates based on active tab for easy window identification
- * - Includes NodeSelector for consistent node filtering across windows
- * - Full feature parity with main window sidebar panels
  */
 import { useEffect, lazy, Suspense, useMemo, useState } from 'react'
 import { Info, Router, Link, AlertCircle, Search, Network } from 'lucide-react'
@@ -15,7 +9,6 @@ import { NodeSelector } from '../components/NodeSelector'
 import { logger } from '../utils/logger'
 import { useRovingTabIndex } from '../hooks/useRovingTabIndex'
 
-// Lazy load panels to reduce initial bundle size and API requests
 const OverviewPanel = lazy(() => import('../components/panels/OverviewPanel'))
 const NodeDetailsPanel = lazy(() => import('../components/panels/NodeDetailsPanel'))
 const EdgeDetailsPanel = lazy(() => import('../components/panels/EdgeDetailsPanel'))
@@ -54,8 +47,6 @@ export function SidebarPopout() {
 
   /**
    * Tab configuration array for popout window
-   * Matches main window sidebar tabs for consistent UX
-   * Each tab maps to a lazy-loaded panel component
    */
   const tabs: Array<{ id: SidebarTab; label: string; icon: React.ReactNode }> = useMemo(() => [
     { id: 'overview', label: t('sidebar.tabs.overview'), icon: <Info className="w-4 h-4" /> },
@@ -94,7 +85,6 @@ export function SidebarPopout() {
     setUrlStateApplied(true)
   }, [clearSelection, setSelectedEdge, setSelectedNode, setSidebarTab])
 
-  // Update window title based on active tab
   useEffect(() => {
     const tabLabel = tabs.find((tab) => tab.id === activeTab)?.label || 'Sidebar'
     document.title = `Topologix - ${tabLabel}`
@@ -109,7 +99,6 @@ export function SidebarPopout() {
         <p className="text-xs text-gray-600">{t('app.subtitle', 'Network Topology Visualization')}</p>
       </div>
 
-      {/* Node Selector */}
       <div className="px-4 py-3 border-b border-gray-200 bg-white">
         <NodeSelector />
       </div>

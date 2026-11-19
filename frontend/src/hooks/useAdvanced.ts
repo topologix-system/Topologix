@@ -22,8 +22,6 @@ export const advancedKeys = {
 /**
  * Query F5 BIG-IP Virtual IPs (VIPs)
  * Returns load balancer VIP configurations from F5 devices
- * Used for load balancer analysis and troubleshooting
- * @param enabled - Optional flag to conditionally enable query (default: true)
  */
 export function useF5VIPs(enabled = true) {
   const currentSnapshotName = useSnapshotStore((state) => state.currentSnapshotName)
@@ -39,8 +37,6 @@ export function useF5VIPs(enabled = true) {
 /**
  * Query vendor-independent (VI) configuration model
  * Returns Batfish's normalized device model across all vendors
- * Advanced feature for deep config analysis
- * @param enabled - Optional flag to conditionally enable query (default: true)
  */
 export function useVIModel(enabled = true) {
   const currentSnapshotName = useSnapshotStore((state) => state.currentSnapshotName)
@@ -56,7 +52,6 @@ export function useVIModel(enabled = true) {
 /**
  * Mutation to test route policy behavior
  * Simulates route-map/policy application in specified direction
- * Used for policy validation and troubleshooting
  */
 export function useTestRoutePolicies() {
   return useMutation({
@@ -74,7 +69,6 @@ export function useTestRoutePolicies() {
 /**
  * Mutation to search for route policies across devices
  * Finds route-maps/policies matching action criteria (permit/deny)
- * Supports filtering by specific nodes
  */
 export function useSearchRoutePolicies() {
   return useMutation({
@@ -185,7 +179,6 @@ export function useCompareRoutePolicies() {
 /**
  * Mutation to analyze filter/ACL line reachability
  * Identifies unreachable ACL lines (shadowed by earlier entries)
- * Helps optimize ACL configurations
  */
 export function useFilterLineReachability() {
   return useMutation({
@@ -197,7 +190,6 @@ export function useFilterLineReachability() {
 /**
  * Mutation to test filter/ACL behavior
  * Simulates packet matching against specified filters
- * Used for ACL validation and troubleshooting
  */
 export function useTestFilters() {
   return useMutation({
@@ -209,7 +201,6 @@ export function useTestFilters() {
 /**
  * Mutation to find ACL lines matching packet headers
  * Returns which filter lines would match specified packet characteristics
- * Detailed ACL analysis for specific traffic patterns
  */
 export function useFindMatchingFilterLines() {
   return useMutation({
@@ -221,7 +212,6 @@ export function useFindMatchingFilterLines() {
 /**
  * Mutation to search filters/ACLs by action
  * Finds ACLs with specific permit/deny actions across devices
- * Supports filtering by specific nodes
  */
 export function useSearchFilters() {
   return useMutation({
@@ -233,7 +223,6 @@ export function useSearchFilters() {
 /**
  * Mutation to compute reduced reachability with path constraints
  * Analyzes reachability while respecting specified constraints
- * Advanced reachability analysis for complex scenarios
  */
 export function useReduceReachability() {
   return useMutation({

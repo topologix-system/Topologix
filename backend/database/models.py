@@ -1,23 +1,16 @@
-"""
-SQLAlchemy database models for authentication and authorization
-- User model with password hashing and role management
-- Role model with hierarchical permissions
-- Many-to-many user-role association
-- Password reset tokens and login attempt tracking
-- Revoked JWT token persistence
-- SQLAlchemy 2.0 declarative base with type hints
-"""
+"""SQLAlchemy database models for authentication, authorization and snapshot versioning"""
 import hashlib
 import secrets
 from datetime import datetime, timedelta, timezone
 from typing import List, Optional
-from sqlalchemy import String, Integer, Boolean, DateTime, ForeignKey, Table, Column, Index
+from sqlalchemy import (
+    BigInteger, String, Integer, Boolean, DateTime, ForeignKey, Table, Column, Index, Text, UniqueConstraint
+)
 from sqlalchemy.dialects import mysql
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, relationship
 from werkzeug.security import generate_password_hash, check_password_hash
 
 
-# SQLAlchemy 2.0 declarative base
 class Base(DeclarativeBase):
     """Base class for all database models"""
     pass
@@ -51,24 +44,19 @@ class User(Base):
     """User model with authentication and authorization"""
     __tablename__ = 'users'
 
-    # Primary key
     id: Mapped[int] = mapped_column(primary_key=True, autoincrement=True)
 
-    # Required authentication fields
     username: Mapped[str] = mapped_column(String(50), unique=True, nullable=False, index=True)
     email: Mapped[str] = mapped_column(String(255), unique=True, nullable=False, index=True)
     password_hash: Mapped[str] = mapped_column(String(255), nullable=False)
 
-    # Optional user information
     full_name: Mapped[Optional[str]] = mapped_column(String(100))
 
-    # Status flags
     is_active: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
     is_superuser: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
     email_verified: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
     force_password_change: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
 
-    # Security tracking
     failed_login_attempts: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
     account_locked_until: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True))
     # Token cutoffs keep microseconds on MySQL, whose plain DATETIME stores whole seconds
@@ -82,7 +70,6 @@ class User(Base):
     last_login_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True))
     last_login_ip: Mapped[Optional[str]] = mapped_column(String(45))  # IPv6 max length
 
-    # Timestamps - always timezone-aware
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),
         default=lambda: datetime.now(timezone.utc),
@@ -95,11 +82,10 @@ class User(Base):
         nullable=False
     )
 
-    # Relationships
     roles: Mapped[List["Role"]] = relationship(
         secondary=user_roles,
         back_populates="users",
-        lazy="selectin"  # Avoid N+1 queries
+        lazy="selectin"
     )
 
     # Indexes; SQLite AUTOINCREMENT keeps ids of deleted users from being reassigned
@@ -110,35 +96,17 @@ class User(Base):
     )
 
     def set_password(self, password: str) -> None:
-        """Hash and set password using bcrypt via werkzeug
-
-        Args:
-            password: Plain text password to hash
-        """
+        """Hash and set password via werkzeug"""
         self.password_hash = generate_password_hash(password)
         self.password_changed_at = datetime.now(timezone.utc)
         self.force_password_change = False
 
     def check_password(self, password: str) -> bool:
-        """Verify password against stored hash
-
-        Args:
-            password: Plain text password to verify
-
-        Returns:
-            True if password matches
-        """
+        """Verify password against stored hash"""
         return check_password_hash(self.password_hash, password)
 
     def has_permission(self, permission_name: str) -> bool:
-        """Check if user has a specific permission through their roles
-
-        Args:
-            permission_name: Permission name (e.g., "network:read")
-
-        Returns:
-            True if user has the permission
-        """
+        """Check if user has a specific permission through their roles"""
         if self.is_superuser:
             return True
 
@@ -149,25 +117,11 @@ class User(Base):
         )
 
     def has_role(self, role_name: str) -> bool:
-        """Check if user has a specific role
-
-        Args:
-            role_name: Role name (e.g., "admin")
-
-        Returns:
-            True if user has the role
-        """
+        """Check if user has a specific role"""
         return any(role.name == role_name for role in self.roles)
 
     def to_dict(self, include_roles: bool = True) -> dict:
-        """Convert to dictionary for JSON serialization
-
-        Args:
-            include_roles: Whether to include user's roles
-
-        Returns:
-            Dictionary representation of user
-        """
+        """Convert to dictionary for JSON serialization"""
         data = {
             'id': self.id,
             'username': self.username,
@@ -204,7 +158,6 @@ class Role(Base):
         nullable=False
     )
 
-    # Relationships
     users: Mapped[List["User"]] = relationship(
         secondary=user_roles,
         back_populates="roles",
@@ -217,14 +170,7 @@ class Role(Base):
     )
 
     def to_dict(self, include_permissions: bool = True) -> dict:
-        """Convert to dictionary for JSON serialization
-
-        Args:
-            include_permissions: Whether to include role's permissions
-
-        Returns:
-            Dictionary representation of role
-        """
+        """Convert to dictionary for JSON serialization"""
         data = {
             'id': self.id,
             'name': self.name,
@@ -241,11 +187,7 @@ class Role(Base):
 
 
 class Permission(Base):
-    """Permission model for fine-grained access control
-
-    Permissions follow the format: resource:action
-    Examples: network:read, snapshot:write, user:delete
-    """
+    """Permission model for fine-grained access control"""
     __tablename__ = 'permissions'
 
     id: Mapped[int] = mapped_column(primary_key=True)
@@ -264,7 +206,6 @@ class Permission(Base):
         nullable=False
     )
 
-    # Relationships
     roles: Mapped[List["Role"]] = relationship(
         secondary=role_permissions,
         back_populates="permissions",
@@ -276,11 +217,7 @@ class Permission(Base):
     )
 
     def to_dict(self) -> dict:
-        """Convert to dictionary for JSON serialization
-
-        Returns:
-            Dictionary representation of permission
-        """
+        """Convert to dictionary for JSON serialization"""
         return {
             'id': self.id,
             'name': self.name,
@@ -295,23 +232,17 @@ class Permission(Base):
 
 
 class LoginAttempt(Base):
-    """Login attempt tracking for IP-based rate limiting
-
-    Tracks all login attempts (successful and failed) by IP address
-    for rate limiting and security monitoring.
-    """
+    """Login attempt record"""
     __tablename__ = 'login_attempts'
 
-    # Primary key
     id: Mapped[int] = mapped_column(primary_key=True, autoincrement=True)
 
     # IP address (IPv4 or IPv6)
     ip_address: Mapped[str] = mapped_column(String(45), nullable=False, index=True)
 
-    # Username attempted (may be None for non-existent users)
+    # Username attempted
     username: Mapped[Optional[str]] = mapped_column(String(50), index=True)
 
-    # Timestamp of attempt
     attempt_time: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),
         default=lambda: datetime.now(timezone.utc),
@@ -319,13 +250,11 @@ class LoginAttempt(Base):
         index=True
     )
 
-    # Whether login was successful
     success: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
 
     # User agent string for forensics
     user_agent: Mapped[Optional[str]] = mapped_column(String(255))
 
-    # Indexes for efficient queries
     __table_args__ = (
         Index('idx_login_attempts_ip_time', 'ip_address', 'attempt_time'),
         Index('idx_login_attempts_ip_success', 'ip_address', 'success'),
@@ -343,10 +272,8 @@ class PasswordResetToken(Base):
     """
     __tablename__ = 'password_reset_tokens'
 
-    # Primary key
     id: Mapped[int] = mapped_column(primary_key=True, autoincrement=True)
 
-    # Foreign key to user
     user_id: Mapped[int] = mapped_column(
         Integer,
         ForeignKey('users.id', ondelete='CASCADE'),
@@ -357,26 +284,20 @@ class PasswordResetToken(Base):
     # SHA-256 hash of the token (plaintext never stored)
     token_hash: Mapped[str] = mapped_column(String(255), unique=True, nullable=False, index=True)
 
-    # Expiration timestamp
     expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
 
-    # Usage tracking
     used_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True))
 
-    # Security tracking
     ip_address: Mapped[Optional[str]] = mapped_column(String(45))  # IPv6 max length
 
-    # Creation timestamp
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),
         default=lambda: datetime.now(timezone.utc),
         nullable=False
     )
 
-    # Relationship to user
     user: Mapped["User"] = relationship("User", lazy="joined")
 
-    # Indexes for efficient queries
     __table_args__ = (
         Index('idx_password_reset_token_hash', 'token_hash'),
         Index('idx_password_reset_user_created', 'user_id', 'created_at'),
@@ -397,14 +318,9 @@ class PasswordResetToken(Base):
         ), token
 
     def is_valid(self) -> bool:
-        """Check if token is still valid (not used and not expired)
-
-        Returns:
-            True if token can be used for password reset
-        """
+        """Check if token is still valid (not used and not expired)"""
         now = datetime.now(timezone.utc)
 
-        # Handle timezone-naive datetimes from database
         expires_at = self.expires_at
         if expires_at.tzinfo is None:
             expires_at = expires_at.replace(tzinfo=timezone.utc)
@@ -449,3 +365,124 @@ class RevokedToken(Base):
 
     def __repr__(self) -> str:
         return f"<RevokedToken(jti={self.jti}, expires_at={self.expires_at})>"
+
+
+class HistoryMeta(Base):
+    """Database identity that scopes the snapshot history object store"""
+    __tablename__ = 'history_meta'
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    db_id: Mapped[str] = mapped_column(String(36), unique=True, nullable=False)
+    clear_counter: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
+
+
+class HistoryObject(Base):
+    """Content-addressed object stored in the snapshot history object store"""
+    __tablename__ = 'history_objects'
+
+    sha256: Mapped[str] = mapped_column(String(64), primary_key=True)
+    size: Mapped[int] = mapped_column(BigInteger, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        default=lambda: datetime.now(timezone.utc),
+        nullable=False
+    )
+
+
+class SnapshotVersion(Base):
+    """One committed or automatic version of a snapshot's consumable file set"""
+    __tablename__ = 'snapshot_versions'
+
+    version_id: Mapped[str] = mapped_column(String(36), primary_key=True)
+    snapshot_id: Mapped[str] = mapped_column(String(36), nullable=False)
+    namespace: Mapped[str] = mapped_column(String(64), nullable=False)
+    seq: Mapped[int] = mapped_column(Integer, nullable=False)
+    content_hash: Mapped[str] = mapped_column(String(64), nullable=False, index=True)
+    parent_version_id: Mapped[Optional[str]] = mapped_column(
+        String(36), ForeignKey('snapshot_versions.version_id', ondelete='SET NULL')
+    )
+    parent_seq: Mapped[Optional[int]] = mapped_column(Integer)
+    kind: Mapped[str] = mapped_column(String(16), nullable=False)
+    message: Mapped[str] = mapped_column(String(500), nullable=False)
+    author_user_id: Mapped[Optional[int]] = mapped_column(Integer)
+    author_username: Mapped[Optional[str]] = mapped_column(String(50))
+    restored_from_version_id: Mapped[Optional[str]] = mapped_column(
+        String(36), ForeignKey('snapshot_versions.version_id', ondelete='SET NULL')
+    )
+    restored_from_seq: Mapped[Optional[int]] = mapped_column(Integer)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        default=lambda: datetime.now(timezone.utc),
+        nullable=False
+    )
+    file_count: Mapped[int] = mapped_column(Integer, nullable=False)
+    total_bytes: Mapped[int] = mapped_column(BigInteger, nullable=False)
+
+    __table_args__ = (
+        UniqueConstraint('namespace', 'snapshot_id', 'seq', name='uq_snapshot_versions_namespace_snapshot_seq'),
+        Index('idx_snapshot_versions_snapshot', 'namespace', 'snapshot_id'),
+    )
+
+
+class SnapshotVersionFile(Base):
+    """Manifest entry of a snapshot version"""
+    __tablename__ = 'snapshot_version_files'
+
+    id: Mapped[int] = mapped_column(primary_key=True, autoincrement=True)
+    version_id: Mapped[str] = mapped_column(
+        String(36),
+        ForeignKey('snapshot_versions.version_id', ondelete='CASCADE'),
+        nullable=False,
+        index=True
+    )
+    path: Mapped[str] = mapped_column(Text, nullable=False)
+    sha256: Mapped[str] = mapped_column(
+        String(64),
+        ForeignKey('history_objects.sha256', ondelete='RESTRICT'),
+        nullable=False,
+        index=True
+    )
+    size: Mapped[int] = mapped_column(BigInteger, nullable=False)
+
+
+class SnapshotState(Base):
+    """Working-tree state of one snapshot within one deployment namespace"""
+    __tablename__ = 'snapshot_states'
+
+    id: Mapped[int] = mapped_column(primary_key=True, autoincrement=True)
+    namespace: Mapped[str] = mapped_column(String(64), nullable=False)
+    snapshot_id: Mapped[str] = mapped_column(String(36), nullable=False)
+    snapshot_name: Mapped[str] = mapped_column(String(255), nullable=False)
+    stat_fingerprint: Mapped[Optional[str]] = mapped_column(String(64))
+    content_hash: Mapped[Optional[str]] = mapped_column(String(64))
+    head_version_id: Mapped[Optional[str]] = mapped_column(
+        String(36), ForeignKey('snapshot_versions.version_id', ondelete='SET NULL')
+    )
+    next_seq: Mapped[int] = mapped_column(Integer, default=1, nullable=False)
+    restored_from_version_id: Mapped[Optional[str]] = mapped_column(
+        String(36), ForeignKey('snapshot_versions.version_id', ondelete='SET NULL')
+    )
+    restored_from_seq: Mapped[Optional[int]] = mapped_column(Integer)
+    pending_external: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
+    missing_since: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True))
+    clear_seq: Mapped[Optional[int]] = mapped_column(Integer)
+    evaluated_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True))
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        default=lambda: datetime.now(timezone.utc),
+        onupdate=lambda: datetime.now(timezone.utc),
+        nullable=False
+    )
+
+    __table_args__ = (
+        UniqueConstraint('namespace', 'snapshot_id', name='uq_snapshot_states_namespace_snapshot'),
+    )
+
+
+class HistoryNamespace(Base):
+    """Deployment namespace that used this database for snapshot history"""
+    __tablename__ = 'history_namespaces'
+
+    namespace: Mapped[str] = mapped_column(String(64), primary_key=True)
+    first_seen_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    last_seen_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)

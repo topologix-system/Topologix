@@ -10,6 +10,7 @@ import {
 import type { HostSearchErrorCode, InterfaceNetworkMatchSource } from '../../types/ipSearch'
 import type { IPOwner } from '../../types/ip'
 import type { InterfaceProperties } from '../../types/network'
+import { hashKeyedErrorText } from '../snapshotVersionLabels'
 
 interface IPSearchPanelProps {
   ipOwners?: IPOwner[]
@@ -74,7 +75,7 @@ export function IPSearchPanel({ ipOwners = [], interfaces = [], isLoading, error
   const [submittedQuery, setSubmittedQuery] = useState('')
   const [includeInactive, setIncludeInactive] = useState(false)
   const hasDataError = Boolean(error)
-  const dataErrorMessage = getDataErrorMessage(error)
+  const dataErrorMessage = hashKeyedErrorText(t, error) ?? getDataErrorMessage(error)
 
   const currentInput = useMemo(() => normalizeHostSearchInput(query), [query])
   const submittedInput = useMemo(

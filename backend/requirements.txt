@@ -26,11 +26,11 @@ click==8.1.7
 gunicorn==23.0.0
 gevent==23.9.1
 
-# Redis for caching/sessions (production)
+# Redis client
 redis==5.0.1
 hiredis==2.2.3
 
-# Database (optional, for future use)
+# Database
 SQLAlchemy==2.0.23
 alembic==1.13.0
 

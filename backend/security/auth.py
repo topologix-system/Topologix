@@ -1,10 +1,4 @@
-"""
-JWT authentication and authorization
-- JWT token generation, validation, and refresh
-- Login/logout with password verification
-- Role-based access control decorators (@require_auth, @require_role)
-- Password reset token generation and validation
-"""
+"""JWT authentication and authorization"""
 import logging
 import secrets
 import time
@@ -21,30 +15,16 @@ logger = logging.getLogger(__name__)
 
 
 class TooManyAttemptsError(Exception):
-    """Rate limiting exception for login attempts (retained for app.py handler compatibility)"""
+    """Rate limiting exception for login attempts"""
     def __init__(self, retry_after: int):
         self.retry_after = retry_after
         super().__init__(f"Too many attempts, retry after {retry_after}s")
 
 
 def get_client_ip() -> str:
-    """Get real client IP address with validation
-
-    Priority order:
-    1. X-Original-Client-IP (custom header set by reverse proxy with actual client IP)
-    2. request.remote_addr (after ProxyFix middleware)
-    3. X-Forwarded-For fallback
-
-    Note: In environments behind NAT/NAPT gateways or load balancers, the IP
-    address may represent the gateway/proxy rather than the actual client.
-    This is acceptable for security logging purposes.
-
-    Returns:
-        Client IP address string
-    """
+    """Get real client IP address with validation"""
     import ipaddress
 
-    # Priority 1: Custom header from reverse proxy with actual client IP
     original_ip = request.headers.get('X-Original-Client-IP')
     if original_ip:
         original_ip = original_ip.strip()
@@ -55,10 +35,8 @@ def get_client_ip() -> str:
         except ValueError:
             logger.warning(f"Invalid IP in X-Original-Client-IP: {original_ip}")
 
-    # Priority 2: After ProxyFix, remote_addr should be correct
     ip = request.remote_addr
 
-    # Validate IP format
     if ip:
         try:
             ipaddress.ip_address(ip)
@@ -67,10 +45,8 @@ def get_client_ip() -> str:
         except ValueError:
             logger.warning(f"Invalid IP format from request.remote_addr: {ip}")
 
-    # Priority 3: Fallback to X-Forwarded-For header
     xff = request.headers.get('X-Forwarded-For')
     if xff:
-        # Take first IP in the chain
         first_ip = xff.split(',')[0].strip()
         try:
             ipaddress.ip_address(first_ip)
@@ -79,13 +55,11 @@ def get_client_ip() -> str:
         except ValueError:
             logger.warning(f"Invalid IP in X-Forwarded-For: {first_ip}")
 
-    # Final fallback
     logger.error("Could not determine client IP, using 0.0.0.0")
     return "0.0.0.0"
 
 
 # In-memory user database (used only when AUTH_ENABLED=false)
-# This provides a simple authentication mechanism for quick setup
 USERS_DB = {
     "admin": {
         "id": 1,
@@ -103,14 +77,8 @@ USERS_DB = {
     }
 }
 
-# Initialize default passwords for in-memory database
 def _initialize_passwords():
-    """Initialize default passwords for in-memory USERS_DB
-
-    Only used when AUTH_ENABLED=false.
-    When AUTH_ENABLED=true, users are managed in the database.
-    Passwords are read from environment variables or generated randomly at startup.
-    """
+    """Initialize default passwords for in-memory USERS_DB"""
     import os
     admin_pass = os.getenv('DEV_ADMIN_PASSWORD') or secrets.token_urlsafe(16)
     viewer_pass = os.getenv('DEV_VIEWER_PASSWORD') or secrets.token_urlsafe(16)
@@ -131,23 +99,17 @@ class JWTManager:
     """Manages JWT authentication for the application"""
 
     def __init__(self, app=None, secret_key: Optional[str] = None):
-        """Initialize JWT Manager
-
-        Args:
-            app: Flask application instance
-            secret_key: Secret key for JWT signing (should be from environment)
-        """
+        """Initialize JWT Manager"""
         self.secret_key = secret_key or secrets.token_urlsafe(32)
         self.algorithm = "HS256"
 
-        # Read JWT access token expiration from config or use default (1 hour)
         expires_seconds = 3600  # Default: 1 hour
         if app and hasattr(app, 'config'):
             expires_seconds = app.config.get('JWT_ACCESS_TOKEN_EXPIRES', 3600)
         self.access_token_expires = timedelta(seconds=expires_seconds)
 
         self.refresh_token_expires = timedelta(days=7)
-        self.token_blacklist = set()  # In production, use Redis or database
+        self.token_blacklist = set()
 
         if app:
             self.init_app(app)
@@ -156,10 +118,8 @@ class JWTManager:
         """Initialize the Flask application for JWT"""
         app.jwt_manager = self
 
-        # Add before_request handler for token validation
         @app.before_request
         def validate_token():
-            # Skip authentication for certain endpoints
             exempt_endpoints = [
                 '/api/health',
                 '/api/auth/login',
@@ -171,7 +131,6 @@ class JWTManager:
             if request.path in exempt_endpoints or request.method == 'OPTIONS':
                 return
 
-            # Validate token for all other endpoints
             token = self._extract_token()
             if token:
                 try:
@@ -184,27 +143,14 @@ class JWTManager:
 
     def generate_tokens(self, user_id: str, username: str, roles: List[str],
                         session_id: Optional[str] = None) -> Dict[str, str]:
-        """Generate access and refresh tokens
+        """Generate access and refresh tokens carrying the login session id ("sid")
 
-        Both tokens carry the login session id ("sid"); revoking the sid revokes every
-        token of that session. "iat" has sub-second precision so it can be compared
-        with the user's password_changed_at.
-
-        Args:
-            user_id: User identifier
-            username: Username
-            roles: List of user roles
-            session_id: Login session id to keep (token refresh); a new login session
-                uses the refresh token's jti
-
-        Returns:
-            Dictionary containing access_token and refresh_token
+        "iat" has sub-second precision so it can be compared with the user's password_changed_at.
         """
         now = datetime.now(timezone.utc)
         refresh_jti = secrets.token_urlsafe(16)
         session_id = session_id or refresh_jti
 
-        # Access token payload
         access_payload = {
             "user_id": user_id,
             "username": username,
@@ -216,7 +162,6 @@ class JWTManager:
             "sid": session_id
         }
 
-        # Refresh token payload
         refresh_payload = {
             "user_id": user_id,
             "type": "refresh",
@@ -239,28 +184,10 @@ class JWTManager:
         }
 
     def decode_token(self, token: str) -> Dict[str, Any]:
-        """Decode and validate JWT token
-
-        When AUTH_ENABLED=true, the token's user must still exist, be active, and not have
-        changed the password or had its tokens invalidated after the token was issued; the
-        roles claim of an access token is replaced with the user's current roles from the
-        database.
-
-        Args:
-            token: JWT token string
-
-        Returns:
-            Decoded token payload
-
-        Raises:
-            jwt.InvalidTokenError: If token is invalid
-            jwt.ExpiredSignatureError: If token has expired
-        """
-        # Check if token is blacklisted (in-memory cache)
+        """Decode and validate JWT token"""
         if token in self.token_blacklist:
             raise jwt.InvalidTokenError("Token has been revoked")
 
-        # Check persistent blacklist by JTI and login session id
         try:
             pre_payload = jwt.decode(token, self.secret_key, algorithms=[self.algorithm], options={"verify_exp": False})
             revocation_ids = [value for value in (pre_payload.get('jti'), pre_payload.get('sid')) if value]
@@ -284,7 +211,6 @@ class JWTManager:
                 algorithms=[self.algorithm]
             )
 
-            # Additional validation
             if "type" not in payload:
                 raise jwt.InvalidTokenError("Invalid token structure")
 
@@ -301,16 +227,7 @@ class JWTManager:
             raise
 
     def _check_token_user(self, payload: Dict[str, Any]) -> None:
-        """Validate the token's user against the database
-
-        Args:
-            payload: Decoded token payload; the roles claim of an access token is
-                replaced with the user's current roles
-
-        Raises:
-            jwt.InvalidTokenError: If the user no longer exists, is inactive, or changed
-                the password or had its tokens invalidated after the token was issued
-        """
+        """Validate the token's user against the database"""
         user_state = self._load_token_user(payload.get("user_id"))
         if user_state is None:
             raise jwt.InvalidTokenError("Token user no longer exists")
@@ -329,20 +246,7 @@ class JWTManager:
             payload["roles"] = user_state["roles"]
 
     def _load_token_user(self, user_id: Any) -> Optional[Dict[str, Any]]:
-        """Load a token user's active flag, token cutoff times and roles
-
-        Uses a single query and caches the result for the current request.
-
-        Args:
-            user_id: user_id claim of the token
-
-        Returns:
-            Dictionary with is_active, password_changed_at and tokens_invalid_before
-            (POSIX timestamps or None) and roles, or None if the user does not exist
-
-        Raises:
-            jwt.InvalidTokenError: If the user cannot be loaded from the database
-        """
+        """Load a token user's active flag, token cutoff times and roles"""
         try:
             user_id = int(user_id)
         except (TypeError, ValueError):
@@ -389,18 +293,7 @@ class JWTManager:
         return user_state
 
     def revoke_token(self, token: str) -> Optional[Dict[str, Any]]:
-        """Revoke a token and its login session (in-memory + persistent DB)
-
-        Revoking the session id ("sid") also rejects the session's refresh token and
-        every access token minted from it. Expired tokens are revoked as well; a token
-        whose signature does not verify is ignored.
-
-        Args:
-            token: JWT token to revoke
-
-        Returns:
-            The revoked token's payload, or None if the token could not be verified
-        """
+        """Revoke a token and its login session (in-memory + persistent DB)"""
         try:
             payload = jwt.decode(token, self.secret_key, algorithms=[self.algorithm], options={"verify_exp": False})
         except jwt.InvalidTokenError as e:
@@ -436,12 +329,7 @@ class JWTManager:
         return payload
 
     def _extract_token(self) -> Optional[str]:
-        """Extract JWT token from request
-
-        Returns:
-            Token string or None if not found
-        """
-        # Check Authorization header
+        """Extract JWT token from request"""
         auth_header = request.headers.get('Authorization')
         if auth_header:
             try:
@@ -451,38 +339,22 @@ class JWTManager:
             except ValueError:
                 pass
 
-        # Check cookie (for web browser clients)
         token = request.cookies.get('access_token')
         if token:
             return token
 
-        # Check query parameter (only for specific endpoints like downloads)
         if request.path.startswith('/api/download/'):
             return request.args.get('token')
 
         return None
 
     def authenticate_user(self, username: str, password: str) -> Optional[Dict[str, Any]]:
-        """Authenticate user with username and password
-
-        Supports two authentication modes:
-        - AUTH_ENABLED=false: Uses in-memory USERS_DB
-        - AUTH_ENABLED=true: Uses database authentication with security tracking
-
-        Args:
-            username: Username
-            password: Password
-
-        Returns:
-            User data if authentication successful, None otherwise
-        """
+        """Authenticate user with username and password"""
         auth_enabled = current_app.config.get('AUTH_ENABLED', False)
 
         if not auth_enabled:
-            # Use in-memory USERS_DB
             return self._authenticate_in_memory(username, password)
         else:
-            # Use database authentication
             return self._authenticate_database(username, password)
 
     def _authenticate_in_memory(self, username: str, password: str) -> Optional[Dict[str, Any]]:
@@ -505,16 +377,7 @@ class JWTManager:
         }
 
     def _apply_progressive_delay(self, attempt_count: int):
-        """Apply progressive delay after repeated failed login attempts
-
-        Sleeps for an exponentially increasing duration after PROGRESSIVE_DELAY_THRESHOLD
-        consecutive failures. Unlike the raise-based approach, sleeping allows the request
-        to proceed to password verification — so a correct password will succeed and reset
-        the counter.
-
-        Args:
-            attempt_count: Number of failed login attempts
-        """
+        """Apply progressive delay after repeated failed login attempts"""
         threshold = 3
         if attempt_count < threshold:
             return
@@ -525,14 +388,7 @@ class JWTManager:
         time.sleep(base_delay)
 
     def _check_ip_rate_limit(self, ip_address: str) -> tuple[bool, int]:
-        """Check if IP address is rate limited
-
-        Args:
-            ip_address: IP address to check
-
-        Returns:
-            Tuple of (is_blocked, remaining_seconds)
-        """
+        """Check if IP address is rate limited"""
         from database.models import LoginAttempt
         from database.session import get_db
 
@@ -543,7 +399,6 @@ class JWTManager:
             cutoff_time = datetime.now(timezone.utc) - timedelta(minutes=window_minutes)
 
             with next(get_db()) as db:
-                # Count failed attempts from this IP in the time window
                 recent_attempts = db.query(LoginAttempt).filter(
                     LoginAttempt.ip_address == ip_address,
                     LoginAttempt.attempt_time > cutoff_time,
@@ -551,7 +406,6 @@ class JWTManager:
                 ).count()
 
                 if recent_attempts >= max_attempts:
-                    # Calculate remaining block time
                     oldest_attempt = db.query(LoginAttempt).filter(
                         LoginAttempt.ip_address == ip_address,
                         LoginAttempt.attempt_time > cutoff_time
@@ -569,13 +423,7 @@ class JWTManager:
             return False, 0  # Fail open on errors
 
     def _record_login_attempt(self, ip_address: str, username: Optional[str], success: bool):
-        """Record login attempt for rate limiting and security monitoring
-
-        Args:
-            ip_address: IP address of the attempt
-            username: Username attempted (may be None)
-            success: Whether login was successful
-        """
+        """Record a login attempt"""
         from database.models import LoginAttempt
         from database.session import get_db
 
@@ -596,45 +444,25 @@ class JWTManager:
 
         except Exception as e:
             logger.error(f"Error recording login attempt: {e}")
-            # Don't fail login on logging error
 
     def _authenticate_database(self, username: str, password: str) -> Optional[Dict[str, Any]]:
-        """Authenticate against database (AUTH_ENABLED=true)
-
-        Includes security features:
-        - Account lockout after failed attempts (5 attempts = 30 min lockout)
-        - Progressive delay to slow down brute force attacks
-        - Failed login tracking
-        - Last login timestamp and IP tracking
-
-        Note: IP-based rate limiting is disabled because this application may be
-        deployed behind NAT/NAPT gateways, load balancers, or proxies where
-        multiple users share the same IP address. Account-based security measures
-        provide sufficient protection in these environments.
-        """
+        """Authenticate against database (AUTH_ENABLED=true)"""
         from database.models import User
         from database.session import get_db
 
         ip_address = get_client_ip()
 
-        # IP-based rate limiting is disabled for shared IP environments
-        # All security is handled by account-based measures below
-
         try:
             with next(get_db()) as db:
-                # Find user by username
                 stmt = select(User).where(User.username == username)
                 user = db.scalar(stmt)
 
-                # 2. Check if user exists
                 if not user:
                     logger.warning(f"Login attempt for non-existent user {username} from {ip_address}")
                     self._record_login_attempt(ip_address, username, False)
                     return None
 
-                # 3. Check if account is locked
                 if user.account_locked_until:
-                    # Handle timezone-naive datetimes from SQLite
                     locked_until = user.account_locked_until
                     if locked_until.tzinfo is None:
                         locked_until = locked_until.replace(tzinfo=timezone.utc)
@@ -645,36 +473,28 @@ class JWTManager:
                             f"Login attempt for locked account {username} from {ip_address} "
                             f"(locked until {user.account_locked_until})"
                         )
-                        # Record failed attempt
                         self._record_login_attempt(ip_address, username, False)
                         return None
                     else:
-                        # Lock expired, reset failed attempts
                         user.account_locked_until = None
                         user.failed_login_attempts = 0
 
-                # 4. Check if account is active
                 if not user.is_active:
                     logger.warning(f"Login attempt for inactive account {username} from {ip_address}")
-                    # Record failed attempt
                     self._record_login_attempt(ip_address, username, False)
                     return None
 
-                # 5. Apply progressive delay BEFORE password verification
-                # This slows down brute force attacks based on previous failed attempts
+                # Apply progressive delay BEFORE password verification
                 if user.failed_login_attempts > 0:
                     self._apply_progressive_delay(user.failed_login_attempts)
 
-                # 6. Verify password
                 if not user.check_password(password):
-                    # Increment failed login attempts
                     user.failed_login_attempts += 1
                     logger.warning(
                         f"Failed login attempt for user {username} from {ip_address} "
                         f"(attempt {user.failed_login_attempts})"
                     )
 
-                    # Lock account after threshold (default: 5 failed attempts)
                     lockout_threshold = current_app.config.get('ACCOUNT_LOCKOUT_THRESHOLD', 5)
                     lockout_duration_minutes = current_app.config.get('LOGIN_LOCKOUT_DURATION_MINUTES', 30)
 
@@ -687,11 +507,9 @@ class JWTManager:
 
                     db.commit()
 
-                    # Record failed attempt for security monitoring
                     self._record_login_attempt(ip_address, username, False)
                     return None
 
-                # 6. Successful authentication - reset failed attempts and update login info
                 user.failed_login_attempts = 0
                 user.account_locked_until = None
                 user.last_login_at = datetime.now(timezone.utc)
@@ -700,7 +518,6 @@ class JWTManager:
 
                 logger.info(f"Successful database login for user {username} from {ip_address}")
 
-                # Record successful attempt
                 self._record_login_attempt(ip_address, username, True)
 
                 return {
@@ -712,20 +529,12 @@ class JWTManager:
 
         except Exception as e:
             logger.error(f"Database authentication error for user {username}: {e}")
-            # Record failed attempt on exception
             self._record_login_attempt(ip_address, username, False)
             return None
 
 
 def require_auth(f):
-    """Decorator to require authentication for an endpoint
-
-    Args:
-        f: Function to decorate
-
-    Returns:
-        Decorated function that requires authentication
-    """
+    """Decorator to require authentication for an endpoint"""
     @wraps(f)
     def decorated_function(*args, **kwargs):
         jwt_manager = current_app.jwt_manager
@@ -741,7 +550,6 @@ def require_auth(f):
         try:
             payload = jwt_manager.decode_token(token)
 
-            # Only allow access tokens for API calls
             if payload.get("type") != "access":
                 return jsonify({
                     "status": "error",
@@ -766,21 +574,13 @@ def require_auth(f):
 
 
 def require_role(*allowed_roles):
-    """Decorator to require specific roles for an endpoint
-
-    Args:
-        allowed_roles: Roles that are allowed to access the endpoint
-
-    Returns:
-        Decorator function
-    """
+    """Decorator to require specific roles for an endpoint"""
     def decorator(f):
         @wraps(f)
         @require_auth
         def decorated_function(*args, **kwargs):
             user_roles = request.jwt_payload.get("roles", [])
 
-            # Check if user has any of the allowed roles
             if not any(role in user_roles for role in allowed_roles):
                 logger.warning(
                     f"Access denied for user {request.jwt_payload.get('username')} "
@@ -799,11 +599,7 @@ def require_role(*allowed_roles):
 
 
 def get_current_user() -> Optional[Dict[str, Any]]:
-    """Get current authenticated user from request context
-
-    Returns:
-        User data or None if not authenticated
-    """
+    """Get current authenticated user from request context"""
     if hasattr(request, 'jwt_payload'):
         return {
             "id": request.jwt_payload.get("user_id"),

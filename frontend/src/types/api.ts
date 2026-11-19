@@ -1,7 +1,6 @@
 /**
  * API request/response type definitions
  * Defines data structures for HTTP API communication with backend
- * Includes APIResponse wrapper, network initialization, and comprehensive data aggregation types
  */
 import {
   NodeProperties,
@@ -47,6 +46,24 @@ export interface NetworkInitializeResponse {
   init_issues: InitIssue[]
   parse_warnings: ParseWarning[]
   initialization_result: Record<string, unknown>
+  parsed?: boolean
+}
+
+export interface SnapshotVersionInfo {
+  content_hash: string | null
+  live: boolean
+  live_hash: string | null
+}
+
+export interface ResultIdentityHeaders {
+  snapshotId?: string
+  contentHash?: string
+  cacheStatus?: string
+}
+
+export interface HashKeyedResponse<T> {
+  data: T
+  identity: ResultIdentityHeaders
 }
 
 export interface AggregateQueryError {
@@ -61,6 +78,7 @@ export interface AggregateQueryError {
 
 export interface AllNetworkData {
   query_errors?: AggregateQueryError[]
+  snapshot_version?: SnapshotVersionInfo
   node_properties: NodeProperties[]
   interface_properties: InterfaceProperties[]
   routes: Route[]

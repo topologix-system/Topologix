@@ -11,7 +11,6 @@ const snapshotSegment = (snapshotName: string | null) => snapshotName ?? inactiv
 
 /**
  * Query key factory for BGP-related React Query caches
- * Hierarchical structure enables targeted cache invalidation
  */
 export const bgpKeys = {
   all: ['bgp'] as const,
@@ -25,7 +24,6 @@ export const bgpKeys = {
 /**
  * Query BGP peer configurations across network devices
  * Returns neighbor addresses, AS numbers, and peering policies
- * @param enabled - Optional flag to conditionally enable query (default: true)
  */
 export function useBGPPeerConfiguration(enabled = true) {
   const currentSnapshotName = useSnapshotStore((state) => state.currentSnapshotName)
@@ -40,8 +38,6 @@ export function useBGPPeerConfiguration(enabled = true) {
 
 /**
  * Query BGP process configurations
- * Returns router IDs, AS numbers, and global BGP settings
- * @param enabled - Optional flag to conditionally enable query (default: true)
  */
 export function useBGPProcessConfiguration(enabled = true) {
   const currentSnapshotName = useSnapshotStore((state) => state.currentSnapshotName)
@@ -56,8 +52,6 @@ export function useBGPProcessConfiguration(enabled = true) {
 
 /**
  * Query BGP session status for all neighbors
- * Returns session states (Established, Idle, Active, etc.) and uptime
- * @param enabled - Optional flag to conditionally enable query (default: true)
  */
 export function useBGPSessionStatus(enabled = true) {
   const currentSnapshotName = useSnapshotStore((state) => state.currentSnapshotName)
@@ -73,7 +67,6 @@ export function useBGPSessionStatus(enabled = true) {
 /**
  * Query BGP session compatibility issues
  * Identifies configuration mismatches preventing session establishment
- * @param enabled - Optional flag to conditionally enable query (default: true)
  */
 export function useBGPSessionCompatibility(enabled = true) {
   const currentSnapshotName = useSnapshotStore((state) => state.currentSnapshotName)
@@ -89,7 +82,6 @@ export function useBGPSessionCompatibility(enabled = true) {
 /**
  * Query BGP Routing Information Base (RIB)
  * Returns learned BGP routes with next-hops, AS paths, and attributes
- * @param enabled - Optional flag to conditionally enable query (default: true)
  */
 export function useBGPRib(enabled = true) {
   const currentSnapshotName = useSnapshotStore((state) => state.currentSnapshotName)

@@ -1,6 +1,7 @@
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { layer1API } from '../services/api'
 import type { Layer1Topology } from '../types/layer1'
+import { getClientGeneration, refreshAfterLayer1Change } from './useSnapshotVersions'
 
 export const layer1EditorKeys = {
   all: ['layer1Editor'] as const,
@@ -34,10 +35,10 @@ export function useSaveLayer1TopologyEditor() {
   return useMutation({
     mutationFn: ({ snapshotName, topology }: { snapshotName: string; topology: Layer1Topology }) =>
       layer1API.saveTopology(snapshotName, topology),
-    onSuccess: (_, variables) => {
+    onMutate: () => ({ generation: getClientGeneration(queryClient) }),
+    onSuccess: (_, variables, context) => {
       queryClient.invalidateQueries({ queryKey: layer1EditorKeys.topology(variables.snapshotName) })
-      queryClient.invalidateQueries({ queryKey: ['network'] })
-      queryClient.refetchQueries({ queryKey: ['topology'] })
+      return refreshAfterLayer1Change(queryClient, variables.snapshotName, context?.generation)
     },
   })
 }
@@ -47,10 +48,10 @@ export function useDeleteLayer1TopologyEditor() {
 
   return useMutation({
     mutationFn: (snapshotName: string) => layer1API.deleteTopology(snapshotName),
-    onSuccess: (_, snapshotName) => {
+    onMutate: () => ({ generation: getClientGeneration(queryClient) }),
+    onSuccess: (_, snapshotName, context) => {
       queryClient.invalidateQueries({ queryKey: layer1EditorKeys.topology(snapshotName) })
-      queryClient.invalidateQueries({ queryKey: ['network'] })
-      queryClient.refetchQueries({ queryKey: ['topology'] })
+      return refreshAfterLayer1Change(queryClient, snapshotName, context?.generation)
     },
   })
 }

@@ -15,7 +15,7 @@ node_modules
 *.local
 dist-ssr
 
-# Next.js (future)
+# Next.js
 .next/
 out/
 

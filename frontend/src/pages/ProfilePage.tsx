@@ -1,10 +1,5 @@
 /**
  * User profile management page for current authenticated user
- * - Self-service profile editing: email, full name (username immutable)
- * - Integrated password change form component with separate section
- * - Form state management with controlled inputs and isEditing tracking
- * - React Query mutations with success messages and auto-clearing timeouts
- * - Displays user roles (read-only) - only admins can modify roles via UserEditPage
  */
 import { useState, useEffect } from 'react'
 import { useTranslation } from 'react-i18next'
@@ -35,8 +30,6 @@ export function ProfilePage() {
 
   /**
    * Handle profile update form submission
-   * Updates email and full name via React Query mutation
-   * Shows success message with 3s auto-clear timeout
    */
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
@@ -53,16 +46,13 @@ export function ProfilePage() {
         },
       })
 
-      // Show success message
       setSuccessMessage(t('profile.updated'))
       setIsEditing(false)
 
-      // Clear success message after 3 seconds
       setTimeout(() => {
         setSuccessMessage('')
       }, 3000)
     } catch (err: any) {
-      // Error is stored in mutation.error
       logger.error('Profile update failed:', err)
     }
   }
@@ -230,7 +220,6 @@ export function ProfilePage() {
           </form>
         </div>
 
-        {/* Password Change Section */}
         <PasswordChangeForm userId={currentUser.id} />
       </div>
     </div>

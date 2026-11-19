@@ -1,10 +1,5 @@
 /**
  * Security audit log table component with timezone-aware formatting
- * - Helper functions: parseAsUtc for timestamp normalization, timeAgo for relative times
- * - formatDateInTimezone using Intl.DateTimeFormat for configurable timezone display
- * - Success/fail indicators with color-coded status badges (green/red)
- * - Displays IP address, username, timestamp, user agent, and login success status
- * - Used in SecurityLogsPage for admin security audit tracking
  */
 import { CheckCircle, XCircle, Monitor, User, Calendar } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
@@ -15,9 +10,6 @@ import { logger } from '../utils/logger'
 
 /**
  * Parse timestamp string as UTC if no timezone indicator present
- * Handles timezone-naive timestamps from backend by appending 'Z'
- * @param timestamp - ISO 8601 timestamp string
- * @returns Date object in UTC
  */
 function parseAsUtc(timestamp: string): Date {
   if (!timestamp.endsWith('Z') && !/[+-]\d{2}:\d{2}$/.test(timestamp)) {
@@ -28,9 +20,6 @@ function parseAsUtc(timestamp: string): Date {
 
 /**
  * Convert date to human-readable relative time string using i18n
- * @param date - Date object to convert
- * @param t - i18n translation function
- * @returns Localized relative time string
  */
 function timeAgo(date: Date, t: TFunction): string {
   const now = new Date()
@@ -46,10 +35,6 @@ function timeAgo(date: Date, t: TFunction): string {
 
 /**
  * Format date in specified timezone using Intl.DateTimeFormat
- * Falls back to ISO string if timezone is invalid
- * @param date - Date object to format
- * @param timezone - IANA timezone identifier (e.g., "Asia/Tokyo")
- * @returns Formatted date string in "YYYY/MM/DD HH:mm:ss" format
  */
 function formatDateInTimezone(date: Date, timezone: string, locale: string): string {
   try {

@@ -1,10 +1,5 @@
 /**
  * Comprehensive node details panel with 14 tabs
- * - Displays all Batfish node properties: interfaces, routes, VLANs, ACLs, AAA, OSPF, BGP, HSRP, VRRP, and more
- * - Implements React Rules of Hooks compliance: all hooks before conditional returns (see lines 38, 43, 205)
- * - Uses useMemo extensively for filtering/searching large datasets (routes can exceed 10K entries)
- * - Largest component in codebase (1830 lines) - handles complex nested data structures from network devices
- * - Interactive search and filtering within each tab for efficient navigation
  */
 import { useState, memo, useMemo, useCallback, useRef } from 'react'
 import { useTranslation } from 'react-i18next'
@@ -96,7 +91,6 @@ export const NodeDetailsPanel = memo(function NodeDetailsPanel() {
   const { data } = useAllNetworkData()
   const [activeTab, setActiveTab] = useState<TabType>('basic')
 
-  // Memoize tab change handler
   const handleTabChange = useCallback((tabId: TabType) => {
     setActiveTab(tabId)
   }, [])
@@ -107,7 +101,6 @@ export const NodeDetailsPanel = memo(function NodeDetailsPanel() {
     onSelect: handleTabChange,
   })
 
-  // Compute node (not a hook - always execute)
   const node = selectedNodeId
     ? data?.node_properties?.find((n) => n.node === selectedNodeId)
     : undefined
@@ -168,7 +161,6 @@ export const NodeDetailsPanel = memo(function NodeDetailsPanel() {
     )
   }, [data?.ip_owners, selectedNodeId])
 
-  // Memoize BGP data filtering
   const nodeBgpData = useMemo(() => {
     if (!selectedNodeId) {
       return {
@@ -210,18 +202,15 @@ export const NodeDetailsPanel = memo(function NodeDetailsPanel() {
     selectedNodeId,
   ])
 
-  // ACL/Filter data
   const allFilterReachability = useMemo(() => {
     return data?.filter_line_reachability || []
   }, [data?.filter_line_reachability])
 
-  // VLAN data for VLAN tab
   const nodeSwitchedVlanProperties = useMemo(() => {
     if (!selectedNodeId || !data?.switched_vlan_properties) return []
     return data.switched_vlan_properties.filter((v) => v.node === selectedNodeId)
   }, [data?.switched_vlan_properties, selectedNodeId])
 
-  // Configuration structures data
   const allDefinedStructures = useMemo(() => {
     if (!data?.defined_structures) return []
     return data.defined_structures
@@ -245,7 +234,6 @@ export const NodeDetailsPanel = memo(function NodeDetailsPanel() {
     return data.named_structures.filter((s) => s.node === selectedNodeId)
   }, [data?.named_structures, selectedNodeId])
 
-  // EIGRP data
   const nodeEigrpEdges = useMemo(() => {
     if (!selectedNodeId || !data?.eigrp_edges) return []
     return data.eigrp_edges.filter(
@@ -253,7 +241,6 @@ export const NodeDetailsPanel = memo(function NodeDetailsPanel() {
     )
   }, [data?.eigrp_edges, selectedNodeId])
 
-  // IS-IS data
   const nodeIsisEdges = useMemo(() => {
     if (!selectedNodeId || !data?.isis_edges) return []
     return data.isis_edges.filter(
@@ -261,7 +248,6 @@ export const NodeDetailsPanel = memo(function NodeDetailsPanel() {
     )
   }, [data?.isis_edges, selectedNodeId])
 
-  // VXLAN data
   const nodeVxlanEdges = useMemo(() => {
     if (!selectedNodeId || !data?.vxlan_edges) return []
     return data.vxlan_edges.filter((edge) => edge.node === selectedNodeId)
@@ -284,7 +270,6 @@ export const NodeDetailsPanel = memo(function NodeDetailsPanel() {
     )
   }
 
-  // Tab configuration
   const tabs = [
     { id: 'basic', label: t('nodeDetails.tabs.basic'), icon: <Cpu className="w-4 h-4" /> },
     { id: 'interfaces', label: t('common.interfaces'), icon: <Network className="w-4 h-4" /> },
@@ -410,7 +395,6 @@ export const NodeDetailsPanel = memo(function NodeDetailsPanel() {
   )
 })
 
-// Basic Information Tab
 function BasicTab({ node }: { node: NodeProperties }) {
   const { t } = useTranslation()
   return (
@@ -490,7 +474,6 @@ function BasicTab({ node }: { node: NodeProperties }) {
   )
 }
 
-// Interfaces Tab
 function InterfacesTab({ node, interfaces }: { node: NodeProperties; interfaces: InterfaceWithHostname[] }) {
   const { t } = useTranslation()
   const [expandedInterface, setExpandedInterface] = useState<string | null>(null)
@@ -507,7 +490,7 @@ function InterfacesTab({ node, interfaces }: { node: NodeProperties; interfaces:
         ) : (
           <div className="space-y-2">
             {interfaces.map((iface) => {
-              const ifaceName = iface.interface  // Already just the interface name (e.g., "GigabitEthernet0/0")
+              const ifaceName = iface.interface
               const isExpanded = expandedInterface === iface.interface
 
               return (
@@ -783,7 +766,6 @@ function RoutingTab({ routes }: { routes: Route[] }) {
   )
 }
 
-// OSPF Tab
 function OspfTab({ process, areas, interfaces, sessions }: {
   process?: OSPFProcessConfig
   areas: OSPFAreaConfig[]
@@ -893,7 +875,6 @@ function OspfTab({ process, areas, interfaces, sessions }: {
   )
 }
 
-// Services Tab
 function ServicesTab({ node, aaa }: { node: NodeProperties; aaa: AAAAuthenticationLogin[] }) {
   const { t } = useTranslation()
   return (
@@ -1051,7 +1032,6 @@ function ServicesTab({ node, aaa }: { node: NodeProperties; aaa: AAAAuthenticati
   )
 }
 
-// Security Tab
 function SecurityTab({ node, ipOwners }: { node: NodeProperties; ipOwners: IPOwner[] }) {
   const { t } = useTranslation()
   return (
@@ -1110,10 +1090,8 @@ function SecurityTab({ node, ipOwners }: { node: NodeProperties; ipOwners: IPOwn
   )
 }
 
-// Validation Tab
 function ValidationTab({ node, data }: { node: NodeProperties; data: AllNetworkData | undefined }) {
   const { t } = useTranslation()
-  // Find validation issues related to this node
   const nodeFileStatus = data?.file_parse_status?.find((f: FileParseStatus) =>
     f.nodes?.includes(node.node)
   )
@@ -1203,7 +1181,6 @@ function ValidationTab({ node, data }: { node: NodeProperties; data: AllNetworkD
   )
 }
 
-// BGP Tab
 function BgpTab({ edges, peerConfig, processConfig, sessionStatus, sessionCompat, rib }: {
   edges: BGPEdge[]
   peerConfig: BGPPeerConfiguration[]
@@ -1527,7 +1504,6 @@ function BgpTab({ edges, peerConfig, processConfig, sessionStatus, sessionCompat
   )
 }
 
-// ACL/Filters Tab — Helper functions
 
 const IPV4_REGEX = /\b(\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}(?:\/\d{1,2})?)\b/g
 
@@ -1640,7 +1616,6 @@ function parseNodeFilter(filter: FilterLineReachability): { node: string; filter
   }
   // Try to extract "node: filter" or "node:filter" from sources field
   const parseSrc = (s: string): { node: string; filterName: string } | null => {
-    // Prefer ": " (colon+space), fall back to ":" (colon only)
     const sepIdx = s.indexOf(': ')
     if (sepIdx > 0) {
       return { node: s.slice(0, sepIdx).trim(), filterName: s.slice(sepIdx + 2).trim() }
@@ -1920,8 +1895,6 @@ function formatSourceRefs(sourceRefs: string[]): string {
 
 /**
  * Whether an interface carries VLAN data
- * - Switchport attributes (mode other than "NONE", access/native/allowed VLANs) count unless switchport is false
- * - VLAN interface and encapsulation VLAN IDs always count
  */
 export function hasVlanData(iface: InterfaceProperties): boolean {
   const switchportMode = typeof iface.switchport_mode === 'string' ? iface.switchport_mode.trim().toUpperCase() : ''
@@ -1986,7 +1959,6 @@ function formatInterfaceValue(value: unknown): string {
   return String(value)
 }
 
-// ACL/Filters Tab
 function AclTab({ node, filterReachability, nodeInterfaces, allInterfaces, allIpOwners, namedStructures, definedStructures }: {
   node: NodeProperties
   filterReachability: FilterLineReachability[]
@@ -2160,7 +2132,7 @@ function AclTab({ node, filterReachability, nodeInterfaces, allInterfaces, allIp
     for (const entry of enrichedFilters) {
       let key: string
       if (!entry.node && !entry.filter) {
-        // Each unknown-source entry gets its own group to prevent merging unrelated entries
+        // Each unknown-source entry gets its own group
         key = `__unknown_${unknownIdx++}|||`
       } else {
         key = `${entry.node}|||${entry.filter}`
@@ -2668,7 +2640,6 @@ function AclTab({ node, filterReachability, nodeInterfaces, allInterfaces, allIp
   )
 }
 
-// VLAN Tab
 function VlanTab({ node, interfaces, vlans }: { node: NodeProperties; interfaces: InterfaceWithHostname[]; vlans: SwitchedVlanProperties[] }) {
   const { t } = useTranslation()
   const [searchQuery, setSearchQuery] = useState('')
@@ -2799,7 +2770,6 @@ function VlanTab({ node, interfaces, vlans }: { node: NodeProperties; interfaces
   )
 }
 
-// Configuration Structures Tab
 function ConfigurationTab({ definedStructures, referencedStructures, namedStructures }: {
   definedStructures: DefinedStructure[]
   referencedStructures: ReferencedStructure[]
@@ -2922,7 +2892,6 @@ function ConfigurationTab({ definedStructures, referencedStructures, namedStruct
   )
 }
 
-// EIGRP Tab
 function EigrpTab({ edges }: { edges: EIGRPEdge[] }) {
   const { t } = useTranslation()
   return (
@@ -2955,7 +2924,6 @@ function EigrpTab({ edges }: { edges: EIGRPEdge[] }) {
   )
 }
 
-// IS-IS Tab
 function IsisTab({ edges }: { edges: ISISEdge[] }) {
   const { t } = useTranslation()
   return (
@@ -2987,7 +2955,6 @@ function IsisTab({ edges }: { edges: ISISEdge[] }) {
   )
 }
 
-// VXLAN Tab
 function VxlanTab({ edges }: { edges: VXLANEdge[] }) {
   const { t } = useTranslation()
   return (

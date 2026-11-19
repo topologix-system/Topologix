@@ -76,7 +76,8 @@ services:
       - ACCOUNT_LOCKOUT_THRESHOLD=${ACCOUNT_LOCKOUT_THRESHOLD:-5}
       - LOGIN_LOCKOUT_DURATION_MINUTES=${LOGIN_LOCKOUT_DURATION_MINUTES:-30}
 
-      # Database configuration (only used when AUTH_ENABLED=true)
+      # Database configuration (snapshot version history in both auth modes,
+      # authentication data when AUTH_ENABLED=true)
       # SQLite (default - stored in Docker volume for persistence)
       - DATABASE_URL=${DATABASE_URL:-sqlite:////app/data/topologix.db}
       # SQL statement logging is disabled by default because SQL values can contain sensitive hashes.
@@ -84,6 +85,39 @@ services:
 
       # Snapshot storage path (must match the snapshots-data mount below)
       - SNAPSHOTS_DIR=${SNAPSHOTS_DIR:-/app/snapshots}
+
+      # Snapshot history and result cache (see README "Snapshot History and Result Cache"
+      # and .env.example). An empty value is treated as unset and selects the backend default.
+      # DATA_DIR defaults to /app/data (the backend-db volume below); RESULT_CACHE_DIR and
+      # SNAPSHOT_HISTORY_DIR default to result_cache/ and snapshot_history/ inside DATA_DIR.
+      # SNAPSHOTS_DIR, RESULT_CACHE_DIR, SNAPSHOT_HISTORY_DIR and DATA_DIR/_invalid-namespace
+      # must not equal or contain one another and DATA_DIR must not equal or lie inside
+      # SNAPSHOTS_DIR; otherwise versioning is unavailable and the result cache is off.
+      - DATA_DIR=${DATA_DIR:-}
+      - RESULT_CACHE_DIR=${RESULT_CACHE_DIR:-}
+      - SNAPSHOT_HISTORY_DIR=${SNAPSHOT_HISTORY_DIR:-}
+      # RESULT_CACHE_ENABLED=false turns the result cache off (kill switch)
+      - RESULT_CACHE_ENABLED=${RESULT_CACHE_ENABLED:-}
+      - RESULT_CACHE_MAX_BYTES=${RESULT_CACHE_MAX_BYTES:-}
+      - RESULT_CACHE_MAX_ENTRIES=${RESULT_CACHE_MAX_ENTRIES:-}
+      - RESULT_CACHE_PROTECT_SECONDS=${RESULT_CACHE_PROTECT_SECONDS:-}
+      - HISTORY_GC_GRACE_SECONDS=${HISTORY_GC_GRACE_SECONDS:-}
+      # Set only to the db_id named by the startup ERROR about a missing object store;
+      # remove it once the startup WARNING reports no marked snapshot
+      - HISTORY_ACCEPT_STORE_LOSS=${HISTORY_ACCEPT_STORE_LOSS:-}
+      - EXTERNAL_CHANGE_SETTLE_SECONDS=${EXTERNAL_CHANGE_SETTLE_SECONDS:-}
+      - BATFISH_VERSION_PROBE_TTL_SECONDS=${BATFISH_VERSION_PROBE_TTL_SECONDS:-}
+      - BATFISH_VERSION_GRACE_SECONDS=${BATFISH_VERSION_GRACE_SECONDS:-}
+      - SNAPSHOT_DIFF_MAX_BYTES=${SNAPSHOT_DIFF_MAX_BYTES:-}
+      - SNAPSHOT_DIFF_MAX_LINES=${SNAPSHOT_DIFF_MAX_LINES:-}
+      # History namespace of this stack in the database (empty: the UUID stored in
+      # SNAPSHOTS_DIR/.topologix-store.json). An existing deployment that adopts it sets it to
+      # that UUID. docker-compose.dev.yaml reads DEV_DEPLOYMENT_ID instead, so a value in the
+      # shared .env applies to this stack only.
+      - DEPLOYMENT_ID=${DEPLOYMENT_ID:-}
+      # Backend build id of cached results; normally empty (derived from the backend sources).
+      # A set value must be unique per backend build. The dev stack reads DEV_APP_BUILD_ID.
+      - APP_BUILD_ID=${APP_BUILD_ID:-}
 
       # Email configuration for password reset
       - EMAIL_PROVIDER=${EMAIL_PROVIDER:-console}
@@ -114,7 +148,8 @@ services:
     volumes:
       # Snapshots directory (shared with Batfish)
       - snapshots-data:/app/snapshots
-      # Database volume (SQLite persistence when AUTH_ENABLED=true)
+      # Data volume (DATA_DIR): SQLite database, snapshot history objects and result cache
+      # in both auth modes
       - backend-db:/app/data
       # Flask session storage (named volume for proper permissions)
       - flask-sessions:/app/flask_session
@@ -168,7 +203,7 @@ volumes:
   snapshots-data:
     name: topologix-snapshots
 
-  # Backend database (SQLite persistence when AUTH_ENABLED=true)
+  # Backend data (DATA_DIR): SQLite database, snapshot history and result cache in both auth modes
   backend-db:
     name: topologix-backend-db
 

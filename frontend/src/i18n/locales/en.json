@@ -27,7 +27,12 @@
     "myProfile": "My Profile",
     "userManagement": "User Management",
     "snapshotOwnerMigration": "Snapshot Owner Migration",
-    "securityLogs": "Security Logs"
+    "securityLogs": "Security Logs",
+    "version": {
+      "suffix": " v{{seq}}{{mark}}",
+      "uncommittedOnlySuffix": " *",
+      "uncommittedMark": "*"
+    }
   },
   "sidebar": {
     "title": "Sidebar",
@@ -98,6 +103,43 @@
         "passed": "PASSED",
         "failed": "FAILED"
       }
+    },
+    "version": {
+      "title": "Snapshot version",
+      "lastKnown": "Last known",
+      "versionLabel": "v{{seq}}",
+      "noVersions": "No versions yet",
+      "kind": {
+        "baseline": "Baseline",
+        "manual": "Manual",
+        "external": "External",
+        "restore": "Restore"
+      },
+      "systemMessage": {
+        "baseline": "Initial state",
+        "external": "External change detected"
+      },
+      "systemAuthor": "System",
+      "noAuthor": "—",
+      "deletedVersionLabel": "v{{seq}} (deleted)",
+      "separator": " · ",
+      "shortHash": "({{hash}})",
+      "headMeta": "{{author}} · {{time}}",
+      "unavailableWithReason": "Version state unavailable ({{reason}})",
+      "basedOn": "Based on {{version}}",
+      "headRestoredFrom": "Restored from {{version}}",
+      "workingRestoredFrom": "Working files restored from {{version}}",
+      "uncommitted": "Uncommitted changes",
+      "pendingExternal": "External change pending: commit to record (Manage snapshots → History)",
+      "settling": "External change settling",
+      "workingStateLabel": "Working files state",
+      "unavailable": "Version state unavailable",
+      "updating": "Updating…",
+      "stagingUnavailable": "Staging unavailable: results are not cached",
+      "staleTopology": "The rendered topology is older than the current files.",
+      "reload": "Reload snapshot",
+      "snapshotMismatch": "The server is serving another snapshot. Reload this snapshot to show its data.",
+      "contentMismatch": "The snapshot content changed while the data was loading. Reload this snapshot to show the current data."
     }
   },
   "ipSearch": {
@@ -1310,6 +1352,7 @@
     "createToStart": "Create one to get started",
     "fileCount": "{{count}} files",
     "filesIn": "Files in {{name}}",
+    "fileList": "File list",
     "ungroupedFolder": "Ungrouped",
     "folderLabel": "Folder",
     "folderPlaceholder": "customer-a/site-01",
@@ -1374,6 +1417,7 @@
       "loadingContent": "Loading file content...",
       "saving": "Saving...",
       "discardChanges": "Discard your unsaved config changes?",
+      "unsavedChanges": "Unsaved changes",
       "saveFailed": "Failed to save file content",
       "loadFailed": "Failed to load file content",
       "conflict": "This file changed since it was opened. Reload latest discards the current editor text; save as new preserves the attempted edit in a new file.",
@@ -1541,7 +1585,168 @@
       }
     },
     "createFailed": "Failed to create snapshot",
-    "folderUpdateFailed": "Failed to update snapshot folder"
+    "folderUpdateFailed": "Failed to update snapshot folder",
+    "history": {
+      "title": "History",
+      "loading": "Loading version history...",
+      "headLine": "Head {{version}}",
+      "pendingExternal": "External change pending: commit to record",
+      "workingHash": "Working files {{hash}}",
+      "headBadge": "head",
+      "listCaption_one": "Version history with {{count}} version",
+      "listCaption_other": "Version history with {{count}} versions",
+      "shownCount_one": "Showing {{shown}} of {{count}} version",
+      "shownCount_other": "Showing {{shown}} of {{count}} versions",
+      "loadMore": "Load more",
+      "details": "Details",
+      "detailsAria": "Show details and differences of {{version}}",
+      "detailTitle": "{{version}} details",
+      "detailSummary_one": "{{count}} file, {{size}}",
+      "detailSummary_other": "{{count}} files, {{size}}",
+      "compareWith": "Compare with",
+      "workingTree": "Working files",
+      "unknownVersion": "Unknown version",
+      "parent": "Parent {{version}}",
+      "missingObjects": "History objects are missing for this snapshot. Only \"Delete history (all)\" is available to reset its history.",
+      "unavailable": "Versioning is unavailable ({{reason}}). Commit, restore, delete and clearing cached results are disabled until it recovers.",
+      "columns": {
+        "seq": "Version",
+        "kind": "Kind",
+        "message": "Message",
+        "author": "Author",
+        "time": "Time",
+        "files": "Files",
+        "lineage": "Lineage",
+        "actions": "Actions"
+      },
+      "reasons": {
+        "database": "database failure",
+        "namespace": "deployment namespace unavailable",
+        "storage": "history storage problem",
+        "sidecar": "snapshot identity not writable",
+        "missing_objects": "history objects missing",
+        "unknown": "unknown reason"
+      },
+      "commitDisabled": {
+        "busy": "Wait until the current file change or activation finishes.",
+        "loading": "Checking the version state...",
+        "unavailable": "Commit is unavailable while the version state cannot be read.",
+        "notSettled": "The working files are still being scanned; commit is unavailable until the scan finishes.",
+        "noChanges": "There are no uncommitted changes to commit."
+      },
+      "commit": {
+        "open": "Commit",
+        "title": "Commit the working files",
+        "messageLabel": "Commit message",
+        "messageHelp": "{{length}} / {{max}} characters",
+        "messageRequired": "Enter a commit message.",
+        "messageTooLong": "The commit message can be at most {{max}} characters.",
+        "submit": "Commit",
+        "created": "Created {{version}}."
+      },
+      "clearCache": {
+        "open": "Clear cached results",
+        "cleared": "Cached results were cleared. They are recomputed the next time they are needed.",
+        "notSettled": "Nothing was cleared yet: the files are still being scanned. The snapshot is re-parsed on its next use.",
+        "disabled": "Nothing was cleared: the result cache is turned off on the server. To re-parse the snapshot, go back to Topology and use \"Reload current snapshot\" in its header.",
+        "disabledNotCurrent": "Nothing was cleared: the result cache is turned off on the server. The snapshot is parsed when it is next activated."
+      },
+      "restore": {
+        "open": "Restore",
+        "openAria": "Restore {{version}}",
+        "title": "Restore {{version}}",
+        "description": "The working files are replaced with the files of {{version}}.",
+        "uncommittedWarning": "The working files have uncommitted changes. They were never saved as a version and will be permanently lost.",
+        "commitFirst": "Commit first",
+        "loadingSummary": "Comparing {{version}} with the working files...",
+        "overwriteTitle": "Files to overwrite ({{count}})",
+        "deleteTitle": "Files to delete ({{count}})",
+        "none": "None",
+        "uncommittedResult": "After the restore the working files stay uncommitted until you commit them, unless they equal the head version.",
+        "changedReview": "The working files changed. Review the updated list and confirm again.",
+        "pathClash": "The restore cannot be done: \"{{path}}\" conflicts with an existing file or folder in the working files. Resolve it and try again.",
+        "confirm": "Restore",
+        "done": "Restored {{version}} into the working files. Commit to record it as a version.",
+        "doneEqualsHead": "Restored {{version}}. The working files now equal the head version.",
+        "doneUnknownState": "Restored {{version}} into the working files.",
+        "reactivateFailed": "The files were restored, but reloading the snapshot failed. Go back to Topology and use \"Reload current snapshot\" in its header."
+      },
+      "delete": {
+        "historyOpen": "Delete history",
+        "allOpen": "Delete history (all)",
+        "version": "Delete version",
+        "versionAria": "Delete {{version}}",
+        "versionTitle": "Delete {{version}}",
+        "versionMessage": "Delete {{version}} (1 version) from the history?",
+        "irreversible": "This cannot be undone. Stored file contents that no remaining version uses are garbage-collected.",
+        "headWhileUncommitted": "This deletes the head version while the working files have uncommitted changes: the head moves to {{version}} and the working files stay uncommitted.",
+        "headWhileUncommittedPrevious": "This deletes the head version while the working files have uncommitted changes: the head moves to the newest remaining version and the working files stay uncommitted.",
+        "headWhileUncommittedNone": "This deletes every version while the working files have uncommitted changes: no head version remains and the working files stay uncommitted.",
+        "changedReview": "The history changed or a file change is still in progress. Review the dialog and confirm again.",
+        "changedRetry": "The history changed or a file change is still in progress. Try again.",
+        "done_one": "Deleted {{count}} version.",
+        "done_other": "Deleted {{count}} versions.",
+        "confirm": "Delete",
+        "historyTitle": "Delete history",
+        "modeLabel": "Versions to delete",
+        "modes": {
+          "oldest": "Oldest N versions",
+          "newest": "Newest N versions",
+          "all": "All versions"
+        },
+        "countLabel": "Number of versions (N)",
+        "historyCount_one": "{{deleted}} of {{count}} version will be deleted.",
+        "historyCount_other": "{{deleted}} of {{count}} versions will be deleted.",
+        "missingTitle": "Delete history (all)",
+        "missingMessage": "The stored files of this snapshot's history are missing. All versions of this snapshot are deleted; the working files are kept."
+      },
+      "errors": {
+        "unavailable": "Versioning is unavailable ({{reason}}).",
+        "versionNotFound": "This version no longer exists. The history was reloaded.",
+        "unchanged": "There are no changes since the head version.",
+        "conflict": "The history or the working files changed meanwhile. Review and try again.",
+        "restoreFailed": "The restore failed. If it failed while writing, some files may already have been changed; check the files and the history.",
+        "snapshotUnavailable": "This snapshot is not available anymore.",
+        "invalidRequest": "The request was rejected as invalid.",
+        "busy": "Wait until the current file change or activation finishes.",
+        "commitAction": "Commit failed.",
+        "restoreAction": "Restore failed.",
+        "summaryAction": "Comparing with the working files failed.",
+        "deleteAction": "Deleting history failed.",
+        "clearAction": "Clearing cached results failed.",
+        "listAction": "Loading the history failed.",
+        "detailAction": "Loading the version failed."
+      },
+      "diff": {
+        "region": "Differences from {{from}} to {{against}}",
+        "heading": "{{from}} → {{against}}",
+        "loading": "Loading differences...",
+        "loadFailed": "Loading differences failed.",
+        "summary_one": "{{changed}} of {{count}} file changed",
+        "summary_other": "{{changed}} of {{count}} files changed",
+        "showUnchanged": "Show unchanged files",
+        "noChanges": "No files changed.",
+        "fileList": "Files",
+        "fileRegion": "Differences of {{path}}",
+        "loadingFile": "Loading file differences...",
+        "fileLoadFailed": "Loading file differences failed.",
+        "binary": "This file is binary or not UTF-8 text: no text differences are shown.",
+        "tooLarge": "This file is too large or too complex to show a diff.",
+        "truncated": "The differences were cut at the line limit; lines beyond it are not shown.",
+        "noTextChanges": "No text differences.",
+        "emptyFile": "The file is empty.",
+        "sizes": "{{from}} → {{against}}",
+        "bytes": "{{size}} B",
+        "noSize": "—",
+        "workingNote": "The working files are compared as they are now.",
+        "status": {
+          "added": "Added",
+          "removed": "Removed",
+          "modified": "Modified",
+          "unchanged": "Unchanged"
+        }
+      }
+    }
   },
   "layer1Editor": {
     "title": "Layer 1 Topology Editor",

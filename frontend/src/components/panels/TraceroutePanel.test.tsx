@@ -154,6 +154,89 @@ describe('TraceroutePanel', () => {
     expect(alert).not.toHaveTextContent('Request failed with status code 400')
   })
 
+  /** Lines of a rendered step detail, two spaces per nesting level and `N.` before list items */
+  function renderedLines(node: Element, indent = ''): string[] {
+    if (node.tagName === 'DL') {
+      return Array.from(node.children).flatMap((group) => {
+        const [term, description] = Array.from(group.children)
+        const nested = description.firstElementChild
+        return nested
+          ? [`${indent}${term.textContent}`, ...renderedLines(nested, `${indent}  `)]
+          : [`${indent}${term.textContent} ${description.textContent}`]
+      })
+    }
+    if (node.tagName === 'OL') {
+      return Array.from(node.children).flatMap((item, index) => [
+        `${indent}${index + 1}.`,
+        ...renderedLines(item.firstElementChild as Element, `${indent}  `),
+      ])
+    }
+    return [`${indent}${node.textContent}`]
+  }
+
+  const stepDetail = (action: string) => screen.getByText(action).nextElementSibling
+
+  it('shows each step detail field as its own key: value line with nested fields indented under their key', () => {
+    mocks.tracerouteData = [{
+      flow: { srcIp: '10.0.0.2', dstIp: '10.0.49.1', ipProtocol: 'ICMP' },
+      traces: [{
+        disposition: 'ACCEPTED',
+        hops: [{
+          node: 'core-rtr1',
+          steps: [
+            { action: 'RECEIVED', detail: { inputInterface: 'GigabitEthernet0/0', inputVrf: 'default' } },
+            {
+              action: 'FORWARDED',
+              detail: {
+                arpIp: '10.0.3.2',
+                forwardingDetail: { outputInterface: 'GigabitEthernet0/1', resolvedNextHopIp: '10.0.3.2', type: 'ForwardedOutInterface' },
+                outputInterface: 'GigabitEthernet0/1',
+                routes: [{
+                  admin: 110,
+                  metric: 47,
+                  network: '10.0.49.0/30',
+                  nextHop: { interface: 'GigabitEthernet0/1', ip: '10.0.3.2', type: 'interface' },
+                  nextHopIp: null,
+                  protocol: 'ospf',
+                }],
+              },
+            },
+            { action: 'TRANSMITTED', detail: 'GigabitEthernet0/1' },
+            { action: 'LOOP', detail: {} },
+          ],
+        }],
+      }],
+    }]
+    render(<TraceroutePanel />)
+    fireEvent.click(screen.getByRole('button', { name: /traceroute\.labels\.trace 1/ }))
+    fireEvent.click(screen.getByRole('button', { name: /core-rtr1/ }))
+
+    expect(renderedLines(stepDetail('RECEIVED')!.firstElementChild!)).toEqual([
+      'inputInterface: GigabitEthernet0/0',
+      'inputVrf: default',
+    ])
+    expect(renderedLines(stepDetail('FORWARDED')!.firstElementChild!)).toEqual([
+      'arpIp: 10.0.3.2',
+      'forwardingDetail:',
+      '  type: ForwardedOutInterface',
+      '  outputInterface: GigabitEthernet0/1',
+      '  resolvedNextHopIp: 10.0.3.2',
+      'outputInterface: GigabitEthernet0/1',
+      'routes:',
+      '  1.',
+      '    admin: 110',
+      '    metric: 47',
+      '    network: 10.0.49.0/30',
+      '    nextHop:',
+      '      type: interface',
+      '      interface: GigabitEthernet0/1',
+      '      ip: 10.0.3.2',
+      '    protocol: ospf',
+    ])
+    expect(renderedLines(stepDetail('TRANSMITTED')!.firstElementChild!)).toEqual(['GigabitEthernet0/1'])
+    expect(stepDetail('LOOP')).toBeNull()
+  })
+
   it('checks Bidirectional with ArrowRight in the trace mode radiogroup', () => {
     render(<TraceroutePanel />)
     const unidirectional = screen.getByRole('radio', { name: 'traceroute.modes.unidirectional' })

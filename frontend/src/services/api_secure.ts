@@ -1,14 +1,8 @@
 /**
  * Secure API client variant with enhanced input validation
- * - Enforces IP address validation (IPv4/IPv6 format checks) before API calls
- * - Required for production deployments with strict security policies
- * - Always uses authentication (no disable option unlike api.ts)
- * - Validates all user inputs against ReDoS patterns before submission
- * - Uses CSRFService for stateless double-submit cookie pattern
  */
-import axios, { AxiosInstance, AxiosError, AxiosRequestConfig } from 'axios'
+import axios, { AxiosHeaders, AxiosInstance, AxiosError, AxiosRequestConfig, type AxiosResponse } from 'axios'
 import { runtimeConfig } from '../config/runtimeConfig'
-// isTokenExpired removed — expiry now checked via stored tokenExpiresAt timestamp
 import { logger } from '../utils/logger'
 import { getSafeApiErrorLog } from '../utils/apiError'
 import { CSRFService } from './csrfService'
@@ -78,6 +72,23 @@ import type {
   SecurityLogsQueryParams,
   PaginatedSecurityLogsResponse,
   SecurityStats,
+  HashKeyedResponse,
+  ResultIdentityHeaders,
+  ActivateSnapshotOptions,
+  SnapshotVersionState,
+  SnapshotVersionDetail,
+  VersionListParams,
+  VersionListResponse,
+  CommitVersionRequest,
+  CommitVersionResponse,
+  RestoreVersionRequest,
+  RestoreVersionResponse,
+  VersionDiffResponse,
+  VersionFileDiff,
+  VersionDeleteRequest,
+  SingleVersionDeleteRequest,
+  VersionDeleteResponse,
+  ClearResultCacheResponse,
 } from '../types'
 
 const API_BASE_URL = runtimeConfig.apiBaseUrl || 'http://localhost:5000'
@@ -126,7 +137,6 @@ const apiClient: AxiosInstance = axios.create({
 
 apiClient.interceptors.request.use(
   async (config) => {
-    // Check if token is expired BEFORE sending request (via stored timestamp)
     if (authState.tokenExpiresAt && Date.now() > authState.tokenExpiresAt) {
       logger.warn('[API Secure] Access token expired, clearing local state')
 
@@ -144,10 +154,8 @@ apiClient.interceptors.request.use(
       return Promise.reject(new Error('Token expired'))
     }
 
-    // Add CSRF token for state-changing methods (double-submit pattern with async retrieval)
     if (['POST', 'PUT', 'DELETE', 'PATCH'].includes(config.method?.toUpperCase() || '')) {
       try {
-        // ASYNC TOKEN RETRIEVAL: Use async getToken() for automatic refresh + retry logic
         const csrfToken = await CSRFService.getToken()
         config.headers['X-CSRF-Token'] = csrfToken
         logger.debug('[API Secure] CSRF token added to request (async)')
@@ -155,7 +163,6 @@ apiClient.interceptors.request.use(
         const safeError = getSafeApiErrorLog(error)
         const safeMessage = typeof safeError.message === 'string' ? safeError.message : 'unknown error'
         logger.error('[API Secure] Failed to obtain CSRF token for request:', safeError)
-        // Fail fast - reject the request instead of proceeding without token
         return Promise.reject(new Error(`CSRF token unavailable: ${safeMessage}`))
       }
     }
@@ -176,7 +183,6 @@ apiClient.interceptors.response.use(
       originalRequest._retry = true
 
       try {
-        // Refresh via HTTP-only cookie (sent automatically with withCredentials)
         const refreshResponse = await axios.post(
           `${API_BASE_URL}/api/auth/refresh`,
           {},
@@ -185,12 +191,10 @@ apiClient.interceptors.response.use(
 
         const { expires_in } = refreshResponse.data.data
 
-        // Update local expiration tracking
         const expiresAt = Date.now() + (expires_in * 1000)
         authState.tokenExpiresAt = expiresAt
         localStorage.setItem('token_expires_at', expiresAt.toString())
 
-        // Retry original request (cookie updated by Set-Cookie header)
         return apiClient(originalRequest)
       } catch (refreshError) {
         logger.error('[API Secure] Refresh token failed')
@@ -214,7 +218,6 @@ apiClient.interceptors.response.use(
         try {
           logger.warn('[API Secure] CSRF validation failed, refreshing token')
 
-          // ASYNC TOKEN RETRIEVAL: Use async getToken() which includes refresh logic
           const newCsrfToken = await CSRFService.getToken()
 
           if (originalRequest.headers) {
@@ -226,7 +229,6 @@ apiClient.interceptors.response.use(
           }
         } catch (csrfError) {
           logger.error('[API Secure] Failed to refresh CSRF token:', getSafeApiErrorLog(csrfError))
-          // Let the error propagate to React Query error handler
           return Promise.reject(csrfError)
         }
       } else {
@@ -253,9 +255,7 @@ apiClient.interceptors.response.use(
 
 /**
  * Authentication and authorization API methods (secure variant)
- * Always enforces authentication (no disable option)
  * Handles login, logout, token refresh, CSRF token management
- * Manages JWT access/refresh tokens and CSRF protection
  */
 export const authAPI = {
   async login(username: string, password: string) {
@@ -323,11 +323,22 @@ export const authAPI = {
   }
 }
 
+function readResultIdentity(headers: AxiosResponse['headers'] | undefined): ResultIdentityHeaders {
+  const read = (name: string): string | undefined => {
+    if (!headers) return undefined
+    const value = headers instanceof AxiosHeaders ? headers.get(name) : headers[name.toLowerCase()]
+    return value === undefined || value === null ? undefined : String(value)
+  }
+  return {
+    snapshotId: read('X-Topologix-Snapshot-Id'),
+    contentHash: read('X-Topologix-Content-Hash'),
+    cacheStatus: read('X-Topologix-Cache'),
+  }
+}
+
 /**
  * Core network data API methods (secure variant)
  * Provides access to network topology, nodes, interfaces, routes, VLANs, and IP ownership
- * Includes additional health and config endpoints for security monitoring
- * Primary source for Batfish network analysis data
  */
 export const networkAPI = {
   async health() {
@@ -359,41 +370,40 @@ export const networkAPI = {
     return response.data.data
   },
 
-  async getAllData() {
+  async getAllData(): Promise<HashKeyedResponse<AllNetworkData>> {
     const response = await apiClient.get<APIResponse<AllNetworkData>>('/network/all-data')
-    return response.data.data
+    return { data: response.data.data, identity: readResultIdentity(response.headers) }
   },
 
-  async getNodes() {
+  async getNodes(): Promise<HashKeyedResponse<NodeProperties[]>> {
     const response = await apiClient.get<APIResponse<NodeProperties[]>>('/network/nodes')
-    return response.data.data
+    return { data: response.data.data, identity: readResultIdentity(response.headers) }
   },
 
-  async getInterfaces() {
+  async getInterfaces(): Promise<HashKeyedResponse<InterfaceProperties[]>> {
     const response = await apiClient.get<APIResponse<InterfaceProperties[]>>('/network/interfaces')
-    return response.data.data
+    return { data: response.data.data, identity: readResultIdentity(response.headers) }
   },
 
-  async getRoutes() {
+  async getRoutes(): Promise<HashKeyedResponse<Route[]>> {
     const response = await apiClient.get<APIResponse<Route[]>>('/network/routes')
-    return response.data.data
+    return { data: response.data.data, identity: readResultIdentity(response.headers) }
   },
 
-  async getVlans() {
+  async getVlans(): Promise<HashKeyedResponse<SwitchedVlanProperties[]>> {
     const response = await apiClient.get<APIResponse<SwitchedVlanProperties[]>>('/network/vlans')
-    return response.data.data
+    return { data: response.data.data, identity: readResultIdentity(response.headers) }
   },
 
-  async getIPOwners() {
+  async getIPOwners(): Promise<HashKeyedResponse<IPOwner[]>> {
     const response = await apiClient.get<APIResponse<IPOwner[]>>('/network/ip-owners')
-    return response.data.data
+    return { data: response.data.data, identity: readResultIdentity(response.headers) }
   },
 }
 
 /**
  * OSPF protocol API methods (secure variant)
  * Provides access to OSPF processes, areas, interface configurations, and adjacency sessions
- * Used for OSPF topology analysis and troubleshooting
  */
 export const ospfAPI = {
   async getProcesses() {
@@ -420,7 +430,6 @@ export const ospfAPI = {
 /**
  * Snapshot management API methods (secure variant)
  * Handles snapshot CRUD operations, file uploads with progress tracking, and snapshot activation
- * Snapshots contain network device configurations for Batfish analysis
  */
 export const snapshotAPI = {
   async list() {
@@ -523,10 +532,77 @@ export const snapshotAPI = {
     return response.data.data
   },
 
-  async activate(name: string) {
+  async activate(name: string, options?: ActivateSnapshotOptions) {
     const response = await apiClient.post<APIResponse<NetworkInitializeResponse>>(
-      `/snapshots/${name}/activate`
+      `/snapshots/${name}/activate`,
+      options?.if_stale ? { if_stale: true } : undefined
     )
+    return response.data.data
+  },
+
+  async getVersionState(name: string) {
+    const response = await apiClient.get<APIResponse<SnapshotVersionState>>(`/snapshots/${name}/version-state`)
+    return response.data.data
+  },
+
+  async listVersions(name: string, params?: VersionListParams) {
+    const response = await apiClient.get<APIResponse<VersionListResponse>>(`/snapshots/${name}/versions`, { params })
+    return response.data.data
+  },
+
+  async getVersion(name: string, versionId: string) {
+    const response = await apiClient.get<APIResponse<SnapshotVersionDetail>>(
+      `/snapshots/${name}/versions/${encodeURIComponent(versionId)}`
+    )
+    return response.data.data
+  },
+
+  async commitVersion(name: string, request: CommitVersionRequest) {
+    const response = await apiClient.post<APIResponse<CommitVersionResponse>>(`/snapshots/${name}/versions`, request)
+    return response.data.data
+  },
+
+  async getVersionDiff(name: string, versionId: string, against: string) {
+    const response = await apiClient.get<APIResponse<VersionDiffResponse>>(
+      `/snapshots/${name}/versions/${encodeURIComponent(versionId)}/diff`,
+      { params: { against } }
+    )
+    return response.data.data
+  },
+
+  async getVersionFileDiff(name: string, versionId: string, against: string, path: string) {
+    const response = await apiClient.get<APIResponse<VersionFileDiff>>(
+      `/snapshots/${name}/versions/${encodeURIComponent(versionId)}/diff/file`,
+      { params: { against, path } }
+    )
+    return response.data.data
+  },
+
+  async restoreVersion(name: string, versionId: string, request?: RestoreVersionRequest) {
+    const response = await apiClient.post<APIResponse<RestoreVersionResponse>>(
+      `/snapshots/${name}/versions/${encodeURIComponent(versionId)}/restore`,
+      request
+    )
+    return response.data.data
+  },
+
+  async deleteVersion(name: string, versionId: string, request?: SingleVersionDeleteRequest) {
+    const response = await apiClient.delete<APIResponse<VersionDeleteResponse>>(
+      `/snapshots/${name}/versions/${encodeURIComponent(versionId)}`,
+      { data: request }
+    )
+    return response.data.data
+  },
+
+  async deleteVersions(name: string, request: VersionDeleteRequest) {
+    const response = await apiClient.delete<APIResponse<VersionDeleteResponse>>(`/snapshots/${name}/versions`, {
+      data: request,
+    })
+    return response.data.data
+  },
+
+  async clearResultCache(name: string) {
+    const response = await apiClient.post<APIResponse<ClearResultCacheResponse>>(`/snapshots/${name}/cache/clear`)
     return response.data.data
   },
 }
@@ -551,8 +627,6 @@ export const snapshotMigrationAPI = {
 /**
  * Network analysis API methods (secure variant)
  * Provides reachability analysis and route policies with input validation
- * Validates IP addresses and CIDR notation before sending to backend
- * Core functionality for end-to-end connectivity testing
  */
 export const analysisAPI = {
   async getReachability(request?: ReachabilityRequest) {
@@ -580,9 +654,6 @@ export const analysisAPI = {
 /**
  * Validate IPv4 address format
  * Checks if string matches standard IPv4 dotted-decimal notation (0-255 per octet)
- * Used for input validation before API calls to prevent injection attacks
- * @param ip - IP address string to validate
- * @returns true if valid IPv4 format, false otherwise
  */
 function isValidIP(ip: string): boolean {
   const ipRegex = /^((25[0-5]|(2[0-4]|1\d|[1-9]|)\d)\.?\b){4}$/
@@ -591,10 +662,6 @@ function isValidIP(ip: string): boolean {
 
 /**
  * Validate CIDR notation format (IPv4 with subnet mask)
- * Checks if string matches IPv4/prefix-length format (e.g., "192.168.1.0/24")
- * Validates both IP address format and prefix length (0-32)
- * @param cidr - CIDR notation string to validate
- * @returns true if valid CIDR format, false otherwise
  */
 function isValidCIDR(cidr: string): boolean {
   const cidrRegex = /^((25[0-5]|(2[0-4]|1\d|[1-9]|)\d)\.?\b){4}\/(3[0-2]|[12]?\d)$/
